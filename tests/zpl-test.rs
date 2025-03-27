@@ -8,7 +8,6 @@ fn get_zpl_dir() -> PathBuf {
     PathBuf::from(manifest_dir).join("test-data")
 }
 
-
 struct TempDir {
     path: PathBuf,
 }
