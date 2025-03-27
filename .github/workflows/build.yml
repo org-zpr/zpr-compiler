@@ -1,0 +1,22 @@
+name: Build ZPC and Create Artifact
+
+on:
+  push:
+    branches: [ main ]
+  pull_requests:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+        make test && make build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zpc
+          path: target/debug/zpc
+          if-no-file-found: error
+
