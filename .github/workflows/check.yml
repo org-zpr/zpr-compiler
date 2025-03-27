@@ -5,6 +5,8 @@ on:
     branches: [ "main" ]
   pull_request:
 
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
   check:
@@ -12,7 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
-      - run: |
+      - name: check warnings etc
+        timeout-minutes: 5
+        run: |
           sudo apt install -u protobuf-compiler
           make check
 
@@ -21,7 +25,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
-      - run: |
+      - name: run tests
+        timeout-minutes: 5
+        run: |
           sudo apt install -u protobuf-compiler
           make test
 
@@ -30,7 +36,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
-      - run: |
+      - name: build
+        timeout-minutes: 5
+        run: |
           sudo apt install -u protobuf-compiler
           make build
 
