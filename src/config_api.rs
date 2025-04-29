@@ -6,10 +6,11 @@ use core::fmt;
 use std::path::{Path, PathBuf};
 
 use base64::prelude::*;
+use openssl::rsa;
 
 use crate::config::{self, Config};
 use crate::context::CompilationCtx;
-use crate::crypto::{digest_as_hex, load_asn1data_from_pem};
+use crate::crypto::{digest_as_hex, load_asn1data_from_pem, load_rsa_public_key};
 use crate::errors::CompilationError;
 use crate::protocols::{IanaProtocol, IcmpFlowType, Protocol};
 
@@ -281,9 +282,13 @@ impl ConfigApi {
     // - /protocols/<foo> -> returns a protocol type?
     //                       Not sure we need this.  When we process the config, we attach protcols to services
     //
+    //
     // Within the "global" zpr namespace is:
     //
     // - zpr/resolver/<foo> -> returns mapping (if any) for hostname "foo"
+    //
+    // - zpr/bootstrap -> returns list of bootstrap CN values.
+    // - zpr/bootstrap/<foo> -> returns public key (base64 encoded DER data).
     //
     // - zpr/nodes -> returns list of node IDs (KeySet)
     // - zpr/nodes/<id> -> returns (?)
@@ -294,6 +299,7 @@ impl ConfigApi {
     // - zpr/visa_services/<id> -> returns (?)
     // - zpr/visa_services/<id>/admin_attrs -> returns (list of attr k/v tuples)
     // - zpr/visa_services/<id>/dock_node_id -> returns (docking node id)
+    //
     //
     pub fn get(&self, key: &str) -> Option<ConfigItem> {
         if key.is_empty() {
@@ -398,6 +404,20 @@ impl ConfigApi {
                     return Some(ConfigItem::KeySet(vec!["default".to_string()]));
                 }
                 self.get_zpr_visa_service(key_path[1..].to_vec())
+            }
+            "bootstrap" => {
+                if key_path.len() == 1 {
+                    // bootstrap -> list of bootstrap CN values
+                    return Some(ConfigItem::KeySet(
+                        self.config
+                            .bootstrap_cfg
+                            .bootstraps
+                            .iter()
+                            .map(|(k, _)| k.clone())
+                            .collect(),
+                    ));
+                }
+                self.get_bootstrap(key_path[1..].to_vec())
             }
             _ => panic!("unknown key: {}", key),
         }
@@ -536,6 +556,30 @@ impl ConfigApi {
         }
     }
 
+    /// `key_path` here is everything after bootstrap/ -- and the only supported things is a
+    /// single <CN> value.
+    fn get_bootstrap(&self, key_path: Vec<&str>) -> Option<ConfigItem> {
+        if key_path.len() != 1 {
+            return None
+        }
+        let key = key_path[0];
+        let kpath = self.config.bootstrap_cfg.bootstraps.get(key)?;
+        let pubkey = if kpath.is_absolute() {
+            load_rsa_public_key(&kpath)
+                .expect(format!("failed to load bootstrap key from '{kpath:?}'").as_str())
+        } else {
+            let abspath = self.base_path.join(kpath)
+                .canonicalize().expect(format!("failed to canonicalize bootstrap key path: {kpath:?}").as_str());
+            load_rsa_public_key(&abspath)
+                .expect(format!("failed to load bootstrap key from '{}'", abspath.display()).as_str())
+        };
+
+        let derdata = pubkey.public_key_to_der()
+            .expect("failed to convert public key to DER format");
+
+        Some(ConfigItem::BytesB64(BASE64_STANDARD.encode(&derdata)))
+    }
+
     /// Given a path, return the possibly adjusted absolute path.
     /// If the passed path `p` is not absolute it is assumed to be relative to the base path.
     ///
@@ -623,6 +667,7 @@ impl ConfigApi {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::env;
 
     #[test]
     fn test_get_some_keys() {
@@ -705,4 +750,62 @@ mod test {
             "[default]"
         );
     }
+
+
+
+    #[test]
+    fn test_get_bootstrap() {
+        let cfg = r#"
+        [resolver]
+        order = [ "hosts", "dns" ]
+
+        [resolver.hosts]
+        "node.zpr" = "fd5a:5052:90de::1"
+
+        [nodes.n0]
+        key = "none"
+        zpr_address = "node.zpr"
+        interfaces = [ "in1", "in2" ]
+        in1.netaddr = "127.0.0.1:5000"
+        in2.netaddr = "foo.bah:5000"
+        provider = [["foo", "fee"]]
+
+        [visa_service]
+        dock_node = "n0"
+
+        [bootstrap]
+        "blah.zpr" = "rsa-pub-key.pem"
+        "bleep.zpr" = "/path/to/fee.pem"
+
+        [protocols.bar]
+        protocol = "iana.TCP"
+        port = 21
+
+        [services.foo]
+        protocol = "bar"
+        "#;
+        let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+        let tdata_dir = PathBuf::from(manifest_dir).join("test-data");
+
+        let ctx = CompilationCtx::default();
+        let api = ConfigApi::new_from_toml_content(cfg, &tdata_dir, &ctx).unwrap();
+
+        {
+            let bs_cns = api.get("zpr/bootstrap").unwrap().to_string();
+            assert!(bs_cns.contains("bleep.zpr"));
+            assert!(bs_cns.contains("blah.zpr"));
+        }
+
+        let bspemdata = api.get("zpr/bootstrap/blah.zpr").unwrap();
+        match bspemdata {
+            ConfigItem::BytesB64(data) => {
+                let decoded = BASE64_STANDARD.decode(data.as_bytes()).unwrap();
+                assert_eq!(decoded.len(), 294);
+                let _ = rsa::Rsa::public_key_from_der(&decoded).unwrap();
+            }
+            _ => panic!("expected a BytesB64"),
+        }
+
+    }
+
 }

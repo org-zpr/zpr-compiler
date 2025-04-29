@@ -5,6 +5,7 @@ use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
 
+use nix::NixPath;
 use ring::digest::Digest;
 use toml::Table;
 
@@ -36,6 +37,7 @@ pub struct Config {
     resolver: Resolver,
     pub nodes: HashMap<String, Node>,
     pub visa_service: VisaService,
+    pub bootstrap_cfg: Bootstrap,
     pub trusted_services: Vec<TrustedService>,
     pub protocols: HashMap<String, Protocol>,
     pub services: Vec<Service>,
@@ -100,6 +102,10 @@ pub struct VisaService {
     pub admin_attrs: Vec<(String, String)>,
 }
 
+pub struct Bootstrap {
+    pub bootstraps: HashMap<String, PathBuf>, // CN -> public-key-pem-file
+}
+
 /// Trusted Service table ("trusted_services")
 // TODO: Will these attribute descriptions need to be made more expressive so we can tell if they are optional, multi-valued, etc?
 // TODO: Ports? Protocols?
@@ -152,6 +158,7 @@ impl ConfigParse {
         let resolver = self.parse_resolver()?;
         let nodes = self.parse_nodes()?;
         let visa_service = self.parse_visa_service(ctx)?;
+        let bootstrap = self.parse_bootstrap(ctx)?;
         let trusted_services = self.parse_trusted_services(ctx)?;
         let protocols = self.parse_protocols(ctx)?;
         let services = self.parse_services(ctx)?;
@@ -161,6 +168,7 @@ impl ConfigParse {
             resolver,
             nodes,
             visa_service,
+            bootstrap_cfg: bootstrap,
             trusted_services,
             protocols,
             services,
@@ -278,6 +286,42 @@ impl ConfigParse {
             admin_attrs,
         })
     }
+
+
+    // Parse optional boostrap section. Each entry in the table is of the form: `<CN> = <KEYFILE>`.
+    fn parse_bootstrap(
+        &mut self,
+        ctx: &CompilationCtx,
+    ) -> Result<Bootstrap, CompilationError> {
+        let mut bootstraps = HashMap::new();
+
+        if !self.ctoml.contains_key("bootstrap") {
+            return Ok(Bootstrap {
+                bootstraps, // empty
+            });
+        }
+
+        let vs = self.ctoml["bootstrap"]
+            .as_table()
+            .ok_or(err_config!("error reading bootstrap section"))?;
+
+        // Each entry in our map is expected to be a CN name and a path to a PEM file.
+        for (cn, v) in vs {
+            let v = v
+                .as_str()
+                .ok_or(err_config!("bootstrap path for {} is not a string", cn))?;
+            let path = PathBuf::from(v);
+            if path.is_empty() {
+                return Err(err_config!("bootstrap path for {} is empty", cn));
+            }
+            // TODO: Need to fix path if not absolute.
+            bootstraps.insert(cn.to_string(), path);
+        }
+        Ok(Bootstrap {
+            bootstraps,
+        })
+    }
+
 
     /// Parse the trusted_services.<ID> tables.  Currently I am reserving the ID of "default" for the
     /// sort of built-in certificate authority based authentication mechanism.
@@ -1054,4 +1098,30 @@ mod test {
         }
         assert_eq!(hits, 0x3); // or did not hit both services.
     }
+
+
+    #[test]
+    fn test_parse_bootstrap() {
+        let tstr = r#"
+        [bootstrap]
+        "some.cn.here" = "keyfile.pem"
+        "another.cn.here" = "other.keyfile.pem"
+        "#;
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let vs = cparser.parse_bootstrap(&ctx);
+        assert!(vs.is_ok());
+        let bs = vs.unwrap();
+
+        assert_eq!(bs.bootstraps.len(), 2);
+        assert_eq!(
+            bs.bootstraps.get("some.cn.here").unwrap(),
+            &PathBuf::from("keyfile.pem")
+        );
+        assert_eq!(
+            bs.bootstraps.get("another.cn.here").unwrap(),
+            &PathBuf::from("other.keyfile.pem")
+        );
+    }
+
 }
