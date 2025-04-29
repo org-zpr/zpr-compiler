@@ -3,13 +3,15 @@ use colored::Colorize;
 use std::path::PathBuf;
 
 use prost::Message;
-use prost::bytes::Bytes;
+use bytes::Bytes;
+
 use zpcsuite::polio::PolicyContainer;
 use zpcsuite::polio::Policy;
+use zpcsuite::polio;
 use zpcsuite::policybuilder::NO_PROC;
 use zpcsuite::protocols::IanaProtocol;
 
-use bytes::{Buf, BytesMut, BufMut};
+
 
 
 /// ZPL Policy Dumper
@@ -37,7 +39,7 @@ fn main() {
 
 
     let encoded = std::fs::read(cli.zpl).expect("failed to read binary policy file");
-    let encoded_buf = bytes::Bytes::from(encoded);
+    let encoded_buf = Bytes::from(encoded);
     let container: PolicyContainer = PolicyContainer::decode(encoded_buf).expect("failed to decode binary policy file");
 
     println!(" container_version: {}", format!("{}", container.container_version).yellow());
@@ -48,7 +50,7 @@ fn main() {
     println!("         signature: {}", if container.signature.is_empty() { "none".red()} else { "yes (not checked)".yellow() });
     println!();
 
-    let encoded_buf = bytes::Bytes::from(container.policy);
+    let encoded_buf = Bytes::from(container.policy);
     let pol: Policy = Policy::decode(encoded_buf).expect("failed to decode policy");
 
     println!("         serial_version: {:>3}", format!("{}", pol.serial_version).yellow());
@@ -98,14 +100,14 @@ fn main() {
 
 
 
-fn scopes_to_string(scopes: &Vec<zpcsuite::polio::Scope>) -> String {
+fn scopes_to_string(scopes: &Vec<polio::Scope>) -> String {
     scopes.iter()
         .map(|scope| scope_to_string(scope))
         .collect::<Vec<String>>()
         .join(", ")
 }
 
-fn scope_to_string(scope: &zpcsuite::polio::Scope) -> String {
+fn scope_to_string(scope: &polio::Scope) -> String {
     let proto: IanaProtocol = match scope.protocol.try_into() {
         Ok(p) => p,
         Err(_) => {
@@ -116,25 +118,25 @@ fn scope_to_string(scope: &zpcsuite::polio::Scope) -> String {
     s.push_str(&proto.to_string());
     if let Some(pa) = &scope.protarg {
         match pa {
-            zpcsuite::polio::scope::Protarg::Pspec(pslist) => {
+            polio::scope::Protarg::Pspec(pslist) => {
                 for ps in &pslist.spec {
                     if let Some(psp) = &ps.parg {
                         match psp {
-                            zpcsuite::polio::port_spec::Parg::Port(pnum) => {
+                            polio::port_spec::Parg::Port(pnum) => {
                                 s.push_str(&format!(" {pnum}"));
                             }
-                            zpcsuite::polio::port_spec::Parg::Pr(prange) => {
+                            polio::port_spec::Parg::Pr(prange) => {
                                 s.push_str(&format!(" {}-{}", prange.low, prange.high));
                             }
                         }
                     }
                 }
             }
-            zpcsuite::polio::scope::Protarg::Icmp(icmp) => {
-                match zpcsuite::polio::Icmpt::try_from(icmp.r#type) {
-                    Ok(zpcsuite::polio::Icmpt::Unused) => s.push_str(" !UNUSED! "),
-                    Ok(zpcsuite::polio::Icmpt::Reqrep) => s.push_str(" REQREP "),
-                    Ok(zpcsuite::polio::Icmpt::Once) => s.push_str(" ONCE "),
+            polio::scope::Protarg::Icmp(icmp) => {
+                match polio::Icmpt::try_from(icmp.r#type) {
+                    Ok(polio::Icmpt::Unused) => s.push_str(" !UNUSED! "),
+                    Ok(polio::Icmpt::Reqrep) => s.push_str(" REQREP "),
+                    Ok(polio::Icmpt::Once) => s.push_str(" ONCE "),
                     Err(_) => s.push_str(" !ERR! "),
                 }
                 s.push_str(&format!(" codes:{:?}", icmp.codes));
@@ -147,7 +149,7 @@ fn scope_to_string(scope: &zpcsuite::polio::Scope) -> String {
 
 
 
-fn attr_exp_to_string(exp: &zpcsuite::polio::AttrExpr, keys: &Vec<String>, values: &Vec<String>) -> String {
+fn attr_exp_to_string(exp: &polio::AttrExpr, keys: &Vec<String>, values: &Vec<String>) -> String {
     let mut s = String::new();
     s.push_str(&keys[exp.key as usize]);
     s.push_str(&format!(" {} ", attr_opt_t_to_string(exp.op)));
@@ -157,12 +159,12 @@ fn attr_exp_to_string(exp: &zpcsuite::polio::AttrExpr, keys: &Vec<String>, value
 
 
 fn attr_opt_t_to_string(opval: i32) -> String {
-    String::from(match zpcsuite::polio::AttrOpT::try_from(opval) {
-        Ok(zpcsuite::polio::AttrOpT::Eq) => "=",
-        Ok(zpcsuite::polio::AttrOpT::Ne) => "!=",
-        Ok(zpcsuite::polio::AttrOpT::Has) => "HAS",
-        Ok(zpcsuite::polio::AttrOpT::Excludes) => "EXCL",
-        Ok(zpcsuite::polio::AttrOpT::Unused) => "!UNUSED!", // shouldn't happen
+    String::from(match polio::AttrOpT::try_from(opval) {
+        Ok(polio::AttrOpT::Eq) => "=",
+        Ok(polio::AttrOpT::Ne) => "!=",
+        Ok(polio::AttrOpT::Has) => "HAS",
+        Ok(polio::AttrOpT::Excludes) => "EXCL",
+        Ok(polio::AttrOpT::Unused) => "!UNUSED!", // shouldn't happen
         Err(_) => "!ERR!", // shouldn't happen
     })
 }
