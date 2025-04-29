@@ -14,7 +14,7 @@ use crate::ptypes::Attribute;
 use crate::zpl;
 
 /// Updeate this if we change the protobuf. This is checked by visa service during deserialization.
-pub const SERIAL_VERSION: u32 = 41;
+pub const SERIAL_VERSION: u32 = 42;
 
 /// This value for a PROC in a connect record means NO PROC.
 const NO_PROC: u32 = u32::MAX; // 0xffffffff
@@ -135,6 +135,7 @@ impl PolicyBuilder {
         self.set_connects(&fabric)?;
         self.set_policies(&fabric)?;
         self.set_default_auth(&fabric, ctx)?;
+        self.set_bootstrap(&fabric, ctx)?;
 
         if self.verbose {
             println!("  {} connect rules", self.policy.connects.len());
@@ -166,6 +167,20 @@ impl PolicyBuilder {
             name: zpl::DEFAULT_TS_PREFIX.to_string(),
         };
         self.policy.certificates.push(pcert);
+        Ok(())
+    }
+
+    fn set_bootstrap(
+        &mut self,
+        fabric: &Fabric,
+        _ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
+        for (cnval, keydata) in &fabric.bootstrap_records {
+            self.policy.pubkeys.push(polio::PublicKey {
+                cn: cnval.clone(),
+                keydata: keydata.clone(),
+            });
+        }
         Ok(())
     }
 

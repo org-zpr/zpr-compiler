@@ -3,6 +3,7 @@
 //! needed by the prototype visa service.
 
 use core::fmt;
+use std::collections::HashMap;
 use std::net::Ipv6Addr;
 
 use crate::config_api::{ConfigApi, ConfigItem};
@@ -19,6 +20,7 @@ pub struct Fabric {
     pub services: Vec<FabricService>,
     pub nodes: Vec<FabricNode>,
     pub default_auth_cert_asn: Vec<u8>, // CA cert for default/builtin trusted auth
+    pub bootstrap_records: HashMap<String, Vec<u8>>, // bootstrap records maps a CN to a der-encoded public key
 }
 
 #[allow(dead_code)]
@@ -65,6 +67,14 @@ pub struct ClientPolicy {
     //       Actually, withouts are just attributes, eg (role, ne, marketing)
 }
 
+fn plural(word: &str, count: usize) -> String {
+    if count == 1 {
+        word.to_string()
+    } else {
+        format!("{}s", word)
+    }
+}
+
 /// Debugging output
 impl fmt::Display for Fabric {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -74,11 +84,22 @@ impl fmt::Display for Fabric {
             "default auth cert: {}bytes\n",
             self.default_auth_cert_asn.len()
         )?;
+        if self.bootstrap_records.is_empty() {
+            write!(f, "no bootstrap records\n")?;
+        } else {
+            let bslen = self.bootstrap_records.len();
+            write!(f, "{} bootstrap {}:\n", bslen, plural("record", bslen))?;
+            for cn in self.bootstrap_records.keys() {
+                write!(f, "  - {}\n", cn)?;
+            }
+        }
         write!(
             f,
-            "{} services - {} nodes\n",
+            "{} {} - {} {}\n",
             self.services.len(),
-            self.nodes.len()
+            plural("service", self.services.len()),
+            self.nodes.len(),
+            plural("node", self.nodes.len())
         )?;
         for s in &self.services {
             write!(

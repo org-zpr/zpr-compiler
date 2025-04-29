@@ -42,6 +42,8 @@ pub fn digest_as_hex(digest: &Digest) -> String {
 
 /// Load a PEM certifiate file and return the ASN.1 data in DER encoding.
 /// Passed file should start with `-----BEGIN CERTIFICATE-----`.
+///
+/// Returns the DER encoded certificate as a byte array.
 pub fn load_asn1data_from_pem(pem_file: &Path) -> Result<Vec<u8>, CompilationError> {
     let pdata = std::fs::read(pem_file).map_err(|e| {
         CompilationError::FileError(format!(
@@ -90,7 +92,9 @@ pub fn load_rsa_private_key(pem_file: &Path) -> Result<Rsa<Private>, Compilation
 
 /// Load a private key from a PEM file.
 /// This should be an RSA private key suitable for signing (NOT just a noise key).
-/// File must begin with `-----BEGIN PRIVATE KEY-----`.
+/// File must begin with `-----BEGIN PUBLIC KEY-----`.
+///
+/// Retruns the public key
 #[allow(dead_code)]
 pub fn load_rsa_public_key(pem_file: &Path) -> Result<Rsa<Public>, CompilationError> {
     let pdata = std::fs::read(pem_file).map_err(|e| {

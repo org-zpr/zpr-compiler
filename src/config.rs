@@ -287,12 +287,8 @@ impl ConfigParse {
         })
     }
 
-
     // Parse optional boostrap section. Each entry in the table is of the form: `<CN> = <KEYFILE>`.
-    fn parse_bootstrap(
-        &mut self,
-        ctx: &CompilationCtx,
-    ) -> Result<Bootstrap, CompilationError> {
+    fn parse_bootstrap(&mut self, _ctx: &CompilationCtx) -> Result<Bootstrap, CompilationError> {
         let mut bootstraps = HashMap::new();
 
         if !self.ctoml.contains_key("bootstrap") {
@@ -317,11 +313,8 @@ impl ConfigParse {
             // TODO: Need to fix path if not absolute.
             bootstraps.insert(cn.to_string(), path);
         }
-        Ok(Bootstrap {
-            bootstraps,
-        })
+        Ok(Bootstrap { bootstraps })
     }
-
 
     /// Parse the trusted_services.<ID> tables.  Currently I am reserving the ID of "default" for the
     /// sort of built-in certificate authority based authentication mechanism.
@@ -1099,7 +1092,6 @@ mod test {
         assert_eq!(hits, 0x3); // or did not hit both services.
     }
 
-
     #[test]
     fn test_parse_bootstrap() {
         let tstr = r#"
@@ -1123,5 +1115,4 @@ mod test {
             &PathBuf::from("other.keyfile.pem")
         );
     }
-
 }

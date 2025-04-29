@@ -6,7 +6,6 @@ use core::fmt;
 use std::path::{Path, PathBuf};
 
 use base64::prelude::*;
-use openssl::rsa;
 
 use crate::config::{self, Config};
 use crate::context::CompilationCtx;
@@ -560,7 +559,7 @@ impl ConfigApi {
     /// single <CN> value.
     fn get_bootstrap(&self, key_path: Vec<&str>) -> Option<ConfigItem> {
         if key_path.len() != 1 {
-            return None
+            return None;
         }
         let key = key_path[0];
         let kpath = self.config.bootstrap_cfg.bootstraps.get(key)?;
@@ -568,13 +567,17 @@ impl ConfigApi {
             load_rsa_public_key(&kpath)
                 .expect(format!("failed to load bootstrap key from '{kpath:?}'").as_str())
         } else {
-            let abspath = self.base_path.join(kpath)
-                .canonicalize().expect(format!("failed to canonicalize bootstrap key path: {kpath:?}").as_str());
-            load_rsa_public_key(&abspath)
-                .expect(format!("failed to load bootstrap key from '{}'", abspath.display()).as_str())
+            let abspath =
+                self.base_path.join(kpath).canonicalize().expect(
+                    format!("failed to canonicalize bootstrap key path: {kpath:?}").as_str(),
+                );
+            load_rsa_public_key(&abspath).expect(
+                format!("failed to load bootstrap key from '{}'", abspath.display()).as_str(),
+            )
         };
 
-        let derdata = pubkey.public_key_to_der()
+        let derdata = pubkey
+            .public_key_to_der()
             .expect("failed to convert public key to DER format");
 
         Some(ConfigItem::BytesB64(BASE64_STANDARD.encode(&derdata)))
@@ -667,6 +670,7 @@ impl ConfigApi {
 #[cfg(test)]
 mod test {
     use super::*;
+    use openssl::rsa;
     use std::env;
 
     #[test]
@@ -751,8 +755,6 @@ mod test {
         );
     }
 
-
-
     #[test]
     fn test_get_bootstrap() {
         let cfg = r#"
@@ -805,7 +807,5 @@ mod test {
             }
             _ => panic!("expected a BytesB64"),
         }
-
     }
-
 }

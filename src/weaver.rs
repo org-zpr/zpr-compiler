@@ -80,6 +80,7 @@ pub fn weave(
     weaver.init_nodes(config)?;
     weaver.add_client_policies(&class_idx, policy, config)?;
     weaver.add_default_auth(config, ctx)?;
+    weaver.add_bootstrap_records(config, ctx)?;
 
     Ok(weaver.fabric)
 }
@@ -579,6 +580,44 @@ impl Weaver {
         };
 
         self.fabric.default_auth_cert_asn = cert_data;
+        Ok(())
+    }
+
+    fn add_bootstrap_records(
+        &mut self,
+        config: &ConfigApi,
+        ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
+        let bootstrap_cns = match config.get(&format!("zpr/bootstrap")) {
+            Some(ConfigItem::KeySet(cns)) => cns,
+            _ => Vec::new(),
+        };
+        for cnval in &bootstrap_cns {
+            match config.get(&format!("zpr/bootstrap/{cnval}")) {
+                Some(ConfigItem::BytesB64(b64data)) => match BASE64_STANDARD.decode(b64data) {
+                    Ok(cert_data) => {
+                        self.fabric
+                            .bootstrap_records
+                            .insert(cnval.clone(), cert_data.clone());
+                    }
+                    Err(e) => {
+                        return Err(CompilationError::ConfigError(format!(
+                            "error decoding certificate data: {}",
+                            e
+                        )));
+                    }
+                },
+                item @ Some(_) => {
+                    return Err(CompilationError::ConfigError(format!(
+                        "unexpected result from config: expected certificate data got {:?}",
+                        item
+                    )));
+                }
+                None => {
+                    ctx.warn(&format!("no certificate for bootstrap record {}", cnval))?;
+                }
+            }
+        }
         Ok(())
     }
 }
