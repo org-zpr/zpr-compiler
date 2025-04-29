@@ -1,3 +1,5 @@
+
+/*
 pub mod polio {
     include!(concat!(env!("OUT_DIR"), "/polio.rs"));
 }
@@ -21,13 +23,14 @@ mod putil;
 mod weaver;
 mod zpl;
 mod zplstr;
+*/
 
 use clap::Parser;
 use colored::Colorize;
 use std::path::PathBuf;
 
-use compilation::Compilation;
-use crypto::load_rsa_private_key;
+use zpcsuite::compilation::Compilation;
+use zpcsuite::crypto::load_rsa_private_key;
 
 /// ZPL Policy Compiler
 ///
@@ -35,7 +38,7 @@ use crypto::load_rsa_private_key;
 /// visa service.
 #[derive(Debug, Parser)]
 #[command(name = "zpc")]
-#[command(version = "1.0", verbatim_doc_comment)]
+#[command(version = "0.2.0", verbatim_doc_comment)] // hmm can get grab this from Cargo?
 struct Cli {
     /// Path to the ZPL file.
     #[arg(value_name = "ZPL_FILE")]

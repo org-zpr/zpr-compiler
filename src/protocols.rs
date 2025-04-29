@@ -25,6 +25,20 @@ impl Into<u32> for IanaProtocol {
     }
 }
 
+impl TryFrom<u32> for IanaProtocol {
+    type Error = &'static str;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(IanaProtocol::ICMP),
+            6 => Ok(IanaProtocol::TCP),
+            17 => Ok(IanaProtocol::UDP),
+            58 => Ok(IanaProtocol::ICMPv6),
+            _ => Err("Invalid IANA protocol number"),
+        }
+    }
+}
+
 /// Convert a ZPL string (without leading 'iana') to an IANA protocol number enum.
 pub fn parse(s: &str) -> Option<IanaProtocol> {
     match s.to_lowercase().as_str() {

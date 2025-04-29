@@ -1,10 +1,11 @@
 [package]
-name = "zpc"
+name = "zpcsuite"
 version = "0.2.0"
 edition = "2021"
 
 [dependencies]
 base64 = "0.22.1"
+bytes = "1.10.1"
 chrono = "0.4.39"
 clap = { version = "4.5.23", features = ["derive"] }
 colored = "3.0.0"

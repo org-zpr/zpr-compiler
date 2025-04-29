@@ -17,7 +17,7 @@ use crate::zpl;
 pub const SERIAL_VERSION: u32 = 42;
 
 /// This value for a PROC in a connect record means NO PROC.
-const NO_PROC: u32 = u32::MAX; // 0xffffffff
+pub const NO_PROC: u32 = u32::MAX; // 0xffffffff
 
 #[allow(dead_code)]
 #[derive(Default)]
