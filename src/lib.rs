@@ -30,5 +30,5 @@ pub mod protocols;
 mod ptypes;
 mod putil;
 mod weaver;
-mod zpl;
+pub mod zpl;
 mod zplstr;
