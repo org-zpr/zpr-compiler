@@ -180,7 +180,7 @@ impl From<&ConfigItem> for Protocol {
         match item {
             ConfigItem::Protocol(_name, prot, port_t) => {
                 let mut p = Protocol {
-                    protocol: prot.clone(),
+                    protocol: *prot,
                     port: None,
                     icmp: None,
                 };
@@ -332,7 +332,7 @@ impl ConfigApi {
     /// This version of [ConfigItem::get] will panic if the key is not found.
     pub fn must_get(&self, key: &str) -> ConfigItem {
         self.get(key)
-            .expect(format!("key not found: {}", key).as_str())
+            .unwrap_or_else(|| panic!("key not found: {}", key))
     }
 
     pub fn must_get_keys(&self, key: &str) -> Vec<String> {
@@ -386,9 +386,7 @@ impl ConfigApi {
         }
         let key = key_path[0];
         match key {
-            "version" => {
-                return Some(ConfigItem::StrVal(digest_as_hex(&self.config.digest)));
-            }
+            "version" => Some(ConfigItem::StrVal(digest_as_hex(&self.config.digest))),
             "resolver" => {
                 if key_path.len() == 1 {
                     return None;
@@ -434,9 +432,7 @@ impl ConfigApi {
         match key {
             "provider" => {
                 // TODO: Why is provider an option?
-                let Some(provider) = svc.provider.as_ref() else {
-                    return None;
-                };
+                let provider = svc.provider.as_ref()?;
                 Some(ConfigItem::AttrList(provider.clone()))
             }
             "protocol" => {
@@ -456,9 +452,9 @@ impl ConfigApi {
                             );
                         };
                         // TODO: This error should be caught in config parser
-                        let portnum = pstr.parse::<u16>().expect(
-                            format!("failed to parse port number for serrvice {}", svc.id).as_str(),
-                        );
+                        let portnum = pstr.parse::<u16>().unwrap_or_else(|_| {
+                            panic!("failed to parse port number for serrvice {}", svc.id)
+                        });
                         Some(ConfigItem::Protocol(
                             svc.id.clone(),
                             prot.protocol,
@@ -507,9 +503,7 @@ impl ConfigApi {
         match key {
             "api" => Some(ConfigItem::StrVal(svc.api.clone())),
             "certificate" => {
-                let Some(cert_path) = svc.cert_path.as_ref() else {
-                    return None;
-                };
+                let cert_path = svc.cert_path.as_ref()?;
                 if cert_path.as_os_str().is_empty() {
                     // No cert path. Possibly this is an error to be detected in config parser?
                     return None;
@@ -564,16 +558,17 @@ impl ConfigApi {
         let key = key_path[0];
         let kpath = self.config.bootstrap_cfg.bootstraps.get(key)?;
         let pubkey = if kpath.is_absolute() {
-            load_rsa_public_key(&kpath)
-                .expect(format!("failed to load bootstrap key from '{kpath:?}'").as_str())
+            load_rsa_public_key(kpath)
+                .unwrap_or_else(|_| panic!("failed to load bootstrap key from '{kpath:?}'"))
         } else {
-            let abspath =
-                self.base_path.join(kpath).canonicalize().expect(
-                    format!("failed to canonicalize bootstrap key path: {kpath:?}").as_str(),
-                );
-            load_rsa_public_key(&abspath).expect(
-                format!("failed to load bootstrap key from '{}'", abspath.display()).as_str(),
-            )
+            let abspath = self
+                .base_path
+                .join(kpath)
+                .canonicalize()
+                .unwrap_or_else(|_| panic!("failed to canonicalize bootstrap key path: {kpath:?}"));
+            load_rsa_public_key(&abspath).unwrap_or_else(|_| {
+                panic!("failed to load bootstrap key from '{}'", abspath.display())
+            })
         };
 
         let derdata = pubkey
@@ -660,7 +655,7 @@ impl ConfigApi {
                     Some(mapping) => mapping.to_string(),
                     None => iface.host.clone(),
                 };
-                return Some(ConfigItem::NetAddr(hostname, iface.port));
+                Some(ConfigItem::NetAddr(hostname, iface.port))
             }
             _ => panic!("unknown key: {}", key),
         }

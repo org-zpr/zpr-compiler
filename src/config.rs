@@ -133,7 +133,7 @@ impl Config {
 
 /// Parse and do some (light) error checking on the ZPL TOML configuration.
 pub fn load_config(path: &Path, ctx: &CompilationCtx) -> Result<Config, CompilationError> {
-    let cstr = std::fs::read_to_string(path).map_err(|e| CompilationError::Io(e))?;
+    let cstr = std::fs::read_to_string(path).map_err(CompilationError::Io)?;
     parse_config(&cstr, ctx)
 }
 
@@ -145,11 +145,9 @@ pub fn parse_config(cstr: &str, ctx: &CompilationCtx) -> Result<Config, Compilat
 
 impl ConfigParse {
     fn new_from_toml_str(cstr: &str) -> Result<ConfigParse, CompilationError> {
-        let digest = sha256(&cstr);
+        let digest = sha256(cstr);
 
-        let ctoml = cstr
-            .parse::<Table>()
-            .map_err(|e| CompilationError::TomlError(e))?;
+        let ctoml = cstr.parse::<Table>().map_err(CompilationError::TomlError)?;
 
         Ok(ConfigParse { digest, ctoml })
     }
@@ -228,7 +226,7 @@ impl ConfigParse {
 
         Ok(Resolver {
             order: order_vec,
-            hosts: hosts,
+            hosts,
         })
     }
 
@@ -482,13 +480,11 @@ fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, Compilation
     // We'll try to parse as a SocketAddr first (which requires an IP address, not a name)
     //let saddr: std::net::SocketAddr = netaddr.parse();
     match netaddr.parse::<std::net::SocketAddr>() {
-        Ok(saddr) => {
-            return Ok(Interface {
-                name: ifname.to_string(),
-                host: saddr.ip().to_string(),
-                port: saddr.port(),
-            })
-        }
+        Ok(saddr) => Ok(Interface {
+            name: ifname.to_string(),
+            host: saddr.ip().to_string(),
+            port: saddr.port(),
+        }),
         Err(_) => {
             // Did not parse as a SocketAddr, so try as "hostname:portnum"
             let parts: Vec<&str> = netaddr.split(':').collect();
@@ -505,11 +501,11 @@ fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, Compilation
                     parts[1]
                 )
             })?;
-            return Ok(Interface {
+            Ok(Interface {
                 name: ifname.to_string(),
                 host: parts[0].to_string(),
                 port: portnum,
-            });
+            })
         }
     }
 }
@@ -618,8 +614,8 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
 
     let mut returns = Vec::new();
     for ra in &returns_attrs {
-        if ra.starts_with("#") {
-            returns.push(Attribute::tag(&ra[1..]));
+        if let Some(stripped) = ra.strip_prefix("#") {
+            returns.push(Attribute::tag(stripped));
         } else {
             returns.push(Attribute::attr_name_only(ra));
         }
@@ -669,19 +665,17 @@ fn parse_protocol(prot_id: &str, prot: &Table) -> Result<Protocol, CompilationEr
         .ok_or(err_config!("protocol {} missing protocol", prot_id))?
         .to_string();
 
-    let protocol: IanaProtocol;
-
-    if protocol_name.starts_with("iana.") {
+    let protocol: IanaProtocol = if protocol_name.starts_with("iana.") {
         let iana_name = protocol_name.split(".").nth(1).ok_or(err_config!(
             "protocol {} invalid IANA protocol name: {}",
             prot_id,
             protocol_name
         ))?;
-        protocol = protocols::parse(iana_name).ok_or(err_config!(
+        protocols::parse(iana_name).ok_or(err_config!(
             "protocol {} unknown IANA protocol name: {}",
             prot_id,
             protocol_name
-        ))?;
+        ))?
     } else {
         // TODO: Not sure what it means to have non-iana protocol yet.
         return Err(err_config!(
@@ -689,7 +683,7 @@ fn parse_protocol(prot_id: &str, prot: &Table) -> Result<Protocol, CompilationEr
             prot_id,
             protocol_name
         ));
-    }
+    };
 
     if protocol.takes_port_arg() && !prot.contains_key("port") {
         return Err(err_config!("protocol {} missing port", prot_id));

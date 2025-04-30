@@ -95,10 +95,9 @@ fn main() {
             Ok(k) => k,
             Err(e) => {
                 println!(
-                    "{}{} {}: {}",
+                    "{}{} failed to load private key: {}",
                     "error".red().bold(),
                     ":".bold(),
-                    "failed to load private key",
                     e
                 );
                 std::process::exit(1);

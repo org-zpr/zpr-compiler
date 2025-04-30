@@ -19,9 +19,9 @@ impl fmt::Display for IanaProtocol {
     }
 }
 
-impl Into<u32> for IanaProtocol {
-    fn into(self) -> u32 {
-        self as u32
+impl From<IanaProtocol> for u32 {
+    fn from(value: IanaProtocol) -> Self {
+        value as u32
     }
 }
 
@@ -99,7 +99,7 @@ impl Protocol {
             if let Some(ref port) = self.port {
                 s.push_str(port);
             } else {
-                s.push_str("0");
+                s.push('0');
             }
         }
         s

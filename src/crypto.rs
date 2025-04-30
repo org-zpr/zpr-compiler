@@ -61,9 +61,9 @@ pub fn load_asn1data_from_pem(pem_file: &Path) -> Result<Vec<u8>, CompilationErr
             )));
         }
     };
-    Ok(cert.to_der().map_err(|e| {
+    cert.to_der().map_err(|e| {
         CompilationError::FileError(format!("error converting certificate to DER format: {}", e))
-    })?)
+    })
 }
 
 /// Load a private key from a PEM file.

@@ -35,14 +35,12 @@ pub fn squash_attributes(
                 attr_map.insert(a.name.clone(), a.clone()); // overwrite old non-valued attribute
             } else if map_attr.value.is_some() && a.value.is_none() {
                 // do nothing
-            } else if map_attr.value.is_some() && a.value.is_some() {
-                if map_attr.value != a.value {
-                    return Err(CompilationError::AttributeValueConflict(
-                        a.name.clone(),
-                        tok.line,
-                        tok.col,
-                    ));
-                }
+            } else if map_attr.value.is_some() && a.value.is_some() && map_attr.value != a.value {
+                return Err(CompilationError::AttributeValueConflict(
+                    a.name.clone(),
+                    tok.line,
+                    tok.col,
+                ));
             }
         } else {
             attr_map.insert(a.name.clone(), a.clone());

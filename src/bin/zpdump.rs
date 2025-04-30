@@ -359,11 +359,8 @@ fn parse_addr(addr_bytes: &[u8]) -> Result<IpAddr, String> {
     }
 }
 
-fn instrs_to_strings(instrs: &Vec<polio::Instruction>) -> Vec<String> {
-    instrs
-        .iter()
-        .map(|instr| instr_to_string(instr))
-        .collect::<Vec<String>>()
+fn instrs_to_strings(instrs: &[polio::Instruction]) -> Vec<String> {
+    instrs.iter().map(instr_to_string).collect::<Vec<String>>()
 }
 
 fn instr_to_string(instr: &polio::Instruction) -> String {
@@ -381,7 +378,7 @@ fn instr_to_string(instr: &polio::Instruction) -> String {
                 polio::argument::Arg::Spval(tuple) => {
                     sb.push_str(&format!("({}, {})", tuple.a, tuple.b))
                 }
-                polio::argument::Arg::Insval(i) => sb.push_str(&instr_to_string(&i)), // recurse!
+                polio::argument::Arg::Insval(i) => sb.push_str(&instr_to_string(i)), // recurse!
             }
             sb.push_str("  ");
         }
@@ -410,10 +407,10 @@ fn svct_to_string(svct: i32) -> String {
     })
 }
 
-fn scopes_to_string(scopes: &Vec<polio::Scope>) -> String {
+fn scopes_to_string(scopes: &[polio::Scope]) -> String {
     scopes
         .iter()
-        .map(|scope| scope_to_string(scope))
+        .map(scope_to_string)
         .collect::<Vec<String>>()
         .join(", ")
 }
@@ -455,7 +452,7 @@ fn scope_to_string(scope: &polio::Scope) -> String {
     s
 }
 
-fn attr_exp_to_string(exp: &polio::AttrExpr, keys: &Vec<String>, values: &Vec<String>) -> String {
+fn attr_exp_to_string(exp: &polio::AttrExpr, keys: &[String], values: &[String]) -> String {
     let mut s = String::new();
     s.push_str(&keys[exp.key as usize]);
     s.push_str(&format!(" {} ", attr_opt_t_to_string(exp.op)));

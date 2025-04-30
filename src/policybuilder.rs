@@ -70,11 +70,13 @@ impl PolicyBuilder {
         let tsnow = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
         let policy_version = tsnow.as_secs();
 
-        let mut pp = polio::Policy::default();
-        pp.serial_version = SERIAL_VERSION;
-        pp.policy_date = policy_date.clone();
-        pp.policy_version = policy_version;
-        pp.policy_metadata = metadata(&policy_date);
+        let pp = polio::Policy {
+            serial_version: SERIAL_VERSION,
+            policy_date: policy_date.clone(),
+            policy_version: policy_version,
+            policy_metadata: metadata(&policy_date),
+            ..Default::default()
+        };
 
         if verbose {
             println!("creating binary policy");
@@ -127,15 +129,15 @@ impl PolicyBuilder {
         let mut key_table = HashMap::new(); // key -> index
         let mut value_table = HashMap::new(); // value -> index
 
-        self.populate_key_table(&fabric, &mut key_table);
-        self.populate_value_table(&fabric, &mut value_table);
+        self.populate_key_table(fabric, &mut key_table);
+        self.populate_value_table(fabric, &mut value_table);
         self.policy.attr_key_index = self.index_from_table(&key_table);
         self.policy.attr_val_index = self.index_from_table(&value_table);
 
-        self.set_connects(&fabric)?;
-        self.set_policies(&fabric)?;
-        self.set_default_auth(&fabric, ctx)?;
-        self.set_bootstrap(&fabric, ctx)?;
+        self.set_connects(fabric)?;
+        self.set_policies(fabric)?;
+        self.set_default_auth(fabric, ctx)?;
+        self.set_bootstrap(fabric, ctx)?;
 
         if self.verbose {
             println!("  {} connect rules", self.policy.connects.len());
@@ -197,7 +199,7 @@ impl PolicyBuilder {
         // We convert each policy to its own CPolicy.
 
         for svc in &fabric.services {
-            let pscope = self.scope_for_service(&svc)?;
+            let pscope = self.scope_for_service(svc)?;
             let mut pcount = 0;
 
             for policy in &svc.client_policies {
@@ -579,7 +581,7 @@ fn connect_to_hash(connect: &polio::Connect) -> String {
             polio::AttrOpT::Has => 0x40 << 56,      // 01..
             polio::AttrOpT::Excludes => 0xc0 << 56, // 11..
         };
-        combined = combined | (((ae.key & 0x3FFFFFFF) as u64) << 32 | (ae.val as u64));
+        combined |= (((ae.key & 0x3FFFFFFF) as u64) << 32) | (ae.val as u64);
         attrs.push(combined);
     }
 
