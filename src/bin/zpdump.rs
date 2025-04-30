@@ -1,23 +1,20 @@
 use clap::Parser;
 use colored::Colorize;
-use std::path::PathBuf;
 use std::net::IpAddr;
+use std::path::PathBuf;
 
-use prost::Message;
-use bytes::Bytes;
 use base64::prelude::*;
-use openssl::x509::X509;
+use bytes::Bytes;
 use openssl::rsa::Rsa;
+use openssl::x509::X509;
+use prost::Message;
 
-use zpcsuite::polio::PolicyContainer;
-use zpcsuite::polio::Policy;
-use zpcsuite::polio;
 use zpcsuite::policybuilder::{NO_PROC, SERIAL_VERSION};
+use zpcsuite::polio;
+use zpcsuite::polio::Policy;
+use zpcsuite::polio::PolicyContainer;
 use zpcsuite::protocols::IanaProtocol;
 use zpcsuite::zpl;
-
-
-
 
 /// ZPL Policy Dumper
 ///
@@ -38,43 +35,92 @@ fn main() {
     let fname = cli.zpl.display().to_string();
     let encoded = std::fs::read(cli.zpl).expect("failed to read binary policy file");
     let encoded_buf = Bytes::from(encoded);
-    let container: PolicyContainer = PolicyContainer::decode(encoded_buf).expect("failed to decode binary policy file");
+    let container: PolicyContainer =
+        PolicyContainer::decode(encoded_buf).expect("failed to decode binary policy file");
 
     println!("              file: {}", fname.yellow());
-    println!(" container_version: {}", format!("{}", container.container_version).yellow());
+    println!(
+        " container_version: {}",
+        format!("{}", container.container_version).yellow()
+    );
     println!("       policy_date: {}", container.policy_date.yellow());
-    println!("    policy_version: {}", format!("{}", container.policy_version).yellow());
+    println!(
+        "    policy_version: {}",
+        format!("{}", container.policy_version).yellow()
+    );
     println!("   policy_revision: {}", container.policy_revision.yellow());
     println!("   policy_metadata: {}", container.policy_metadata.yellow());
-    println!("         signature: {}", if container.signature.is_empty() { "none".red()} else { "yes (not checked)".yellow() });
+    println!(
+        "         signature: {}",
+        if container.signature.is_empty() {
+            "none".red()
+        } else {
+            "yes (not checked)".yellow()
+        }
+    );
     println!();
 
     let encoded_buf = Bytes::from(container.policy);
     let pol: Policy = Policy::decode(encoded_buf).expect("failed to decode policy");
 
-    print!("         serial_version: {:>3}", format!("{}", pol.serial_version).yellow().bold());
+    print!(
+        "         serial_version: {:>3}",
+        format!("{}", pol.serial_version).yellow().bold()
+    );
     if pol.serial_version != SERIAL_VERSION {
-        println!("      {} != {}",
+        println!(
+            "      {} != {}",
             String::from("*mismatch*").red(),
-            format!("{}", SERIAL_VERSION).bold());
+            format!("{}", SERIAL_VERSION).bold()
+        );
     } else {
         println!();
     }
-    print!("       connection rules: {:>3}", format!("{}", pol.connects.len()).yellow());
-    println!("      communication policies: {:>3}", format!("{}", pol.policies.len()).yellow());
-    print!("               services: {:>3}", format!("{}", pol.services.len()).yellow());
-    println!("                  procedures: {:>3}", format!("{}", pol.procs.len()).yellow());
-    print!("                  links: {:>3}", format!("{}", pol.links.len()).yellow());
-    println!("                certificates: {:>3}", format!("{}", pol.certificates.len()).yellow());
-    print!("         attribute keys: {:>3}", format!("{}", pol.attr_key_index.len()).yellow());
-    println!("            attribute values: {:>3}", format!("{}", pol.attr_val_index.len()).yellow());
-    print!(" configuration settings: {:>3}", format!("{}", pol.config.len()).yellow());
-    println!("                 public keys: {:>3}", format!("{}", pol.pubkeys.len()).yellow());
+    print!(
+        "       connection rules: {:>3}",
+        format!("{}", pol.connects.len()).yellow()
+    );
+    println!(
+        "      communication policies: {:>3}",
+        format!("{}", pol.policies.len()).yellow()
+    );
+    print!(
+        "               services: {:>3}",
+        format!("{}", pol.services.len()).yellow()
+    );
+    println!(
+        "                  procedures: {:>3}",
+        format!("{}", pol.procs.len()).yellow()
+    );
+    print!(
+        "                  links: {:>3}",
+        format!("{}", pol.links.len()).yellow()
+    );
+    println!(
+        "                certificates: {:>3}",
+        format!("{}", pol.certificates.len()).yellow()
+    );
+    print!(
+        "         attribute keys: {:>3}",
+        format!("{}", pol.attr_key_index.len()).yellow()
+    );
+    println!(
+        "            attribute values: {:>3}",
+        format!("{}", pol.attr_val_index.len()).yellow()
+    );
+    print!(
+        " configuration settings: {:>3}",
+        format!("{}", pol.config.len()).yellow()
+    );
+    println!(
+        "                 public keys: {:>3}",
+        format!("{}", pol.pubkeys.len()).yellow()
+    );
 
     if !pol.connects.is_empty() {
         print_section_hdr("CONNECTS");
         for (i, connect) in pol.connects.iter().enumerate() {
-            print!("connect {}", format!("{}", i+1).yellow());
+            print!("connect {}", format!("{}", i + 1).yellow());
             if connect.proc != NO_PROC {
                 println!("     proc {}", format!("{:03}", connect.proc).yellow());
             } else {
@@ -82,7 +128,10 @@ fn main() {
             }
 
             for aexp in &connect.attr_exprs {
-                println!("     {}", attr_exp_to_string(aexp, &pol.attr_key_index, &pol.attr_val_index).yellow());
+                println!(
+                    "     {}",
+                    attr_exp_to_string(aexp, &pol.attr_key_index, &pol.attr_val_index).yellow()
+                );
             }
         }
     }
@@ -90,7 +139,7 @@ fn main() {
     if !pol.policies.is_empty() {
         print_section_hdr("COMMUNICATION POLICIES");
         for (i, cp) in pol.policies.iter().enumerate() {
-            println!("policy {}", format!("{}", i+1).yellow());
+            println!("policy {}", format!("{}", i + 1).yellow());
             println!("     service_id: {}", cp.service_id.yellow());
             println!("             id: {}", cp.id.yellow());
             println!("          scope: {}", scopes_to_string(&cp.scope).yellow());
@@ -100,14 +149,16 @@ fn main() {
     if !pol.services.is_empty() {
         print_section_hdr("SERVICES");
         for (i, service) in pol.services.iter().enumerate() {
-            println!("service {}", format!("{}", i+1).yellow());
+            println!("service {}", format!("{}", i + 1).yellow());
             println!("       type: {}", svct_to_string(service.r#type).yellow());
             println!("       name: {}", service.name.yellow());
             println!("     prefix: {}", service.prefix.yellow());
             println!("     domain: {}", service.domain.yellow());
-            println!("        api: query {} / validate {}",
+            println!(
+                "        api: query {} / validate {}",
                 format!("{}", service.query_api_version).yellow(),
-                format!("{}", service.validate_api_version).yellow());
+                format!("{}", service.validate_api_version).yellow()
+            );
             println!("       addr: {}", service.addr.yellow());
         }
     }
@@ -117,7 +168,11 @@ fn main() {
         for (i, proc) in pol.procs.iter().enumerate() {
             println!("proc {}", format!("{:03}", i).yellow());
             for (j, instr) in instrs_to_strings(&proc.proc).iter().enumerate() {
-                println!("     {:03}: {}", format!("{:03}", j).dimmed(), instr.yellow());
+                println!(
+                    "     {:03}: {}",
+                    format!("{:03}", j).dimmed(),
+                    instr.yellow()
+                );
             }
         }
     }
@@ -125,16 +180,27 @@ fn main() {
     if !pol.links.is_empty() {
         print_section_hdr("LINKS");
         for (i, link) in pol.links.iter().enumerate() {
-            println!("link {}", format!("{}", i+1).yellow());
+            println!("link {}", format!("{}", i + 1).yellow());
             for term in &link.terms {
-                println!("     source: {}  ->  dest: {}",
+                println!(
+                    "     source: {}  ->  dest: {}",
                     parse_addr_to_string(&link.source_id).yellow(),
-                    parse_addr_to_string(&term.zpr_id).yellow());
-                println!("     @ {}:{}", term.host.yellow(), format!("{}", term.port).yellow());
-                println!("     key: {}", BASE64_STANDARD.encode(term.key.as_slice()).yellow());
-                println!("     cost: {}    ext_auth: {}",
+                    parse_addr_to_string(&term.zpr_id).yellow()
+                );
+                println!(
+                    "     @ {}:{}",
+                    term.host.yellow(),
+                    format!("{}", term.port).yellow()
+                );
+                println!(
+                    "     key: {}",
+                    BASE64_STANDARD.encode(term.key.as_slice()).yellow()
+                );
+                println!(
+                    "     cost: {}    ext_auth: {}",
                     format!("{}", term.cost).yellow(),
-                    format!("{}", term.ext_auth).yellow());
+                    format!("{}", term.ext_auth).yellow()
+                );
             }
         }
     }
@@ -142,23 +208,25 @@ fn main() {
     if !pol.certificates.is_empty() {
         print_section_hdr("CERTIFICATES");
         for (i, cert) in pol.certificates.iter().enumerate() {
-            println!("cert {}", format!("{}", i+1).yellow());
-            println!("     name: {}    ( ID = {} )", cert.name.yellow(), format!("{}", cert.id).yellow());
+            println!("cert {}", format!("{}", i + 1).yellow());
+            println!(
+                "     name: {}    ( ID = {} )",
+                cert.name.yellow(),
+                format!("{}", cert.id).yellow()
+            );
             println!("     data:");
             match X509::from_der(&cert.asn1data) {
-                Ok(x509cert) => {
-                    match x509cert.to_text() {
-                        Ok(text) => {
-                            let text = String::from_utf8_lossy(&text);
-                            for line in text.split('\n') {
-                                println!("         {}", line.yellow());
-                            }
-                        }
-                        Err(e) => {
-                            println!("     !ERR! {}", e);
+                Ok(x509cert) => match x509cert.to_text() {
+                    Ok(text) => {
+                        let text = String::from_utf8_lossy(&text);
+                        for line in text.split('\n') {
+                            println!("         {}", line.yellow());
                         }
                     }
-                }
+                    Err(e) => {
+                        println!("     !ERR! {}", e);
+                    }
+                },
                 Err(e) => {
                     println!("     !ERR! {}", e);
                 }
@@ -173,12 +241,29 @@ fn main() {
         println!("       {}{:>29}", "KEYS".bold(), "VALUES".bold());
         for i in 0..key_idx_len.max(val_idx_len) {
             if i < key_idx_len && i < val_idx_len {
-                print!("     {:>3}: {:<20}", format!("{}", i).yellow(), pol.attr_key_index[i].yellow());
-                println!("  {:>3}: {}", format!("{}", i).yellow(), pol.attr_val_index[i].yellow());
+                print!(
+                    "     {:>3}: {:<20}",
+                    format!("{}", i).yellow(),
+                    pol.attr_key_index[i].yellow()
+                );
+                println!(
+                    "  {:>3}: {}",
+                    format!("{}", i).yellow(),
+                    pol.attr_val_index[i].yellow()
+                );
             } else if i < key_idx_len {
-                println!("     {:>3}: {:<20}", format!("{}", i).yellow(), pol.attr_key_index[i].yellow());
+                println!(
+                    "     {:>3}: {:<20}",
+                    format!("{}", i).yellow(),
+                    pol.attr_key_index[i].yellow()
+                );
             } else {
-                println!("{:>32}{:>3}: {}", "", format!("{}", i).yellow(), pol.attr_val_index[i].yellow());
+                println!(
+                    "{:>32}{:>3}: {}",
+                    "",
+                    format!("{}", i).yellow(),
+                    pol.attr_val_index[i].yellow()
+                );
             }
         }
     }
@@ -186,32 +271,34 @@ fn main() {
     if !pol.config.is_empty() {
         print_section_hdr("CONFIGURATION SETTINGS");
         for setting in &pol.config {
-            println!("     {} = {}",
+            println!(
+                "     {} = {}",
                 config_setting_key_to_string(setting.key).yellow(),
-                config_val_to_string(&setting.val).yellow());
+                config_val_to_string(&setting.val).yellow()
+            );
         }
     }
 
     if !pol.pubkeys.is_empty() {
         print_section_hdr("PUBLIC KEYS");
         for (i, pubkey) in pol.pubkeys.iter().enumerate() {
-            println!("pubkey {}    CN = {}",
-                format!("{}", i+1).yellow(),
-                pubkey.cn.yellow());
+            println!(
+                "pubkey {}    CN = {}",
+                format!("{}", i + 1).yellow(),
+                pubkey.cn.yellow()
+            );
             match Rsa::public_key_from_der(&pubkey.keydata) {
-                Ok(rsa) => {
-                    match rsa.public_key_to_pem() {
-                        Ok(pem) => {
-                            let pem = String::from_utf8_lossy(&pem);
-                            for line in pem.split('\n') {
-                                println!("     {}", line.yellow());
-                            }
-                        }
-                        Err(e) => {
-                            println!("     !ERR! {}", e);
+                Ok(rsa) => match rsa.public_key_to_pem() {
+                    Ok(pem) => {
+                        let pem = String::from_utf8_lossy(&pem);
+                        for line in pem.split('\n') {
+                            println!("     {}", line.yellow());
                         }
                     }
-                }
+                    Err(e) => {
+                        println!("     !ERR! {}", e);
+                    }
+                },
                 Err(e) => {
                     println!("     !ERR! {}", e);
                 }
@@ -224,11 +311,13 @@ fn main() {
 
 fn print_section_hdr(title: &str) {
     println!();
-    println!("{}{}{} {}",
+    println!(
+        "{}{}{} {}",
         String::from("═").red(),
         String::from("═").white(),
         String::from("═").blue(),
-        title.green().bold());
+        title.green().bold()
+    );
 }
 
 fn config_setting_key_to_string(key: u32) -> String {
@@ -237,7 +326,6 @@ fn config_setting_key_to_string(key: u32) -> String {
         _ => format!("key #{}", key),
     }
 }
-
 
 fn config_val_to_string(optval: &Option<polio::config_setting::Val>) -> String {
     match optval {
@@ -248,7 +336,6 @@ fn config_val_to_string(optval: &Option<polio::config_setting::Val>) -> String {
         None => String::from("null"),
     }
 }
-
 
 fn parse_addr_to_string(addr_bytes: &[u8]) -> String {
     match parse_addr(addr_bytes) {
@@ -273,7 +360,8 @@ fn parse_addr(addr_bytes: &[u8]) -> Result<IpAddr, String> {
 }
 
 fn instrs_to_strings(instrs: &Vec<polio::Instruction>) -> Vec<String> {
-    instrs.iter()
+    instrs
+        .iter()
         .map(|instr| instr_to_string(instr))
         .collect::<Vec<String>>()
 }
@@ -288,9 +376,11 @@ fn instr_to_string(instr: &polio::Instruction) -> String {
                 polio::argument::Arg::Uival(n) => sb.push_str(&format!("{}", n)),
                 polio::argument::Arg::Strval(s) => sb.push_str(&format!("'{}'", s)),
                 polio::argument::Arg::Bval(b) => sb.push_str(&format!("{}", b)),
-                polio::argument::Arg::Flagval(f) =>sb.push_str(&flagt_to_string(*f)),
+                polio::argument::Arg::Flagval(f) => sb.push_str(&flagt_to_string(*f)),
                 polio::argument::Arg::Svcval(s) => sb.push_str(&svct_to_string(*s)),
-                polio::argument::Arg::Spval(tuple) => sb.push_str(&format!("({}, {})", tuple.a, tuple.b)),
+                polio::argument::Arg::Spval(tuple) => {
+                    sb.push_str(&format!("({}, {})", tuple.a, tuple.b))
+                }
                 polio::argument::Arg::Insval(i) => sb.push_str(&instr_to_string(&i)), // recurse!
             }
             sb.push_str("  ");
@@ -313,7 +403,6 @@ fn flagt_to_string(flag: i32) -> String {
     })
 }
 
-
 fn svct_to_string(svct: i32) -> String {
     String::from(match polio::SvcT::try_from(svct) {
         Ok(st) => st.as_str_name(),
@@ -321,9 +410,9 @@ fn svct_to_string(svct: i32) -> String {
     })
 }
 
-
 fn scopes_to_string(scopes: &Vec<polio::Scope>) -> String {
-    scopes.iter()
+    scopes
+        .iter()
         .map(|scope| scope_to_string(scope))
         .collect::<Vec<String>>()
         .join(", ")
@@ -366,9 +455,6 @@ fn scope_to_string(scope: &polio::Scope) -> String {
     s
 }
 
-
-
-
 fn attr_exp_to_string(exp: &polio::AttrExpr, keys: &Vec<String>, values: &Vec<String>) -> String {
     let mut s = String::new();
     s.push_str(&keys[exp.key as usize]);
@@ -376,7 +462,6 @@ fn attr_exp_to_string(exp: &polio::AttrExpr, keys: &Vec<String>, values: &Vec<St
     s.push_str(&values[exp.val as usize]);
     s
 }
-
 
 fn attr_opt_t_to_string(opval: i32) -> String {
     String::from(match polio::AttrOpT::try_from(opval) {
