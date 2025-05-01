@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use zplc::compilation::Compilation;
 use zplc::crypto::load_rsa_private_key;
 
-/// zpc: the ZPL Compiler
+/// zlpc: the ZPL Compiler
 ///
 /// Compile a ZPL policy (plus its configuration) into a binary format for the
 /// visa service.
