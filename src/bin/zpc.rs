@@ -1,37 +1,12 @@
-/*
-pub mod polio {
-    include!(concat!(env!("OUT_DIR"), "/polio.rs"));
-}
-
-mod allow;
-mod compilation;
-mod config;
-mod config_api;
-mod context;
-mod crypto;
-mod define;
-mod errors;
-mod fabric;
-mod fabric_util;
-mod lex;
-mod parser;
-mod policybuilder;
-mod protocols;
-mod ptypes;
-mod putil;
-mod weaver;
-mod zpl;
-mod zplstr;
-*/
 
 use clap::Parser;
 use colored::Colorize;
 use std::path::PathBuf;
 
-use zpcsuite::compilation::Compilation;
-use zpcsuite::crypto::load_rsa_private_key;
+use zplc::compilation::Compilation;
+use zplc::crypto::load_rsa_private_key;
 
-/// ZPL Policy Compiler
+/// zpc: the ZPL Compiler
 ///
 /// Compile a ZPL policy (plus its configuration) into a binary format for the
 /// visa service.

@@ -138,7 +138,6 @@ impl Weaver {
         };
 
         // The provider of the visa service is a hardcoded CN value.
-        //let mut vs_attrs = Vec::new();
         let vs_attrs = vec![Attribute::attr(zpl::ADAPTER_CN_ATTR, zpl::VISA_SERVICE_CN)];
         let fab_svc_id = self.fabric.add_service(
             zpl::VS_SERVICE_NAME,

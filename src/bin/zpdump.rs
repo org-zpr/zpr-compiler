@@ -9,12 +9,12 @@ use openssl::rsa::Rsa;
 use openssl::x509::X509;
 use prost::Message;
 
-use zpcsuite::policybuilder::{NO_PROC, SERIAL_VERSION};
-use zpcsuite::polio;
-use zpcsuite::polio::Policy;
-use zpcsuite::polio::PolicyContainer;
-use zpcsuite::protocols::IanaProtocol;
-use zpcsuite::zpl;
+use zplc::policybuilder::{NO_PROC, SERIAL_VERSION};
+use zplc::polio;
+use zplc::polio::Policy;
+use zplc::polio::PolicyContainer;
+use zplc::protocols::IanaProtocol;
+use zplc::zpl;
 
 /// ZPL Policy Dumper
 ///

@@ -1,7 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use zpcsuite::compilation::CompilationBuilder;
+use zplc::compilation::CompilationBuilder;
 
 fn get_zpl_dir() -> PathBuf {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
