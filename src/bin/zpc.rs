@@ -1,4 +1,3 @@
-
 use clap::Parser;
 use colored::Colorize;
 use std::path::PathBuf;
