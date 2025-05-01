@@ -66,7 +66,7 @@ impl Compilation {
         let policy_digest = sha256_of_file(&self.source_zpl)?;
         policy.digest = Some(policy_digest);
 
-        let fabric = weave(&self, &cfg, &policy, &cctx)?;
+        let fabric = weave(self, &cfg, &policy, &cctx)?;
         if self.verbose {
             println!();
             println!("fabric production:\n{}", fabric);
@@ -97,8 +97,7 @@ impl Compilation {
         file: &Path,
         ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
-        let mut buf = Vec::new();
-        buf.reserve(container.encoded_len());
+        let mut buf = Vec::with_capacity(container.encoded_len());
         container.encode(&mut buf).map_err(|e| {
             CompilationError::EncodingError(format!("failed to encode policy container: {}", e))
         })?;
@@ -118,25 +117,20 @@ impl Compilation {
         pol: &polio::Policy,
         ctx: &CompilationCtx,
     ) -> Result<polio::PolicyContainer, CompilationError> {
-        let mut buf = Vec::new();
-        buf.reserve(pol.encoded_len());
+        let mut buf = Vec::with_capacity(pol.encoded_len());
         pol.encode(&mut buf).map_err(|e| {
             CompilationError::EncodingError(format!("failed to encode policy: {}", e))
         })?;
 
-        let signature: Vec<u8>;
-
-        match self.private_key {
-            Some(ref key) => {
-                signature = sign_pkcs1v15_sha256(key, &buf)?;
-            }
+        let signature: Vec<u8> = match self.private_key {
+            Some(ref key) => sign_pkcs1v15_sha256(key, &buf)?,
             None => {
                 ctx.warn(
                     "policy not signed, use `--key <pemfile>` to specify a private key for signing",
                 )?;
-                signature = Vec::new();
+                Vec::new()
             }
-        }
+        };
 
         let container = polio::PolicyContainer {
             container_version: CONTAINER_VERSION,

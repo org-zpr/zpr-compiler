@@ -72,7 +72,7 @@ pub fn parse_allow(
     ps.parse_tags_attrs_and_classname(
         &mut tokens,
         classes_idx,
-        &&ParseOpts::stop_at_any(&vec![TokenType::To, TokenType::With]),
+        &ParseOpts::stop_at_any(&[TokenType::To, TokenType::With]),
         "device or user clause",
     )?;
 
@@ -324,7 +324,7 @@ impl ParseOpts {
 impl Default for ParseOpts {
     fn default() -> Self {
         Self {
-            break_at: vec![TokenType::EOS],
+            break_at: vec![TokenType::Eos],
             break_at_count: 1,
         }
     }

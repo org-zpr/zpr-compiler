@@ -12,7 +12,7 @@ test: build
 	cargo test --verbose
 
 check:
-	cargo fmt --check && cargo rustc --lib -- -D warnings && cargo rustc --bins -- -D warnings
+	cargo fmt --check && cargo rustc --lib -- -D warnings && cargo rustc --bin zplc -- -D warnings && cargo rustc --bin zpdump -- -D warnings
 
 clean:
 	cargo clean

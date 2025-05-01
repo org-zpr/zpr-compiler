@@ -3,6 +3,7 @@
 //! needed by the prototype visa service.
 
 use core::fmt;
+use std::collections::HashMap;
 use std::net::Ipv6Addr;
 
 use crate::config_api::{ConfigApi, ConfigItem};
@@ -19,6 +20,7 @@ pub struct Fabric {
     pub services: Vec<FabricService>,
     pub nodes: Vec<FabricNode>,
     pub default_auth_cert_asn: Vec<u8>, // CA cert for default/builtin trusted auth
+    pub bootstrap_records: HashMap<String, Vec<u8>>, // bootstrap records maps a CN to a der-encoded public key
 }
 
 #[allow(dead_code)]
@@ -33,19 +35,14 @@ pub struct FabricService {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Default, Clone, PartialEq, Copy)]
 pub enum ServiceType {
+    #[default]
     Undefined,
     Trusted,
     Visa,
     Regular,
     BuiltIn, // eg, noode access to VS, or VS access to VSS
-}
-
-impl Default for ServiceType {
-    fn default() -> Self {
-        ServiceType::Undefined
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -65,39 +62,54 @@ pub struct ClientPolicy {
     //       Actually, withouts are just attributes, eg (role, ne, marketing)
 }
 
+fn plural(word: &str, count: usize) -> String {
+    if count == 1 {
+        word.to_string()
+    } else {
+        format!("{}s", word)
+    }
+}
+
 /// Debugging output
 impl fmt::Display for Fabric {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "revision: {}\n", self.revision)?;
-        write!(
+        writeln!(f, "revision: {}", self.revision)?;
+        writeln!(
             f,
-            "default auth cert: {}bytes\n",
+            "default auth cert: {}bytes",
             self.default_auth_cert_asn.len()
         )?;
-        write!(
+        if self.bootstrap_records.is_empty() {
+            writeln!(f, "no bootstrap records")?;
+        } else {
+            let bslen = self.bootstrap_records.len();
+            writeln!(f, "{} bootstrap {}:", bslen, plural("record", bslen))?;
+            for cn in self.bootstrap_records.keys() {
+                writeln!(f, "  - {}", cn)?;
+            }
+        }
+        writeln!(
             f,
-            "{} services - {} nodes\n",
+            "{} {} - {} {}",
             self.services.len(),
-            self.nodes.len()
+            plural("service", self.services.len()),
+            self.nodes.len(),
+            plural("node", self.nodes.len())
         )?;
         for s in &self.services {
-            write!(
-                f,
-                "  service: {}  (type={:?})\n",
-                s.fabric_id, s.service_type
-            )?;
-            write!(f, "    provider attrs:\n")?;
+            writeln!(f, "  service: {}  (type={:?})", s.fabric_id, s.service_type)?;
+            writeln!(f, "    provider attrs:")?;
             for a in &s.provider_attrs {
-                write!(f, "      {}\n", a)?;
+                writeln!(f, "      {}", a)?;
             }
-            write!(f, "    client policies:\n")?;
+            writeln!(f, "    client policies:")?;
             if s.client_policies.is_empty() {
-                write!(f, "      (none)\n")?;
+                writeln!(f, "      (none)")?;
             }
             for (i, cp) in s.client_policies.iter().enumerate() {
-                write!(
+                writeln!(
                     f,
-                    "      {})  {}\n",
+                    "      {})  {}",
                     i + 1,
                     cp.condition
                         .iter()
@@ -108,13 +120,13 @@ impl fmt::Display for Fabric {
             }
         }
         for n in &self.nodes {
-            write!(f, "  node: {}\n", n.node_id)?;
-            write!(f, "    provider attrs:\n")?;
+            writeln!(f, "  node: {}", n.node_id)?;
+            writeln!(f, "    provider attrs:")?;
             for a in &n.provider_attrs {
-                write!(f, "      {}\n", a)?;
+                writeln!(f, "      {}", a)?;
             }
         }
-        write!(f, "\n")
+        writeln!(f)
     }
 }
 

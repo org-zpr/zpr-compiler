@@ -1,21 +1,22 @@
 # ZPL Compiler
 
-Can compile simple (new) ZPL into binary policies that the prototype visa service
-can process.
+Can compile simple (new) ZPL into binary policies that the prototype visa
+service can process.  This comes bundled with a tool to examine the 
+contents of a "compiled" binary policy, `zpdump`.
 
 ## Example usage
 
 ```bash
-./zpc -k path/to/rsa-key.pem path/to/policy.zpl
+./zplc -k path/to/rsa-key.pem path/to/policy.zpl
 ```
 
 - That RSA key in the invocation is used to sign the binary policy so
   must match the one that the visa service is configured with.
 - By default the _configuration_ for the ZPL policy will be found in a
   file with the same name as the ZPL file but with the `zplc` extension.
-  If you want to loca configuration from somewhre else, use
+  If you want to load configuration from somewhre else, use
   `-c path/to/config.zplc` argument.
-- Help is available via `zpc -h`
+- Help is available via `zplc -h`
 
 
 

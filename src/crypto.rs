@@ -3,7 +3,7 @@
 use ring::digest::{self, Digest};
 
 use openssl::hash::MessageDigest;
-use openssl::pkey::{PKey, Private};
+use openssl::pkey::{PKey, Private, Public};
 use openssl::rsa::Rsa;
 use openssl::sign::Signer;
 use openssl::x509::X509;
@@ -42,6 +42,8 @@ pub fn digest_as_hex(digest: &Digest) -> String {
 
 /// Load a PEM certifiate file and return the ASN.1 data in DER encoding.
 /// Passed file should start with `-----BEGIN CERTIFICATE-----`.
+///
+/// Returns the DER encoded certificate as a byte array.
 pub fn load_asn1data_from_pem(pem_file: &Path) -> Result<Vec<u8>, CompilationError> {
     let pdata = std::fs::read(pem_file).map_err(|e| {
         CompilationError::FileError(format!(
@@ -59,9 +61,9 @@ pub fn load_asn1data_from_pem(pem_file: &Path) -> Result<Vec<u8>, CompilationErr
             )));
         }
     };
-    Ok(cert.to_der().map_err(|e| {
+    cert.to_der().map_err(|e| {
         CompilationError::FileError(format!("error converting certificate to DER format: {}", e))
-    })?)
+    })
 }
 
 /// Load a private key from a PEM file.
@@ -80,6 +82,32 @@ pub fn load_rsa_private_key(pem_file: &Path) -> Result<Rsa<Private>, Compilation
         Err(e) => {
             return Err(CompilationError::FileError(format!(
                 "error constructing private key from PEM data {}: {}",
+                pem_file.display(),
+                e
+            )));
+        }
+    };
+    Ok(key)
+}
+
+/// Load a private key from a PEM file.
+/// This should be an RSA private key suitable for signing (NOT just a noise key).
+/// File must begin with `-----BEGIN PUBLIC KEY-----`.
+///
+/// Retruns the public key
+#[allow(dead_code)]
+pub fn load_rsa_public_key(pem_file: &Path) -> Result<Rsa<Public>, CompilationError> {
+    let pdata = std::fs::read(pem_file).map_err(|e| {
+        CompilationError::FileError(format!(
+            "failed to read private key file {:?}: {}",
+            pem_file, e
+        ))
+    })?;
+    let key = match Rsa::public_key_from_pem(&pdata) {
+        Ok(k) => k,
+        Err(e) => {
+            return Err(CompilationError::FileError(format!(
+                "error constructing public key from PEM data {}: {}",
                 pem_file.display(),
                 e
             )));

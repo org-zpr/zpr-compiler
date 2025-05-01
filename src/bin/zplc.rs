@@ -1,41 +1,17 @@
-pub mod polio {
-    include!(concat!(env!("OUT_DIR"), "/polio.rs"));
-}
-
-mod allow;
-mod compilation;
-mod config;
-mod config_api;
-mod context;
-mod crypto;
-mod define;
-mod errors;
-mod fabric;
-mod fabric_util;
-mod lex;
-mod parser;
-mod policybuilder;
-mod protocols;
-mod ptypes;
-mod putil;
-mod weaver;
-mod zpl;
-mod zplstr;
-
 use clap::Parser;
 use colored::Colorize;
 use std::path::PathBuf;
 
-use compilation::Compilation;
-use crypto::load_rsa_private_key;
+use zplc::compilation::Compilation;
+use zplc::crypto::load_rsa_private_key;
 
-/// ZPL Policy Compiler
+/// zlpc: the ZPL Compiler
 ///
 /// Compile a ZPL policy (plus its configuration) into a binary format for the
 /// visa service.
 #[derive(Debug, Parser)]
 #[command(name = "zpc")]
-#[command(version = "1.0", verbatim_doc_comment)]
+#[command(version = "0.2.0", verbatim_doc_comment)] // hmm can get grab this from Cargo?
 struct Cli {
     /// Path to the ZPL file.
     #[arg(value_name = "ZPL_FILE")]
@@ -93,10 +69,9 @@ fn main() {
             Ok(k) => k,
             Err(e) => {
                 println!(
-                    "{}{} {}: {}",
+                    "{}{} failed to load private key: {}",
                     "error".red().bold(),
                     ":".bold(),
-                    "failed to load private key",
                     e
                 );
                 std::process::exit(1);

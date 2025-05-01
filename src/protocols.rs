@@ -19,9 +19,23 @@ impl fmt::Display for IanaProtocol {
     }
 }
 
-impl Into<u32> for IanaProtocol {
-    fn into(self) -> u32 {
-        self as u32
+impl From<IanaProtocol> for u32 {
+    fn from(value: IanaProtocol) -> Self {
+        value as u32
+    }
+}
+
+impl TryFrom<u32> for IanaProtocol {
+    type Error = &'static str;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(IanaProtocol::ICMP),
+            6 => Ok(IanaProtocol::TCP),
+            17 => Ok(IanaProtocol::UDP),
+            58 => Ok(IanaProtocol::ICMPv6),
+            _ => Err("Invalid IANA protocol number"),
+        }
     }
 }
 
@@ -85,7 +99,7 @@ impl Protocol {
             if let Some(ref port) = self.port {
                 s.push_str(port);
             } else {
-                s.push_str("0");
+                s.push('0');
             }
         }
         s

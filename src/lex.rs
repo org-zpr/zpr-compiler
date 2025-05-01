@@ -26,7 +26,7 @@ pub enum TokenType {
     Literal(String),
     Tuple((String, String)),
     Period,
-    EOS, // means "end of statement" but is never actually created
+    Eos, // means "end of statement" but is never actually created
 }
 
 #[allow(dead_code)]
@@ -234,7 +234,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                     current_word.push(c, quoting, line, col)?;
                 } else if current_word.is_comment_start() {
                     // consume the rest of the line
-                    while let Some(c) = chars.next() {
+                    for c in chars.by_ref() {
                         if c == '\n' {
                             break;
                         }
@@ -320,14 +320,12 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
             current_start.1,
         ));
     }
-    if current_word.len() > 0 {
-        if !current_word.is_sugar() {
-            tokens.push(Token::new_from_str(
-                &current_word.build(),
-                current_start.0,
-                current_start.1,
-            ));
-        }
+    if current_word.len() > 0 && !current_word.is_sugar() {
+        tokens.push(Token::new_from_str(
+            &current_word.build(),
+            current_start.0,
+            current_start.1,
+        ));
     }
 
     let tz = Tokenization { tokens };

@@ -80,6 +80,7 @@ pub fn weave(
     weaver.init_nodes(config)?;
     weaver.add_client_policies(&class_idx, policy, config)?;
     weaver.add_default_auth(config, ctx)?;
+    weaver.add_bootstrap_records(config, ctx)?;
 
     Ok(weaver.fabric)
 }
@@ -137,8 +138,7 @@ impl Weaver {
         };
 
         // The provider of the visa service is a hardcoded CN value.
-        let mut vs_attrs = Vec::new();
-        vs_attrs.push(Attribute::attr(zpl::ADAPTER_CN_ATTR, zpl::VISA_SERVICE_CN));
+        let vs_attrs = vec![Attribute::attr(zpl::ADAPTER_CN_ATTR, zpl::VISA_SERVICE_CN)];
         let fab_svc_id = self.fabric.add_service(
             zpl::VS_SERVICE_NAME,
             &vs_protocol,
@@ -206,7 +206,7 @@ impl Weaver {
             // maybe we don't even allow it to connect?
 
             let mut attrs = Vec::new();
-            let svc_class_attrs = attrs_for_class(&class_idx, &define.name);
+            let svc_class_attrs = attrs_for_class(class_idx, &define.name);
             attrs.extend_from_slice(&svc_class_attrs);
 
             self.add_service(class_idx, define, &attrs, svc_id, config)?;
@@ -316,7 +316,7 @@ impl Weaver {
 
             let mut attrs = Vec::new();
 
-            let svc_class_attrs = attrs_for_class(&class_idx, &ac.service.class);
+            let svc_class_attrs = attrs_for_class(class_idx, &ac.service.class);
             attrs.extend_from_slice(&svc_class_attrs);
             attrs.extend_from_slice(&ac.service.with);
 
@@ -377,14 +377,11 @@ impl Weaver {
                     } else {
                         a.name.clone()
                     };
-                    let ts_attrs: Vec<String>;
-                    if a.tag {
-                        ts_attrs =
-                            config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name));
+                    let ts_attrs = if a.tag {
+                        config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name))
                     } else {
-                        ts_attrs = config
-                            .must_get_keys(&format!("/trusted_services/{}/attributes", ts_name));
-                    }
+                        config.must_get_keys(&format!("/trusted_services/{}/attributes", ts_name))
+                    };
                     if ts_attrs.contains(&search_name) {
                         if matched {
                             return Err(CompilationError::ConfigError(format!(
@@ -481,7 +478,7 @@ impl Weaver {
             let mut attrs = Vec::new();
 
             // Grab all the endpint attributes
-            let ep_class_attrs = attrs_for_class(&class_idx, &ac.device.class);
+            let ep_class_attrs = attrs_for_class(class_idx, &ac.device.class);
             attrs.extend_from_slice(&ep_class_attrs);
             attrs.extend_from_slice(
                 &ac.device
@@ -493,7 +490,7 @@ impl Weaver {
             );
 
             // Grab all the user attributes
-            let user_class_attrs = attrs_for_class(&class_idx, &ac.user.class);
+            let user_class_attrs = attrs_for_class(class_idx, &ac.user.class);
             attrs.extend_from_slice(&user_class_attrs);
             attrs.extend_from_slice(
                 &ac.user
@@ -581,6 +578,44 @@ impl Weaver {
         self.fabric.default_auth_cert_asn = cert_data;
         Ok(())
     }
+
+    fn add_bootstrap_records(
+        &mut self,
+        config: &ConfigApi,
+        ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
+        let bootstrap_cns = match config.get("zpr/bootstrap") {
+            Some(ConfigItem::KeySet(cns)) => cns,
+            _ => Vec::new(),
+        };
+        for cnval in &bootstrap_cns {
+            match config.get(&format!("zpr/bootstrap/{cnval}")) {
+                Some(ConfigItem::BytesB64(b64data)) => match BASE64_STANDARD.decode(b64data) {
+                    Ok(cert_data) => {
+                        self.fabric
+                            .bootstrap_records
+                            .insert(cnval.clone(), cert_data.clone());
+                    }
+                    Err(e) => {
+                        return Err(CompilationError::ConfigError(format!(
+                            "error decoding certificate data: {}",
+                            e
+                        )));
+                    }
+                },
+                item @ Some(_) => {
+                    return Err(CompilationError::ConfigError(format!(
+                        "unexpected result from config: expected certificate data got {:?}",
+                        item
+                    )));
+                }
+                None => {
+                    ctx.warn(&format!("no certificate for bootstrap record {}", cnval))?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Returns first service starting with `class_name` and searching ancestors that is
@@ -602,10 +637,7 @@ fn find_defined_service(
         cur_svc_class = &cl.parent;
         matched_service = config.get(&format!("/services/{}", cur_svc_class));
     }
-    match matched_service {
-        Some(s) => Some(s.to_string()),
-        None => None,
-    }
+    matched_service.map(|s| s.to_string())
 }
 
 /// Get all the WITH attributes on the named class, including any attributes on
@@ -614,7 +646,7 @@ fn attrs_for_class(class_idx: &HashMap<String, &Class>, class_name: &str) -> Vec
     let mut attrs = Vec::new();
     let mut cl = class_idx
         .get(class_name)
-        .expect(&format!("class {} not found in class index", class_name));
+        .unwrap_or_else(|| panic!("class {} not found in class index", class_name));
 
     // If my parent name is not my name... grab all my attributes.
     while cl.parent != cl.name {
@@ -627,7 +659,7 @@ fn attrs_for_class(class_idx: &HashMap<String, &Class>, class_name: &str) -> Vec
         // Then move up to the parent class.
         cl = class_idx
             .get(&cl.parent)
-            .expect(format!("error parent class {} of {} not found", cl.parent, cl.name).as_str());
+            .unwrap_or_else(|| panic!("error parent class {} of {} not found", cl.parent, cl.name));
     }
     // WHEN parent name is my name, take my attributes
     for a in &cl.with_attrs {

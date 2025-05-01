@@ -5,6 +5,7 @@ use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
 
+use nix::NixPath;
 use ring::digest::Digest;
 use toml::Table;
 
@@ -36,6 +37,7 @@ pub struct Config {
     resolver: Resolver,
     pub nodes: HashMap<String, Node>,
     pub visa_service: VisaService,
+    pub bootstrap_cfg: Bootstrap,
     pub trusted_services: Vec<TrustedService>,
     pub protocols: HashMap<String, Protocol>,
     pub services: Vec<Service>,
@@ -100,6 +102,10 @@ pub struct VisaService {
     pub admin_attrs: Vec<(String, String)>,
 }
 
+pub struct Bootstrap {
+    pub bootstraps: HashMap<String, PathBuf>, // CN -> public-key-pem-file
+}
+
 /// Trusted Service table ("trusted_services")
 // TODO: Will these attribute descriptions need to be made more expressive so we can tell if they are optional, multi-valued, etc?
 // TODO: Ports? Protocols?
@@ -127,7 +133,7 @@ impl Config {
 
 /// Parse and do some (light) error checking on the ZPL TOML configuration.
 pub fn load_config(path: &Path, ctx: &CompilationCtx) -> Result<Config, CompilationError> {
-    let cstr = std::fs::read_to_string(path).map_err(|e| CompilationError::Io(e))?;
+    let cstr = std::fs::read_to_string(path).map_err(CompilationError::Io)?;
     parse_config(&cstr, ctx)
 }
 
@@ -139,11 +145,9 @@ pub fn parse_config(cstr: &str, ctx: &CompilationCtx) -> Result<Config, Compilat
 
 impl ConfigParse {
     fn new_from_toml_str(cstr: &str) -> Result<ConfigParse, CompilationError> {
-        let digest = sha256(&cstr);
+        let digest = sha256(cstr);
 
-        let ctoml = cstr
-            .parse::<Table>()
-            .map_err(|e| CompilationError::TomlError(e))?;
+        let ctoml = cstr.parse::<Table>().map_err(CompilationError::TomlError)?;
 
         Ok(ConfigParse { digest, ctoml })
     }
@@ -152,6 +156,7 @@ impl ConfigParse {
         let resolver = self.parse_resolver()?;
         let nodes = self.parse_nodes()?;
         let visa_service = self.parse_visa_service(ctx)?;
+        let bootstrap = self.parse_bootstrap(ctx)?;
         let trusted_services = self.parse_trusted_services(ctx)?;
         let protocols = self.parse_protocols(ctx)?;
         let services = self.parse_services(ctx)?;
@@ -161,6 +166,7 @@ impl ConfigParse {
             resolver,
             nodes,
             visa_service,
+            bootstrap_cfg: bootstrap,
             trusted_services,
             protocols,
             services,
@@ -220,7 +226,7 @@ impl ConfigParse {
 
         Ok(Resolver {
             order: order_vec,
-            hosts: hosts,
+            hosts,
         })
     }
 
@@ -277,6 +283,35 @@ impl ConfigParse {
             dock_node_id,
             admin_attrs,
         })
+    }
+
+    // Parse optional boostrap section. Each entry in the table is of the form: `<CN> = <KEYFILE>`.
+    fn parse_bootstrap(&mut self, _ctx: &CompilationCtx) -> Result<Bootstrap, CompilationError> {
+        let mut bootstraps = HashMap::new();
+
+        if !self.ctoml.contains_key("bootstrap") {
+            return Ok(Bootstrap {
+                bootstraps, // empty
+            });
+        }
+
+        let vs = self.ctoml["bootstrap"]
+            .as_table()
+            .ok_or(err_config!("error reading bootstrap section"))?;
+
+        // Each entry in our map is expected to be a CN name and a path to a PEM file.
+        for (cn, v) in vs {
+            let v = v
+                .as_str()
+                .ok_or(err_config!("bootstrap path for {} is not a string", cn))?;
+            let path = PathBuf::from(v);
+            if path.is_empty() {
+                return Err(err_config!("bootstrap path for {} is empty", cn));
+            }
+            // TODO: Need to fix path if not absolute.
+            bootstraps.insert(cn.to_string(), path);
+        }
+        Ok(Bootstrap { bootstraps })
     }
 
     /// Parse the trusted_services.<ID> tables.  Currently I am reserving the ID of "default" for the
@@ -445,13 +480,11 @@ fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, Compilation
     // We'll try to parse as a SocketAddr first (which requires an IP address, not a name)
     //let saddr: std::net::SocketAddr = netaddr.parse();
     match netaddr.parse::<std::net::SocketAddr>() {
-        Ok(saddr) => {
-            return Ok(Interface {
-                name: ifname.to_string(),
-                host: saddr.ip().to_string(),
-                port: saddr.port(),
-            })
-        }
+        Ok(saddr) => Ok(Interface {
+            name: ifname.to_string(),
+            host: saddr.ip().to_string(),
+            port: saddr.port(),
+        }),
         Err(_) => {
             // Did not parse as a SocketAddr, so try as "hostname:portnum"
             let parts: Vec<&str> = netaddr.split(':').collect();
@@ -468,11 +501,11 @@ fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, Compilation
                     parts[1]
                 )
             })?;
-            return Ok(Interface {
+            Ok(Interface {
                 name: ifname.to_string(),
                 host: parts[0].to_string(),
                 port: portnum,
-            });
+            })
         }
     }
 }
@@ -581,8 +614,8 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
 
     let mut returns = Vec::new();
     for ra in &returns_attrs {
-        if ra.starts_with("#") {
-            returns.push(Attribute::tag(&ra[1..]));
+        if let Some(stripped) = ra.strip_prefix("#") {
+            returns.push(Attribute::tag(stripped));
         } else {
             returns.push(Attribute::attr_name_only(ra));
         }
@@ -632,19 +665,17 @@ fn parse_protocol(prot_id: &str, prot: &Table) -> Result<Protocol, CompilationEr
         .ok_or(err_config!("protocol {} missing protocol", prot_id))?
         .to_string();
 
-    let protocol: IanaProtocol;
-
-    if protocol_name.starts_with("iana.") {
+    let protocol: IanaProtocol = if protocol_name.starts_with("iana.") {
         let iana_name = protocol_name.split(".").nth(1).ok_or(err_config!(
             "protocol {} invalid IANA protocol name: {}",
             prot_id,
             protocol_name
         ))?;
-        protocol = protocols::parse(iana_name).ok_or(err_config!(
+        protocols::parse(iana_name).ok_or(err_config!(
             "protocol {} unknown IANA protocol name: {}",
             prot_id,
             protocol_name
-        ))?;
+        ))?
     } else {
         // TODO: Not sure what it means to have non-iana protocol yet.
         return Err(err_config!(
@@ -652,7 +683,7 @@ fn parse_protocol(prot_id: &str, prot: &Table) -> Result<Protocol, CompilationEr
             prot_id,
             protocol_name
         ));
-    }
+    };
 
     if protocol.takes_port_arg() && !prot.contains_key("port") {
         return Err(err_config!("protocol {} missing port", prot_id));
@@ -1053,5 +1084,29 @@ mod test {
             }
         }
         assert_eq!(hits, 0x3); // or did not hit both services.
+    }
+
+    #[test]
+    fn test_parse_bootstrap() {
+        let tstr = r#"
+        [bootstrap]
+        "some.cn.here" = "keyfile.pem"
+        "another.cn.here" = "other.keyfile.pem"
+        "#;
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let vs = cparser.parse_bootstrap(&ctx);
+        assert!(vs.is_ok());
+        let bs = vs.unwrap();
+
+        assert_eq!(bs.bootstraps.len(), 2);
+        assert_eq!(
+            bs.bootstraps.get("some.cn.here").unwrap(),
+            &PathBuf::from("keyfile.pem")
+        );
+        assert_eq!(
+            bs.bootstraps.get("another.cn.here").unwrap(),
+            &PathBuf::from("other.keyfile.pem")
+        );
     }
 }
