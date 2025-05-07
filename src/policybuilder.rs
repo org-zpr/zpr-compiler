@@ -160,7 +160,7 @@ impl PolicyBuilder {
         ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         if fabric.default_auth_cert_asn.is_empty() {
-            ctx.warn("refusing to add empty default certificate to policy")?;
+            ctx.warn("trusted_services.default missing certificate")?;
             return Ok(());
         }
         let pcert = polio::Cert {
@@ -199,6 +199,11 @@ impl PolicyBuilder {
         // We convert each policy to its own CPolicy.
 
         for svc in &fabric.services {
+            if matches!(svc.service_type, ServiceType::Trusted(_)) {
+                // Trusted service fabric records are not really a service, so skip them here.
+                continue;
+            }
+
             let pscope = self.scope_for_service(svc)?;
             let mut pcount = 0;
 
@@ -226,6 +231,7 @@ impl PolicyBuilder {
     }
 
     /// Create a polio::Scope from a FabricService.protocol.
+    /// Only services with protocols should be passed here.
     fn scope_for_service(
         &self,
         svc: &FabricService,
@@ -238,7 +244,15 @@ impl PolicyBuilder {
 
         let parg: polio::scope::Protarg;
 
-        match &svc.protocol.icmp {
+        if svc.protocol.is_none() {
+            panic!(
+                "cannot call scope_for_service on a service with no protocol: {}",
+                svc.config_id
+            );
+        }
+        let svc_prot = svc.protocol.clone().unwrap();
+
+        match &svc_prot.get_icmp() {
             Some(icmp) => {
                 let picmp = match icmp {
                     IcmpFlowType::OneShot(codes) => {
@@ -259,7 +273,7 @@ impl PolicyBuilder {
                 parg = polio::scope::Protarg::Icmp(picmp);
             }
             None => {
-                match &svc.protocol.port {
+                match &svc_prot.get_port() {
                     Some(port_str) => {
                         let port_num: u16 = match port_str.parse() {
                             Ok(n) => n,
@@ -289,7 +303,7 @@ impl PolicyBuilder {
         }
 
         let scope = polio::Scope {
-            protocol: svc.protocol.protocol.into(),
+            protocol: svc_prot.get_layer4().into(),
             protarg: Some(parg),
         };
         scopes.push(scope);
@@ -319,8 +333,8 @@ impl PolicyBuilder {
                     };
                     let proc = self.create_service_proc(
                         &svc.fabric_id,
-                        svc.service_type,
-                        &svc.protocol.to_endpoint_str(),
+                        &svc.service_type,
+                        &svc.protocol.as_ref().unwrap().to_endpoint_str(),
                         flags,
                     );
                     self.policy.procs.push(proc);
@@ -331,7 +345,7 @@ impl PolicyBuilder {
                     };
                     self.add_connect(pconnect);
                 }
-                ServiceType::Trusted => {
+                ServiceType::Trusted(_) => {
                     return Err(CompilationError::ConfigError(
                         "trusted service not yet implemented".to_string(),
                     ))
@@ -350,7 +364,7 @@ impl PolicyBuilder {
             // So this registers as node service but uses a bogus endpoint.
             let proc = self.create_service_proc(
                 format!("/zpr/{}", &node.node_id).as_str(),
-                ServiceType::Regular,
+                &ServiceType::Regular,
                 "TCP/1",
                 Some(PFlags::node()),
             );
@@ -374,7 +388,7 @@ impl PolicyBuilder {
     fn create_service_proc(
         &self,
         svc_id: &str,
-        svc_type: ServiceType,
+        svc_type: &ServiceType,
         endpoint_str: &str,
         flags: Option<PFlags>,
     ) -> polio::Proc {
@@ -386,7 +400,7 @@ impl PolicyBuilder {
         args.push(polio::Argument {
             arg: Some(polio::argument::Arg::Strval(svc_id.to_string())),
         });
-        let svc_t = if svc_type == ServiceType::Trusted {
+        let svc_t = if matches!(svc_type, ServiceType::Trusted(_)) {
             polio::SvcT::SvctAuth
         } else {
             polio::SvcT::SvctDef

@@ -28,18 +28,21 @@ pub struct Fabric {
 pub struct FabricService {
     pub config_id: String, // Service name as specified in configuration and ZPL.
     pub fabric_id: String, // Service name assigned in the fabric
-    pub protocol: Protocol,
+    pub protocol: Option<Protocol>, // For an auth service this is the visa-service facing protocol.
     pub provider_attrs: Vec<Attribute>, // Set of provider attributes required to offer the service
     pub client_policies: Vec<ClientPolicy>, // List of consumer policies
     pub service_type: ServiceType,
+    pub certificate: Option<Vec<u8>>, // Certificate for this (trusted) service
+    pub prefix: Option<String>,       // Only used for trusted services
+    pub client_service_name: Option<String>, // For an AUTH service, the name of the optional client service.
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Default, Clone, PartialEq, Copy)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum ServiceType {
     #[default]
     Undefined,
-    Trusted,
+    Trusted(String), // Takes the API name
     Visa,
     Regular,
     BuiltIn, // eg, noode access to VS, or VS access to VSS
@@ -98,6 +101,18 @@ impl fmt::Display for Fabric {
         )?;
         for s in &self.services {
             writeln!(f, "  service: {}  (type={:?})", s.fabric_id, s.service_type)?;
+            match s.service_type {
+                ServiceType::Trusted(ref api) => {
+                    writeln!(f, "    API: {}", api)?;
+                    writeln!(f, "    prefix: {:?}", s.prefix)?;
+                    writeln!(f, "    client-service: {:?}", s.client_service_name)?;
+                }
+                _ => {}
+            }
+            match s.protocol {
+                Some(ref p) => writeln!(f, "    protocol: {:?}", p)?,
+                None => writeln!(f, "    protocol: (none)")?,
+            }
             writeln!(f, "    provider attrs:")?;
             for a in &s.provider_attrs {
                 writeln!(f, "      {}", a)?;
@@ -131,6 +146,47 @@ impl fmt::Display for Fabric {
 }
 
 impl Fabric {
+    /// You must add client services associated with the trusted service before adding a trusted service.
+    pub fn add_trusted_service(
+        &mut self,
+        id: &str,
+        protocol: &Protocol,
+        prefix: &str,
+        api: &str,
+        provider_attrs: &[Attribute],
+        certificate: Option<Vec<u8>>,
+        client_service_name: String,
+    ) -> Result<(), CompilationError> {
+        let mut matched = false;
+        for s in &self.services {
+            if s.config_id == id {
+                // Caller should prevent this.
+                panic!("trusted service {} already exists in the fabric", id);
+            }
+            if s.config_id == client_service_name {
+                matched = true;
+            }
+        }
+        if !matched {
+            return Err(CompilationError::ConfigError(format!(
+                "associated client service {client_service_name} for trusted service {id} not found in fabric",
+            )));
+        }
+        let fs = FabricService {
+            config_id: id.to_string(),
+            fabric_id: id.to_string(),
+            protocol: Some(protocol.clone()),
+            provider_attrs: provider_attrs.to_vec(),
+            client_policies: Vec::new(),
+            service_type: ServiceType::Trusted(api.to_string()),
+            certificate,
+            prefix: Some(prefix.to_string()),
+            client_service_name: Some(client_service_name),
+        };
+        self.services.push(fs);
+        Ok(())
+    }
+
     /// Add the service and the attributes that are required to provide it.
     /// There may be many services with the same `id`, but they must then have
     /// different attribute lists.
@@ -144,8 +200,12 @@ impl Fabric {
         stype: ServiceType,
     ) -> Result<String, CompilationError> {
         assert!(stype != ServiceType::Undefined); // programming error
-        if stype == ServiceType::BuiltIn {
-            panic!("not allowed to explicity add a BUILTIN service: {}", id);
+        match &stype {
+            ServiceType::BuiltIn => {
+                panic!("not allowed to explicity add a BUILTIN service: {}", id)
+            }
+            ServiceType::Trusted(_) => panic!("use add_trusted_service to add a TRUSTED service"),
+            _ => {}
         }
         if stype == ServiceType::Regular && id.starts_with("/zpr") {
             return Err(CompilationError::ConfigError(format!(
@@ -177,10 +237,13 @@ impl Fabric {
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: fabric_id.clone(),
-            protocol: protocol.clone(),
+            protocol: Some(protocol.clone()),
             provider_attrs: attrs.to_vec(),
             client_policies: Vec::new(),
             service_type: stype,
+            certificate: None,
+            prefix: None,
+            client_service_name: None,
         };
         self.services.push(fs);
         Ok(fabric_id)
@@ -216,10 +279,13 @@ impl Fabric {
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: fabric_id.clone(),
-            protocol: protocol.clone(),
+            protocol: Some(protocol.clone()),
             provider_attrs: attrs.to_vec(),
             client_policies: Vec::new(),
             service_type: ServiceType::BuiltIn,
+            certificate: None,
+            prefix: None,
+            client_service_name: None,
         };
         self.services.push(fs);
         Ok(fabric_id)
@@ -299,11 +365,10 @@ impl Fabric {
             )));
         }
 
-        let vss_prot = Protocol {
-            protocol: IanaProtocol::TCP,
-            port: Some(format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT)),
-            icmp: None,
-        };
+        let vss_prot = Protocol::new_l4_with_port(
+            IanaProtocol::TCP,
+            format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT),
+        );
         let vss_id = self.add_builtin_service(&svc_name, &vss_prot, &provider_attrs)?;
         self.add_condition_to_service(&vss_id, &vs_provider_attrs, false)?;
         Ok(())

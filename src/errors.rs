@@ -78,4 +78,7 @@ pub enum CompilationError {
 
     #[error("warning: {0}")]
     Warning(String),
+
+    #[error("protocol error: {0}")]
+    ProtocolError(#[from] crate::protocols::ProtocolError),
 }

@@ -37,3 +37,9 @@ pub const VISA_SERVICE_ADMIN_PORT: u16 = 8182; // TCP
 
 // Only known config setting (see policy.proto)
 pub const CONFIG_KEY_MAX_VISA_LIFETIME: u32 = 1; // value is time in seconds
+
+// client (eg, adapter) facing
+pub const ZPR_OAUTH_RSA_PORT_DEFAULT: u16 = 4000;
+
+// visa service facing
+pub const ZPR_VALIDATION2_PORT_DEFAULT: u16 = 3999;

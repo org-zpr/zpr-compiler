@@ -138,76 +138,39 @@ impl fmt::Display for ConfigItem {
 
 impl From<ConfigItem> for Protocol {
     fn from(item: ConfigItem) -> Self {
-        match item {
-            ConfigItem::Protocol(_name, prot, port_t) => {
-                let mut p = Protocol {
-                    protocol: prot,
-                    port: None,
-                    icmp: None,
-                };
-                match port_t {
-                    PortArgT::Port(pnum) => {
-                        p.port = Some(pnum.to_string());
-                    }
-                    PortArgT::PortRange(low, hi) => {
-                        p.port = Some(format!("{}-{}", low, hi));
-                    }
-                    PortArgT::PortList(plist) => {
-                        p.port = Some(
-                            plist
-                                .iter()
-                                .map(|n| n.to_string())
-                                .collect::<Vec<String>>()
-                                .join(","),
-                        );
-                    }
-                    PortArgT::ICMPOneShot(codes) => {
-                        p.icmp = Some(IcmpFlowType::OneShot(codes));
-                    }
-                    PortArgT::ICMPReqRep(req, resp) => {
-                        p.icmp = Some(IcmpFlowType::RequestResponse(req, resp));
-                    }
-                }
-                p
-            }
-            _ => panic!("ConfigItem is not a protocol"),
-        }
+        return Protocol::from(&item);
     }
 }
 
 impl From<&ConfigItem> for Protocol {
     fn from(item: &ConfigItem) -> Self {
         match item {
-            ConfigItem::Protocol(_name, prot, port_t) => {
-                let mut p = Protocol {
-                    protocol: *prot,
-                    port: None,
-                    icmp: None,
-                };
-                match port_t {
-                    PortArgT::Port(pnum) => {
-                        p.port = Some(pnum.to_string());
-                    }
-                    PortArgT::PortRange(low, hi) => {
-                        p.port = Some(format!("{}-{}", low, hi));
-                    }
-                    PortArgT::PortList(plist) => {
-                        p.port = Some(
+            ConfigItem::Protocol(name, prot, port_t) => {
+                let (port_arg, icmp_arg) = match port_t {
+                    PortArgT::Port(pnum) => (Some(pnum.to_string()), None),
+                    PortArgT::PortRange(low, hi) => (Some(format!("{}-{}", low, hi)), None),
+                    PortArgT::PortList(plist) => (
+                        Some(
                             plist
                                 .iter()
                                 .map(|n| n.to_string())
                                 .collect::<Vec<String>>()
                                 .join(","),
-                        );
-                    }
+                        ),
+                        None,
+                    ),
                     PortArgT::ICMPOneShot(codes) => {
-                        p.icmp = Some(IcmpFlowType::OneShot(codes.clone()));
+                        (None, Some(IcmpFlowType::OneShot(codes.clone())))
                     }
                     PortArgT::ICMPReqRep(req, resp) => {
-                        p.icmp = Some(IcmpFlowType::RequestResponse(*req, *resp));
+                        (None, Some(IcmpFlowType::RequestResponse(*req, *resp)))
                     }
+                };
+                if port_arg.is_some() {
+                    Protocol::new_l7_with_port(name, *prot, port_arg).unwrap() // todo -- use TryFrom instead?
+                } else {
+                    Protocol::new_l7_with_icmp(name, *prot, icmp_arg).unwrap()
                 }
-                p
             }
             _ => panic!("ConfigItem is not a protocol"),
         }
@@ -262,6 +225,8 @@ impl ConfigApi {
     // - /trusted_services -> returns list of IDs of the trusted services (KeySet)
     // - /trusted_services/<foo> -> returns (type ?)
     // - /trusted_services/<foo>/api -> the api value
+    // - /trusted_services/<foo>/vs_service -> the visa service "service" name
+    // - /trusted_services/<foo>/client_service -> the client service "service" name
     // - /trusted_services/<foo>/certificate -> returns certificate (if any)
     // - /trusted_services/<foo>/provider -> k/v tuples
     // - /trusted_services/<foo>/attributes -> list of attribute names (probably also need type)
@@ -437,15 +402,27 @@ impl ConfigApi {
             }
             "protocol" => {
                 let Some(prot) = self.config.protocols.get(&svc.protocol_id) else {
+                    // TODO: For now the protocol must be in the protocols list. But there is no reason why
+                    // a user can't just put the protocol into the service definition.
                     panic!(
                         "protocol {} for service {} not found",
                         svc.protocol_id, svc.id
                     );
                 };
-                match prot.protocol {
+                let mut prot = prot.clone();
+                if let Some(details) = svc.protocol_override.as_ref() {
+                    // ignore name and allow overridding of ports or ICMP.
+                    if details.has_port() {
+                        prot.set_port(details.get_port().unwrap());
+                    }
+                    if details.is_icmp() {
+                        prot.set_icmp(details.get_icmp().unwrap());
+                    }
+                }
+                match prot.get_layer4() {
                     IanaProtocol::TCP | IanaProtocol::UDP => {
                         // TODO: The config should parse out the port. For now we only accept single port number.
-                        let Some(pstr) = prot.port.as_ref() else {
+                        let Some(pstr) = prot.get_port() else {
                             panic!(
                                 "port not set for service {}, protocol {}",
                                 svc.id, svc.protocol_id
@@ -457,12 +434,12 @@ impl ConfigApi {
                         });
                         Some(ConfigItem::Protocol(
                             svc.id.clone(),
-                            prot.protocol,
+                            prot.get_layer4(),
                             PortArgT::Port(portnum),
                         ))
                     }
                     IanaProtocol::ICMP | IanaProtocol::ICMPv6 => {
-                        let Some(flowtype) = prot.icmp.as_ref() else {
+                        let Some(flowtype) = prot.get_icmp() else {
                             panic!(
                                 "flowtype not set for service {}, protocol {}",
                                 svc.id, svc.protocol_id
@@ -471,12 +448,12 @@ impl ConfigApi {
                         match flowtype {
                             IcmpFlowType::RequestResponse(req, rep) => Some(ConfigItem::Protocol(
                                 svc.id.clone(),
-                                prot.protocol,
+                                prot.get_layer4(),
                                 PortArgT::ICMPReqRep(*req, *rep),
                             )),
                             IcmpFlowType::OneShot(codes) => Some(ConfigItem::Protocol(
                                 svc.id.clone(),
-                                prot.protocol,
+                                prot.get_layer4(),
                                 PortArgT::ICMPOneShot(codes.clone()),
                             )),
                         }
@@ -524,7 +501,18 @@ impl ConfigApi {
                 Some(ConfigItem::BytesB64(BASE64_STANDARD.encode(&cert_data)))
             }
             "prefix" => Some(ConfigItem::StrVal(svc.prefix.clone())),
-            "provider" => panic!("trusted_service.Provider not yet implemented"),
+            "vs_service" => match svc.service {
+                Some(ref vs) => Some(ConfigItem::StrVal(vs.clone())),
+                None => None,
+            },
+            "client_service" => match svc.client {
+                Some(ref cs) => Some(ConfigItem::StrVal(cs.clone())),
+                None => None,
+            },
+            "provider" => match &svc.provider {
+                Some(provider) => Some(ConfigItem::AttrList(provider.clone())),
+                None => None,
+            },
             // TODO: Just like when parsing config, we need a notation to express the attribute properties.
             // Eg, multi-value or tag, required or optional.
             // For now we assume all attributes are tuple-type.
