@@ -892,13 +892,13 @@ mod test {
         zpr_address = "fd5a:5052:90de::1"
         interfaces = [ "in1" ]
         in1.netaddr = "127.0.0.1:5000"
-        provider = [["foo", "fee"]]
+        provider = [["zpr.adapter.cn", "fee"]]
 
         [visa_service]
         dock_node = "n0"
 
         [protocols.fee]
-        protocol = "iana.TCP"
+        l4protocol = "iana.TCP"
         port = 80
 
         [services.foo]
@@ -906,7 +906,7 @@ mod test {
         provider = [["cn", "fee"]]
 
         [services.bar]
-        protocol = "boo"
+        protocol = "fee"
         "#;
 
         let mut class_idx = HashMap::new();

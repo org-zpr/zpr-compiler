@@ -297,7 +297,7 @@ mod test {
     zpr_address = "fd5a:5052:90de::1"
     interfaces = [ "in1" ]
     in1.netaddr = "127.0.0.1:5000"
-    provider = [["foo", "fee"]]
+    provider = [["zpr.adapter.cn", "fee"]]
 
     [visa_service]
     dock_node = "n0"
@@ -306,7 +306,7 @@ mod test {
     cert_path = ""
 
     [protocols.http]
-    protocol = "iana.TCP"
+    l4protocol = "iana.TCP"
     port = 80
 
     [services.Webby]
@@ -379,7 +379,7 @@ mod test {
         zpr_address = "fd5a:5052:90de::1"
         interfaces = [ "in1" ]
         in1.netaddr = "127.0.0.1:5000"
-        provider = [["foo", "fee"]]
+        provider = [["zpr.adapter.cn", "fee"]]
 
         [visa_service]
         dock_node = "n0"
@@ -388,7 +388,7 @@ mod test {
         cert_path = ""
 
         [protocols.http]
-        protocol = "iana.TCP"
+        l4protocol = "iana.TCP"
         port = 80
 
         [services.Webby]

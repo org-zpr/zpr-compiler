@@ -41,7 +41,10 @@ pub const ZPR_L7_BUILTINS: [&str; 2] = [ZPR_OAUTH_RSA, ZPR_VALIDATION_2];
 
 /// Protocol is an attempt to encompass the ZPL notion of a protocol.
 /// It always must include a layer 3 protocol (eg TCP, UDP, ICMP).
-/// It may also include a layer 7 protocol name.
+/// It may also include a layer 7 protocol name.  Protocols from the
+/// configuation always have a label (if we don't have an explicit
+/// label the convention is to just use the layer7 name if we have it,
+/// or the layer4 name if we don't).
 #[derive(Debug, Clone)]
 pub struct Protocol {
     label: String,

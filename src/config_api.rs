@@ -672,7 +672,7 @@ mod test {
         dock_node = "n0"
 
         [protocols.bar]
-        protocol = "iana.TCP"
+        l4protocol = "iana.TCP"
         port = 21
 
         [services.foo]
@@ -758,7 +758,7 @@ mod test {
         "bleep.zpr" = "/path/to/fee.pem"
 
         [protocols.bar]
-        protocol = "iana.TCP"
+        l4protocol = "iana.TCP"
         port = 21
 
         [services.foo]
