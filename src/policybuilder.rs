@@ -139,7 +139,6 @@ impl PolicyBuilder {
         self.set_default_auth(fabric, ctx)?;
         self.set_bootstrap(fabric, ctx)?;
 
-
         if self.verbose {
             println!("  {} connect rules", self.policy.connects.len());
             println!("  {} trusted services", self.policy.services.len());
@@ -347,7 +346,7 @@ impl PolicyBuilder {
                         &svc.fabric_id,
                         &svc.service_type,
                         &svc.protocol.as_ref().unwrap().to_endpoint_str(),
-                        None
+                        None,
                     );
                     self.policy.procs.push(proc);
                     let proc_idx = self.policy.procs.len() as u32 - 1;
@@ -397,7 +396,6 @@ impl PolicyBuilder {
         }
         Ok(())
     }
-
 
     /// Create a PROC for the policy binary to register a service and optionally set flags.
     /// `endpoint_str` is comma separated list of endpoint values.

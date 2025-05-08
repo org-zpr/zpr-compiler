@@ -675,11 +675,12 @@ impl Weaver {
             //
             // Issuing warning here so I don't forget.
             {
-                let ts_id_attrs = config.must_get_keys(&format!("/trusted_services/{ts_name}/id_attributes"));
+                let ts_id_attrs =
+                    config.must_get_keys(&format!("/trusted_services/{ts_name}/id_attributes"));
                 ctx.warn(&format!(
-                        "TODO add identity attrs for <{}> to policy: {:?}",
-                        ts_name, ts_id_attrs
-                    ))?;
+                    "TODO add identity attrs for <{}> to policy: {:?}",
+                    ts_name, ts_id_attrs
+                ))?;
             }
 
             // We copy the visa service facing service protocol onto the fabric trusted-service record.
@@ -727,7 +728,10 @@ impl Weaver {
                         ServiceType::Regular,
                     )?;
                     if &fname != svc_name {
-                        panic!("fabric altered name of auth client svc {} becomes {}", svc_name, fname);
+                        panic!(
+                            "fabric altered name of auth client svc {} becomes {}",
+                            svc_name, fname
+                        );
                     }
                 }
             }
@@ -754,7 +758,8 @@ impl Weaver {
 
             // The visa service can access the trusted service over its vs interface.
             let vs_access_attrs = vec![Attribute::attr(zpl::KATTR_CN, zpl::VISA_SERVICE_CN)];
-            self.fabric.add_condition_to_service(ts_name, &vs_access_attrs, true)?;
+            self.fabric
+                .add_condition_to_service(ts_name, &vs_access_attrs, true)?;
         }
         Ok(())
     }

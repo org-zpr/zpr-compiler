@@ -144,16 +144,12 @@ fn main() {
             println!("             id: {}", cp.id.yellow());
             println!("          scope: {}", scopes_to_string(&cp.scope).yellow());
             for cond in &cp.conditions {
-                println!(
-                    "     cond {}:",
-                    format!("{}", cond.id).yellow()
-                );
+                println!("     cond {}:", format!("{}", cond.id).yellow());
                 for aexp in &cond.attr_exprs {
                     println!(
                         "         {} {}",
                         format!("{}", "󰞘").dimmed(),
-                        attr_exp_to_string(aexp, &pol.attr_key_index, &pol.attr_val_index)
-                            .yellow()
+                        attr_exp_to_string(aexp, &pol.attr_key_index, &pol.attr_val_index).yellow()
                     );
                 }
             }
