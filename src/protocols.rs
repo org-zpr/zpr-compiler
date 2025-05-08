@@ -248,6 +248,10 @@ impl Protocol {
         self.layer7.as_ref()
     }
 
+    pub fn set_layer7(&mut self, layer7: &str) {
+        self.layer7 = Some(layer7.to_string());
+    }
+
     pub fn get_layer4(&self) -> IanaProtocol {
         self.layer4
     }

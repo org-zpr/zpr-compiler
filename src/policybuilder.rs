@@ -199,10 +199,12 @@ impl PolicyBuilder {
         // We convert each policy to its own CPolicy.
 
         for svc in &fabric.services {
+            /*
             if matches!(svc.service_type, ServiceType::Trusted(_)) {
                 // Trusted service fabric records are not really a service, so skip them here.
                 continue;
             }
+            */
 
             let pscope = self.scope_for_service(svc)?;
             let mut pcount = 0;
@@ -345,10 +347,21 @@ impl PolicyBuilder {
                     };
                     self.add_connect(pconnect);
                 }
+
                 ServiceType::Trusted(_) => {
-                    return Err(CompilationError::ConfigError(
-                        "trusted service not yet implemented".to_string(),
-                    ))
+                    let proc = self.create_service_proc(
+                        &svc.fabric_id,
+                        &svc.service_type,
+                        &svc.protocol.as_ref().unwrap().to_endpoint_str(),
+                        None
+                    );
+                    self.policy.procs.push(proc);
+                    let proc_idx = self.policy.procs.len() as u32 - 1;
+                    let pconnect = polio::Connect {
+                        attr_exprs: self.attr_list_to_attrexpr(&svc.provider_attrs),
+                        proc: proc_idx,
+                    };
+                    self.add_connect(pconnect);
                 }
                 ServiceType::Undefined => {
                     panic!("undefined service type in fabric{}", svc.config_id);

@@ -11,7 +11,7 @@ use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
 use crate::fabric::{Fabric, ServiceType};
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
-use crate::protocols::{IanaProtocol, Protocol};
+use crate::protocols::{IanaProtocol, Protocol, ZPR_VALIDATION_2};
 use crate::ptypes::{Attribute, Class, ClassFlavor, FPos, Policy};
 use crate::zpl;
 
@@ -675,9 +675,18 @@ impl Weaver {
             //
             // TODO: Need to alter the policy.proto so we can put the identity attributes in there.
             //
-            // let ts_id_attrs = config.must_get_keys(&format!("/trusted_services/{ts_name}/id_attributes"));
+            // Issuing warning here so I don't forget.
+            {
+                let ts_id_attrs = config.must_get_keys(&format!("/trusted_services/{ts_name}/id_attributes"));
+                ctx.warn(&format!(
+                        "TODO add identity attrs for <{}> to policy: {:?}",
+                        ts_name, ts_id_attrs
+                    ))?;
+            }
 
             // We copy the visa service facing service protocol onto the fabric trusted-service record.
+            // TODO: We have lost the layer7 info here due to limitations in config_api, but we use the
+            // api value in the trusted-service record to determine that.
             let mut vs_svc_protocol: Option<Protocol> = None;
 
             for svc_name in vec![&client_svc, &vs_svc] {
@@ -700,21 +709,20 @@ impl Weaver {
                     }
                 };
                 if svc_name == &vs_svc {
-                    vs_svc_protocol = Some(prot.clone());
+                    println!("XXX setting ZPR_VALIDATION_2 as l7 for {svc_name}");
+                    let mut vsp = prot.clone();
+                    if ts_api == zpl::TS_API_V2 {
+                        vsp.set_layer7(ZPR_VALIDATION_2);
+                    } else {
+                        return Err(CompilationError::ConfigError(format!(
+                            "trusted service {} has unknown API version {}",
+                            ts_name, ts_api
+                        )));
+                    }
+                    vs_svc_protocol = Some(vsp);
                 }
-                let fs_name = self.fabric.add_service(
-                    &svc_name,
-                    &prot,
-                    &ts_provider_attrs,
-                    ServiceType::Regular,
-                )?;
-                // Not sure that the trusted service ancillary services can have multiple instances in the fabric.
-                if &fs_name != svc_name {
-                    panic!(
-                        "error - trusted service {} has multiple instances in fabric",
-                        svc_name
-                    );
-                }
+                // We do not need to add the visa-service facing service to the fabric, we just
+                // use it to gather additional data for the trusted service.
             }
 
             if vs_svc_protocol.is_none() {
@@ -723,7 +731,6 @@ impl Weaver {
                     ts_name
                 )));
             }
-
             self.fabric
                 .add_trusted_service(
                     ts_name,
@@ -737,6 +744,10 @@ impl Weaver {
                 .map_err(|e| {
                     CompilationError::ConfigError(format!("error adding trusted service: {}", e))
                 })?;
+
+            // The visa service can access the trusted service over its vs interface.
+            let vs_access_attrs = vec![Attribute::attr(zpl::KATTR_CN, zpl::VISA_SERVICE_CN)];
+            self.fabric.add_condition_to_service(ts_name, &vs_access_attrs, true)?;
         }
         Ok(())
     }

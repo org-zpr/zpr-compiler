@@ -8,7 +8,10 @@ pub const DEF_CLASS_DEVICE_NAME: &str = "device";
 pub const DEF_CLASS_DEVICE_AKA: &str = "devices";
 
 pub const DEFAULT_TRUSTED_SERVICE_ID: &str = "default";
-pub const DEFAULT_TRUSTED_SERVICE_API: &str = "validation/1";
+pub const DEFAULT_TRUSTED_SERVICE_API: &str = TS_API_V1;
+
+pub const TS_API_V1: &str = "validation/1";
+pub const TS_API_V2: &str = "validation/2";
 
 pub const ICMP_INTERACION_REQUEST_RESPONSE: &str = "request-response";
 pub const ICMP_INTERACTION_ONESHOT: &str = "oneshot";
@@ -18,12 +21,13 @@ pub const ZPR_ADDR_ATTR: &str = "zpr.addr";
 
 pub const DEFAULT_TS_PREFIX: &str = "zpr.adapter";
 pub const DEFAULT_ATTR: &str = "cn";
-pub const ADAPTER_CN_ATTR: &str = "zpr.adapter.cn";
+pub const ADAPTER_CN_ATTR: &str = KATTR_CN;
 
 // TODO: What is up with this odd name? Why not '/zpr/visaservice'?
 pub const VS_SERVICE_NAME: &str = "/zpr/$$zpr/visaservice";
 
 pub const KATTR_ROLE: &str = "zpr.role";
+pub const KATTR_CN: &str = "zpr.adapter.cn";
 
 // For nodes to talk to VS
 pub const VISA_SERVICE_PORT: u16 = 5002; // TCP
