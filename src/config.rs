@@ -181,10 +181,6 @@ impl ConfigParse {
         let trusted_services = self.parse_trusted_services(ctx)?;
         let mut protocols = self.parse_protocols(ctx)?;
         self.add_default_protocols(&mut protocols);
-
-        println!("XXXXXX PROTOCOLS:");
-        println!("{:?}\n\n", protocols);
-
         let services = self.parse_services(ctx, &protocols)?;
 
         Ok(Config {
@@ -1116,7 +1112,7 @@ mod test {
         // and with api succeeds
         let tstr = r#"
         [trusted_services.other]
-        api = "validation/1"
+        api = "validation/2"
         cert_path = "foo.pem"
         prefix = "bar.hop"
         returns_attributes = ["a", "c"]
@@ -1134,7 +1130,7 @@ mod test {
         assert_eq!(services.len(), 1);
         let ts = services.get(0).unwrap();
         assert_eq!(ts.id, "other");
-        assert_eq!(ts.api, "validation/1");
+        assert_eq!(ts.api, "validation/2");
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
         assert_eq!(ts.prefix, "bar.hop");
         assert_eq!(ts.returns_attrs.len(), 2);
@@ -1155,7 +1151,7 @@ mod test {
     fn test_parse_trusted_service_prefix_not_required() {
         let tstr = r#"
         [trusted_services.other]
-        api = "validation/1"
+        api = "validation/2"
         cert_path = "foo.pem"
         returns_attributes = ["a", "c"]
         identity_attributes = ["c"]
@@ -1172,7 +1168,7 @@ mod test {
         assert_eq!(services.len(), 1);
         let ts = services.get(0).unwrap();
         assert_eq!(ts.id, "other");
-        assert_eq!(ts.api, "validation/1");
+        assert_eq!(ts.api, "validation/2");
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
         assert_eq!(ts.prefix, "other");
         assert_eq!(ts.returns_attrs.len(), 2);

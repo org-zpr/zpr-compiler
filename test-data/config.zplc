@@ -15,7 +15,7 @@ cert_path = ""
 
 [trusted_services.foo]
 prefix = "foo" # maybe prefix should default to <service-name> ?
-api = "validation/1"
+api = "validation/2"
 returns_attributes = [ "clearance", "#government", "service", "mach-type", "svc-id", "#cleared", "machine-id", "#managed", "government", "external-network-connection"]
 provider = [["zpr.adapter.cn", "foo"]]
 

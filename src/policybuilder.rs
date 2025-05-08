@@ -114,8 +114,8 @@ impl PolicyBuilder {
     ///   - The attribute keys and values lookup tables.
     ///   - The set of communication policies which set which agents can access which services.
     ///   - The links which are empty for now as only a single node is supported (TODO).
-    ///   - The services which is only used for AUTH services. TODO: empty for now.
-    ///   - The certificates used for trusted services (TODO) and for the default/internal auth service.
+    ///   - The services which is only used for AUTH services.
+    ///   - The certificates used for trusted services and for the default/internal auth service.
     ///
     /// This does most of the work in building the policy.
     pub fn with_fabric(
@@ -138,6 +138,7 @@ impl PolicyBuilder {
         self.set_policies(fabric)?;
         self.set_default_auth(fabric, ctx)?;
         self.set_bootstrap(fabric, ctx)?;
+
 
         if self.verbose {
             println!("  {} connect rules", self.policy.connects.len());
@@ -164,7 +165,7 @@ impl PolicyBuilder {
             return Ok(());
         }
         let pcert = polio::Cert {
-            id: 1,
+            id: (self.policy.certificates.len() + 1) as u32,
             asn1data: fabric.default_auth_cert_asn.clone(),
             name: zpl::DEFAULT_TS_PREFIX.to_string(),
         };
@@ -199,13 +200,6 @@ impl PolicyBuilder {
         // We convert each policy to its own CPolicy.
 
         for svc in &fabric.services {
-            /*
-            if matches!(svc.service_type, ServiceType::Trusted(_)) {
-                // Trusted service fabric records are not really a service, so skip them here.
-                continue;
-            }
-            */
-
             let pscope = self.scope_for_service(svc)?;
             let mut pcount = 0;
 
@@ -362,6 +356,14 @@ impl PolicyBuilder {
                         proc: proc_idx,
                     };
                     self.add_connect(pconnect);
+                    if let Some(cert_data) = &svc.certificate {
+                        let pcert = polio::Cert {
+                            id: self.policy.certificates.len() as u32 + 1,
+                            asn1data: cert_data.clone(),
+                            name: svc.fabric_id.clone(),
+                        };
+                        self.policy.certificates.push(pcert);
+                    };
                 }
                 ServiceType::Undefined => {
                     panic!("undefined service type in fabric{}", svc.config_id);
@@ -395,6 +397,7 @@ impl PolicyBuilder {
         }
         Ok(())
     }
+
 
     /// Create a PROC for the policy binary to register a service and optionally set flags.
     /// `endpoint_str` is comma separated list of endpoint values.

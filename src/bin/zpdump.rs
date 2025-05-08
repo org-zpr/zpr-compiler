@@ -150,7 +150,8 @@ fn main() {
                 );
                 for aexp in &cond.attr_exprs {
                     println!(
-                        "        󰞘 {}",
+                        "         {} {}",
+                        format!("{}", "󰞘").dimmed(),
                         attr_exp_to_string(aexp, &pol.attr_key_index, &pol.attr_val_index)
                             .yellow()
                     );

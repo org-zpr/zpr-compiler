@@ -324,9 +324,7 @@ impl Weaver {
         Ok(())
     }
 
-    // Every attribute needs to come from a trusted service. Since right now (TODO) the
-    // only service is the default one, the only attribute we accept is "cn" or the full
-    // expansion of that "zpr.adapter.cn".
+    // Every attribute needs to come from a trusted service.
     //
     // As a side effect, this updates our local set of in-use trusted services.
     //
@@ -709,7 +707,6 @@ impl Weaver {
                     }
                 };
                 if svc_name == &vs_svc {
-                    println!("XXX setting ZPR_VALIDATION_2 as l7 for {svc_name}");
                     let mut vsp = prot.clone();
                     if ts_api == zpl::TS_API_V2 {
                         vsp.set_layer7(ZPR_VALIDATION_2);
@@ -720,9 +717,19 @@ impl Weaver {
                         )));
                     }
                     vs_svc_protocol = Some(vsp);
+                } else {
+                    // We do not need to add the visa-service facing service to the fabric, we just
+                    // use it to gather additional data for the trusted service.
+                    let fname = self.fabric.add_service(
+                        &svc_name,
+                        &prot,
+                        &ts_provider_attrs,
+                        ServiceType::Regular,
+                    )?;
+                    if &fname != svc_name {
+                        panic!("fabric altered name of auth client svc {} becomes {}", svc_name, fname);
+                    }
                 }
-                // We do not need to add the visa-service facing service to the fabric, we just
-                // use it to gather additional data for the trusted service.
             }
 
             if vs_svc_protocol.is_none() {
