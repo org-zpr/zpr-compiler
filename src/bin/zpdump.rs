@@ -143,6 +143,19 @@ fn main() {
             println!("     service_id: {}", cp.service_id.yellow());
             println!("             id: {}", cp.id.yellow());
             println!("          scope: {}", scopes_to_string(&cp.scope).yellow());
+            for cond in &cp.conditions {
+                println!(
+                    "     cond {}:",
+                    format!("{}", cond.id).yellow()
+                );
+                for aexp in &cond.attr_exprs {
+                    println!(
+                        "        󰞘 {}",
+                        attr_exp_to_string(aexp, &pol.attr_key_index, &pol.attr_val_index)
+                            .yellow()
+                    );
+                }
+            }
         }
     }
 
