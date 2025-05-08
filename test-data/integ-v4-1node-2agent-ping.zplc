@@ -22,7 +22,7 @@ dock_node = "node"
 admin_attrs = [ ["zpr.adapter.cn", "client.zpr.org"] ]
 
 [protocols.ping]
-protocol = "iana.ICMP4"
+l4protocol = "iana.ICMP4"
 icmp_type = "request-response"
 icmp_codes = [ 0, 8 ]
 

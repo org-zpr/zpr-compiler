@@ -7,13 +7,12 @@ use std::path::PathBuf;
 
 use nix::NixPath;
 use ring::digest::Digest;
-use toml::map::Map;
 use toml::Table;
 
 use crate::context::CompilationCtx;
 use crate::crypto::sha256;
 use crate::errors::CompilationError;
-use crate::protocols::{self, IanaProtocol, IcmpFlowType, Protocol, ZPR_L7_BUILTINS};
+use crate::protocols::{IanaProtocol, IcmpFlowType, Protocol, ZPR_L7_BUILTINS};
 use crate::ptypes::Attribute;
 use crate::zpl;
 
@@ -55,8 +54,25 @@ struct ConfigParse {
 pub struct Service {
     pub id: String,
     pub protocol_id: String, // Known protocol.  TODO: Could consider using a list here
+    pub protocol_refinement: Option<ProtocolRefinement>, // optional protocol refinement
     pub provider: Option<Vec<(String, String)>>, // optional provider attributes
-    pub protocol_override: Option<Protocol>,
+}
+
+#[derive(Debug)]
+pub struct ProtocolRefinement {
+    pub port: Option<String>,       // override protocol port
+    pub icmp: Option<IcmpFlowType>, // override protocol icmp (needed??)
+}
+
+impl ProtocolRefinement {
+    pub fn apply(&self, protocol: &mut Protocol) {
+        if let Some(refine) = &self.port {
+            protocol.set_port(refine);
+        }
+        if let Some(refine) = &self.icmp {
+            protocol.set_icmp(refine);
+        }
+    }
 }
 
 /// Resolver table.
@@ -167,7 +183,7 @@ impl ConfigParse {
         self.add_default_protocols(&mut protocols);
 
         println!("XXXXXX PROTOCOLS:");
-        println!("{:?}", protocols);
+        println!("{:?}\n\n", protocols);
 
         let services = self.parse_services(ctx, &protocols)?;
 
@@ -187,8 +203,8 @@ impl ConfigParse {
     fn add_default_protocols(&self, protocols: &mut HashMap<String, Protocol>) {
         for pname in ZPR_L7_BUILTINS {
             protocols.insert(
-                format!("zpr.{pname}"),
-                Protocol::new_zpr(pname, None).unwrap(),
+                pname.to_string(),
+                Protocol::new_zpr(pname, pname, None).unwrap(),
             );
         }
     }
@@ -721,17 +737,47 @@ fn parse_string_array(ts: &Table, key: &str, ctx: &str) -> Result<Vec<String>, C
 }
 
 /// Parse an individual protocol table.
-fn parse_protocol(prot_id: &str, prot: &Table) -> Result<Protocol, CompilationError> {
-    let protocol_name = prot["protocol"]
+/// Allow fields are:
+/// - l4protocol (iana protocol name)
+/// - 7lprotocol (app layer protocol name eg, HTTP or a ZPR protocol name)
+/// - port (optional)
+/// - icmp_type
+/// - icmp_codes
+fn parse_protocol(prot_label: &str, prot: &Table) -> Result<Protocol, CompilationError> {
+    if !prot.contains_key("l4protocol") {
+        return Err(err_config!(
+            "protocol {} missing key 'l4protocol'",
+            prot_label
+        ));
+    }
+    let protocol_name = prot["l4protocol"]
         .as_str()
-        .ok_or(err_config!("protocol {} missing protocol", prot_id))?
+        .ok_or(err_config!("protocol {} missing protocol", prot_label))?
         .to_string();
-
     let is_icmp = prot.contains_key("icmp_type") || prot.contains_key("icmp_codes");
-    let (port, icmp) = parse_port_and_or_icmp(prot_id, is_icmp, prot)?;
-    let protocol_parsed = Protocol::parse(&protocol_name, port, icmp)?;
-
-    Ok(protocol_parsed)
+    let (port, icmp) = parse_port_and_or_icmp(prot_label, is_icmp, prot)?;
+    let l7protocol = if prot.contains_key("l7protocol") {
+        Some(
+            prot["l7protocol"]
+                .as_str()
+                .ok_or(err_config!(
+                    "protocol {} l7protocol is not a string",
+                    prot_label
+                ))?
+                .to_string(),
+        )
+    } else {
+        None
+    };
+    if let Some(l4) = IanaProtocol::parse(&protocol_name) {
+        Ok(Protocol::new(prot_label, l4, port, icmp, l7protocol))
+    } else {
+        Err(err_config!(
+            "protocol {}: invalid l4 protocol name: {}",
+            prot_label,
+            protocol_name
+        ))
+    }
 }
 
 fn parse_port_and_or_icmp(
@@ -773,6 +819,9 @@ fn parse_port_and_or_icmp(
 }
 
 /// Parse the very bare bones individual service table.
+///
+/// A service must reference a defined protocol using the `protocol` key, it can also
+/// additionally override a port or icmp setting in a defined protocol.
 fn parse_service(
     sid: &str,
     s: &Table,
@@ -781,7 +830,7 @@ fn parse_service(
     if !s.contains_key("protocol") {
         return Err(err_config!("service {} missing protocol", sid));
     }
-    let protocol_id = s["protocol"]
+    let protocol_label = s["protocol"]
         .as_str()
         .ok_or(err_config!("service {} missing protocol", sid))?
         .to_string();
@@ -790,38 +839,50 @@ fn parse_service(
     } else {
         None
     };
+
+    let Some(matched_protocol) = protocols.get(&protocol_label) else {
+        return Err(err_config!(
+            "service {} references unknown protocol {}",
+            sid,
+            protocol_label
+        ));
+    };
+
     // The service could contain overrides for protocol.
     let looks_like_icmp = s.contains_key("icmp_type") || s.contains_key("icmp_codes");
     let (port, icmp) = parse_port_and_or_icmp(sid, looks_like_icmp, s)?;
-
-    // In a service the protocol name is either an iana protocol name or a zpr protocol name
-    // OR a protocol name defined in the config.
-
-    let opt_protocol = if let Some(matched_protocol) = protocols.get(&protocol_id) {
+    let opt_refine =
         // Is in our table.  Did this clause specify any sort of override?
         if port.is_some() || icmp.is_some() {
-            // We have an override.
-            let mut adjusted_protocol = matched_protocol.clone();
-            if port.is_some() {
-                adjusted_protocol.set_port(port.as_ref().unwrap());
-            } else {
-                adjusted_protocol.set_icmp(icmp.as_ref().unwrap());
+            if port.is_some() && matched_protocol.is_icmp() {
+                return Err(err_config!(
+                    "service {}: cannot override port for ICMP protocol: {}",
+                    sid,
+                    protocol_label
+                ));
             }
-            Some(adjusted_protocol)
+            if icmp.is_some() && !matched_protocol.is_icmp() {
+                return Err(err_config!(
+                    "service {}: cannot override icmp for non-ICMP protocol: {}",
+                    sid,
+                    protocol_label
+                ));
+            }
+            let refinement = ProtocolRefinement {
+                port,
+                icmp,
+            };
+            Some(refinement)
         } else {
             // No override, just use the protocol as is.
             None
-        }
-    } else {
-        // Not in our table.
-        Some(Protocol::parse(&protocol_id, port, icmp)?)
-    };
+        };
 
     Ok(Service {
         id: sid.to_string(),
-        protocol_id,
+        protocol_id: protocol_label,
+        protocol_refinement: opt_refine,
         provider,
-        protocol_override: opt_protocol,
     })
 }
 
@@ -1177,11 +1238,11 @@ mod test {
     fn test_parse_protocols() {
         let tstr = r#"
         [protocols.http]
-        protocol = "iana.Tcp"
+        l4protocol = "iana.Tcp"
         port = "80"
 
         [protocols.ping]
-        protocol = "iana.ICMP6"
+        l4protocol = "iana.ICMP6"
         icmp_type = "request-response"
         icmp_codes = [128, 129]
         "#;
@@ -1220,8 +1281,19 @@ mod test {
         "#;
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
-        let protocols = HashMap::new();
+        let mut protocols = HashMap::new();
+        protocols.insert(
+            String::from("ping"),
+            Protocol::new("ping", IanaProtocol::ICMPv6, None, None, None),
+        );
+        protocols.insert(
+            String::from("pong"),
+            Protocol::new("pong", IanaProtocol::ICMPv6, None, None, None),
+        );
         let services = cparser.parse_services(&ctx, &protocols);
+        if services.is_err() {
+            panic!("parse_services failed: {:?}", services);
+        }
         assert!(services.is_ok());
         let services = services.unwrap();
         assert_eq!(services.len(), 2);
@@ -1251,21 +1323,25 @@ mod test {
     fn test_parse_services_with_ports() {
         let tstr = r#"
         [services.MyService]
-        protocol = "zpr.oauthrsa"
+        protocol = "zpr-oauthrsa"
         port = "3000"
         "#;
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
-        let protocols = HashMap::new();
+        let mut protocols = HashMap::new();
+        cparser.add_default_protocols(&mut protocols);
         let services = cparser.parse_services(&ctx, &protocols);
+        if services.is_err() {
+            panic!("parse_services failed: {:?}", services);
+        }
         assert!(services.is_ok());
         let services = services.unwrap();
         assert_eq!(services.len(), 1);
         let parsed = services.get(0).unwrap();
         assert_eq!(parsed.id, "MyService");
-        assert!(parsed.protocol_override.is_some());
-        let ov = parsed.protocol_override.as_ref().unwrap();
-        assert_eq!(ov.get_port(), Some(&String::from("3000")));
+        assert!(parsed.protocol_refinement.is_some());
+        let pr = parsed.protocol_refinement.as_ref().unwrap();
+        assert_eq!(pr.port, Some("3000".to_string()));
     }
 
     #[test]

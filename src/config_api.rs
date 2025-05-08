@@ -145,6 +145,7 @@ impl From<ConfigItem> for Protocol {
 impl From<&ConfigItem> for Protocol {
     fn from(item: &ConfigItem) -> Self {
         match item {
+            // TODO: ConfigItem is missing the layer7 value
             ConfigItem::Protocol(name, prot, port_t) => {
                 let (port_arg, icmp_arg) = match port_t {
                     PortArgT::Port(pnum) => (Some(pnum.to_string()), None),
@@ -167,9 +168,9 @@ impl From<&ConfigItem> for Protocol {
                     }
                 };
                 if port_arg.is_some() {
-                    Protocol::new_l7_with_port(name, *prot, port_arg).unwrap() // todo -- use TryFrom instead?
+                    Protocol::new_l4_with_port(name, *prot, port_arg.unwrap()) // todo -- use TryFrom instead?
                 } else {
-                    Protocol::new_l7_with_icmp(name, *prot, icmp_arg).unwrap()
+                    Protocol::new_l4_with_icmp(name, *prot, icmp_arg.unwrap())
                 }
             }
             _ => panic!("ConfigItem is not a protocol"),
@@ -410,14 +411,8 @@ impl ConfigApi {
                     );
                 };
                 let mut prot = prot.clone();
-                if let Some(details) = svc.protocol_override.as_ref() {
-                    // ignore name and allow overridding of ports or ICMP.
-                    if details.has_port() {
-                        prot.set_port(details.get_port().unwrap());
-                    }
-                    if details.is_icmp() {
-                        prot.set_icmp(details.get_icmp().unwrap());
-                    }
+                if let Some(refinement) = svc.protocol_refinement.as_ref() {
+                    refinement.apply(&mut prot);
                 }
                 match prot.get_layer4() {
                     IanaProtocol::TCP | IanaProtocol::UDP => {

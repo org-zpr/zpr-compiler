@@ -364,8 +364,8 @@ impl Fabric {
                 &svc_name
             )));
         }
-
         let vss_prot = Protocol::new_l4_with_port(
+            "zpr-vss",
             IanaProtocol::TCP,
             format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT),
         );

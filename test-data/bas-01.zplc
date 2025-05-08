@@ -26,8 +26,13 @@ provider = [[ "zpr.adapter.cn", "bas.zpr.org" ]]
 "bas.zpr.org" = "rsa-pub-key.pem"
 
 
+# There are pre-defiend "protocols":
+# zpr-validation2
+# zpr-authrsa
+
 [protocols.http]
-protocol = "iana.TCP"
+l4protocol = "iana.TCP"
+l7protocol = "http"
 port = 80
 
 [services.server]
@@ -40,11 +45,11 @@ protocol = "http"
 protocol = "http"
 
 [services.bas-vs]
-protocol = "zpr.validation2"
+protocol = "zpr-validation2"
 port = 3999
 
 [services.bas-client]
-protocol = "zpr.oauthrsa"
+protocol = "zpr-oauthrsa"
 port = 4444
 
 

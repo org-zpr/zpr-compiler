@@ -125,8 +125,11 @@ impl Weaver {
         config: &ConfigApi,
         ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
-        let vs_protocol =
-            Protocol::new_l4_with_port(IanaProtocol::TCP, zpl::VISA_SERVICE_PORT.to_string());
+        let vs_protocol = Protocol::new_l4_with_port(
+            "zpr-vs",
+            IanaProtocol::TCP,
+            zpl::VISA_SERVICE_PORT.to_string(),
+        );
 
         // The provider of the visa service is a hardcoded CN value.
         let vs_attrs = vec![Attribute::attr(zpl::ADAPTER_CN_ATTR, zpl::VISA_SERVICE_CN)];
@@ -144,8 +147,11 @@ impl Weaver {
             .add_condition_to_service(&fab_svc_id, &vs_access_attrs, true)?;
 
         // Now add a service for the admin HTTPS API.
-        let admin_api_protocol =
-            Protocol::new_l4_with_port(IanaProtocol::TCP, zpl::VISA_SERVICE_ADMIN_PORT.to_string());
+        let admin_api_protocol = Protocol::new_l4_with_port(
+            "zpr-vsadmin",
+            IanaProtocol::TCP,
+            zpl::VISA_SERVICE_ADMIN_PORT.to_string(),
+        );
 
         // This AMIN service is provided by the visa service too.
         let fab_admin_svc_id = self.fabric.add_builtin_service(
