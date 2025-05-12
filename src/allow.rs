@@ -5,7 +5,7 @@ use std::iter::Peekable;
 
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{AllowClause, Attribute, Class, ClassFlavor, Clause};
+use crate::ptypes::{AllowClause, AttrDomain, Attribute, Class, ClassFlavor, Clause};
 use crate::putil;
 use crate::zpl;
 
@@ -194,7 +194,18 @@ pub fn parse_allow(
     // The remaining tokens should start with "access ..." which we pass to the service class parser.
     parse_allow_service_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
 
-    let ac = parse_state.to_allow_clause(statement_id);
+    let mut ac = parse_state.to_allow_clause(statement_id);
+
+    for attr in &mut ac.device.with {
+        attr.set_domain(AttrDomain::Device);
+    }
+    for attr in &mut ac.user.with {
+        attr.set_domain(AttrDomain::User);
+    }
+    for attr in &mut ac.service.with {
+        attr.set_domain(AttrDomain::Service);
+    }
+
     validate_clause(&ac, classes_map)?;
     Ok(ac)
 }
@@ -211,6 +222,7 @@ fn validate_clause(
             ac.user.class_tok.col,
         ));
     }
+    // TODO: Check that attributes are in correct domains for each clause.
     Ok(())
 }
 
@@ -382,7 +394,7 @@ impl PState {
                 }
                 TokenType::Tuple((name, value)) => {
                     // This is an attribute.
-                    let attr = Attribute::attr(name, value);
+                    let attr = Attribute::attr_domain_opt(name, value);
                     self.attrs.push(attr);
                     tokens.next();
                 }
@@ -402,7 +414,7 @@ impl PState {
                         let tok = tokens.next().unwrap();
                         self.class_name_token = Some(tok.clone());
                     } else {
-                        self.attrs.push(Attribute::tag(s));
+                        self.attrs.push(Attribute::tag_domain_opt(s));
                         tokens.next();
                     }
                 }

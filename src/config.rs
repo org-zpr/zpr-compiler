@@ -665,8 +665,16 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
             ));
         }
         prefix = zpl::DEFAULT_TS_PREFIX.to_string();
-        returns_attrs = vec![zpl::DEFAULT_ATTR.to_string()];
-        identity_attrs = vec![zpl::DEFAULT_ATTR.to_string()];
+        returns_attrs = vec![format!(
+            "{}.{}",
+            zpl::DEFAULT_TS_PREFIX,
+            zpl::DEFAULT_ATTR.to_string()
+        )];
+        identity_attrs = vec![format!(
+            "{}.{}",
+            zpl::DEFAULT_TS_PREFIX,
+            zpl::DEFAULT_ATTR.to_string()
+        )];
         client_svc = None;
         service_svc = None;
     }
@@ -677,9 +685,9 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
     let mut returns = Vec::new();
     for ra in &returns_attrs {
         if let Some(stripped) = ra.strip_prefix("#") {
-            returns.push(Attribute::tag(stripped));
+            returns.push(Attribute::tag(stripped)?);
         } else {
-            returns.push(Attribute::attr_name_only(ra));
+            returns.push(Attribute::attr_name_only(ra)?);
         }
     }
 
@@ -688,7 +696,7 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
         if ra.starts_with("#") {
             return Err(err_config!("identity attribute cannot be a tag: '{}'", ra));
         }
-        idents.push(Attribute::attr_name_only(ra));
+        idents.push(Attribute::attr_name_only(ra)?);
     }
 
     let provider = if ts.contains_key("provider") {
@@ -1079,7 +1087,11 @@ mod test {
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
         let services = cparser.parse_trusted_services(&ctx);
-        assert!(services.is_ok());
+        assert!(
+            services.is_ok(),
+            "parse failed: {:?}",
+            services.unwrap_err()
+        );
         let services = services.unwrap();
         assert_eq!(services.len(), 1);
         let ts = services.get(0).unwrap();
@@ -1088,9 +1100,9 @@ mod test {
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
         assert_eq!(ts.prefix, zpl::DEFAULT_TS_PREFIX);
         assert_eq!(ts.returns_attrs.len(), 1);
-        assert!(ts.returns_attrs[0].zpl_key() == "cn");
+        assert_eq!(ts.returns_attrs[0].zpl_key(), "device.zpr.adapter.cn");
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert!(ts.identity_attrs[0].zpl_key() == "cn");
+        assert_eq!(ts.identity_attrs[0].zpl_key(), "device.zpr.adapter.cn");
     }
 
     #[test]
@@ -1115,8 +1127,8 @@ mod test {
         api = "validation/2"
         cert_path = "foo.pem"
         prefix = "bar.hop"
-        returns_attributes = ["a", "c"]
-        identity_attributes = ["c"]
+        returns_attributes = ["user.a", "user.c"]
+        identity_attributes = ["user.c"]
         provider = [["foo", "bar"]]
         "#;
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
@@ -1140,11 +1152,11 @@ mod test {
                 .iter()
                 .map(|a| a.zpl_key())
                 .collect::<Vec<String>>();
-            assert!(attr_names.contains(&"a".to_string()));
-            assert!(attr_names.contains(&"c".to_string()));
+            assert!(attr_names.contains(&"user.a".to_string()));
+            assert!(attr_names.contains(&"user.c".to_string()));
         }
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert!(ts.identity_attrs[0].zpl_key() == "c");
+        assert!(ts.identity_attrs[0].zpl_key() == "user.c");
     }
 
     #[test]
@@ -1153,8 +1165,8 @@ mod test {
         [trusted_services.other]
         api = "validation/2"
         cert_path = "foo.pem"
-        returns_attributes = ["a", "c"]
-        identity_attributes = ["c"]
+        returns_attributes = ["user.a", "user.c"]
+        identity_attributes = ["user.c"]
         provider = [["foo", "bar"]]
         "#;
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
@@ -1178,11 +1190,11 @@ mod test {
                 .iter()
                 .map(|a| a.zpl_key())
                 .collect::<Vec<String>>();
-            assert!(attr_names.contains(&"a".to_string()));
-            assert!(attr_names.contains(&"c".to_string()));
+            assert!(attr_names.contains(&"user.a".to_string()));
+            assert!(attr_names.contains(&"user.c".to_string()));
         }
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert!(ts.identity_attrs[0].zpl_key() == "c");
+        assert!(ts.identity_attrs[0].zpl_key() == "user.c");
         assert_eq!(ts.client, Some("other-client".to_string()));
         assert_eq!(ts.service, Some("other-vs".to_string()));
     }
@@ -1193,8 +1205,8 @@ mod test {
         [trusted_services.bas]
         api = "validation/2"
         cert_path = "foo.crt"
-        returns_attributes = ["a", "c"]
-        identity_attributes = ["c"]
+        returns_attributes = ["user.a", "user.c"]
+        identity_attributes = ["user.c"]
         provider = [["foo", "bar"]]
         client = "bas-client-interface"
         service = "bas-vs-interface"
@@ -1221,11 +1233,11 @@ mod test {
                 .iter()
                 .map(|a| a.zpl_key())
                 .collect::<Vec<String>>();
-            assert!(attr_names.contains(&"a".to_string()));
-            assert!(attr_names.contains(&"c".to_string()));
+            assert!(attr_names.contains(&"user.a".to_string()));
+            assert!(attr_names.contains(&"user.c".to_string()));
         }
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert!(ts.identity_attrs[0].zpl_key() == "c");
+        assert!(ts.identity_attrs[0].zpl_key() == "user.c");
         assert_eq!(ts.client, Some("bas-client-interface".to_string()));
         assert_eq!(ts.service, Some("bas-vs-interface".to_string()));
     }

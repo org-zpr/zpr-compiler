@@ -19,7 +19,7 @@ pub const ICMP_INTERACTION_ONESHOT: &str = "oneshot";
 pub const VISA_SERVICE_CN: &str = "vs.zpr";
 pub const ZPR_ADDR_ATTR: &str = "zpr.addr";
 
-pub const DEFAULT_TS_PREFIX: &str = "zpr.adapter";
+pub const DEFAULT_TS_PREFIX: &str = "device.zpr.adapter";
 pub const DEFAULT_ATTR: &str = "cn";
 pub const ADAPTER_CN_ATTR: &str = KATTR_CN;
 
@@ -27,7 +27,11 @@ pub const ADAPTER_CN_ATTR: &str = KATTR_CN;
 pub const VS_SERVICE_NAME: &str = "/zpr/$$zpr/visaservice";
 
 pub const KATTR_ROLE: &str = "zpr.role";
-pub const KATTR_CN: &str = "zpr.adapter.cn";
+pub const KATTR_CN: &str = "device.zpr.adapter.cn";
+
+pub const ATTR_DOMAIN_SERVICE: &str = "service";
+pub const ATTR_DOMAIN_USER: &str = "user";
+pub const ATTR_DOMAIN_DEVICE: &str = "device";
 
 // For nodes to talk to VS
 pub const VISA_SERVICE_PORT: u16 = 5002; // TCP

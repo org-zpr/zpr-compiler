@@ -12,7 +12,7 @@ use crate::ptypes::FPos;
 pub fn vec_to_attributes(v: &[(String, String)]) -> Result<Vec<Attribute>, CompilationError> {
     let mut attrs = Vec::new();
     for (k, v) in v {
-        attrs.push(Attribute::attr(k, v));
+        attrs.push(Attribute::attr(k, v)?);
     }
     Ok(attrs)
 }
@@ -25,25 +25,25 @@ pub fn squash_attributes(
 ) -> Result<HashMap<String, Attribute>, CompilationError> {
     let mut attr_map: HashMap<String, Attribute> = HashMap::new();
     for a in attrs {
-        if attr_map.contains_key(&a.name) {
+        if attr_map.contains_key(&a.zpl_key()) {
             // Map already has this attribute in it. If the map one has a value
             // and this one doesn't, keep the map one. If they both have values and they are different
             // that is an error.
 
-            let map_attr = attr_map.get(&a.name).unwrap();
+            let map_attr = attr_map.get(&a.zpl_key()).unwrap();
             if map_attr.value.is_none() && a.value.is_some() {
-                attr_map.insert(a.name.clone(), a.clone()); // overwrite old non-valued attribute
+                attr_map.insert(a.zpl_key(), a.clone()); // overwrite old non-valued attribute
             } else if map_attr.value.is_some() && a.value.is_none() {
                 // do nothing
             } else if map_attr.value.is_some() && a.value.is_some() && map_attr.value != a.value {
                 return Err(CompilationError::AttributeValueConflict(
-                    a.name.clone(),
+                    a.zpl_key(),
                     tok.line,
                     tok.col,
                 ));
             }
         } else {
-            attr_map.insert(a.name.clone(), a.clone());
+            attr_map.insert(a.zpl_key(), a.clone());
         }
     }
     Ok(attr_map)

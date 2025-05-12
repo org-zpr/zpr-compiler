@@ -515,18 +515,18 @@ impl ConfigApi {
                 svc.returns_attrs
                     .iter()
                     .filter(|a| !a.tag)
-                    .map(|a| a.name.clone())
+                    .map(|a| a.zpl_key())
                     .collect(),
             )),
             "tags" => Some(ConfigItem::KeySet(
                 svc.returns_attrs
                     .iter()
                     .filter(|a| a.tag)
-                    .map(|a| a.name.clone())
+                    .map(|a| a.zpl_key())
                     .collect(),
             )),
             "id_attributes" => Some(ConfigItem::KeySet(
-                svc.identity_attrs.iter().map(|a| a.name.clone()).collect(),
+                svc.identity_attrs.iter().map(|a| a.zpl_key()).collect(),
             )),
             _ => panic!("unknown key {}", key),
         }

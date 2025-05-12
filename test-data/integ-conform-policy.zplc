@@ -11,7 +11,7 @@ order = ["hosts", "dns"]
 
 [nodes."node.zpr.org"]
 key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
-provider = [ ["zpr.adapter.cn", "node.zpr.org"] ]
+provider = [ ["device.zpr.adapter.cn", "node.zpr.org"] ]
 zpr_address = "n0.zpr"
 interfaces = ["in1"]
 in1.netaddr = "n0.overlay:5000"
@@ -21,7 +21,7 @@ cert_path = "ca-cert.pem"
 
 [visa_service]
 dock_node = "node.zpr.org"
-admin_attrs = [ ["zpr.adapter.cn", "client.zpr.org"] ]
+admin_attrs = [ ["device.zpr.adapter.cn", "client.zpr.org"] ]
 
 [protocols.http]
 l4protocol = "iana.TCP"

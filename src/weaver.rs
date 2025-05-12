@@ -132,7 +132,10 @@ impl Weaver {
         );
 
         // The provider of the visa service is a hardcoded CN value.
-        let vs_attrs = vec![Attribute::attr(zpl::ADAPTER_CN_ATTR, zpl::VISA_SERVICE_CN)];
+        let vs_attrs = vec![Attribute::attr_or_panic(
+            zpl::ADAPTER_CN_ATTR,
+            zpl::VISA_SERVICE_CN,
+        )];
         let fab_svc_id = self.fabric.add_service(
             zpl::VS_SERVICE_NAME,
             &vs_protocol,
@@ -142,7 +145,7 @@ impl Weaver {
 
         // Visa service has policy that allows nodes to access it.  We use a node role attribute so
         // we don't care about individual node names.
-        let vs_access_attrs = vec![Attribute::attr(zpl::KATTR_ROLE, "node")];
+        let vs_access_attrs = vec![Attribute::zpr_internal_attr(zpl::KATTR_ROLE, "node")];
         self.fabric
             .add_condition_to_service(&fab_svc_id, &vs_access_attrs, true)?;
 
@@ -203,7 +206,6 @@ impl Weaver {
             let mut attrs = Vec::new();
             let svc_class_attrs = attrs_for_class(class_idx, &define.name);
             attrs.extend_from_slice(&svc_class_attrs);
-
             self.add_service(class_idx, define, &attrs, svc_id, config)?;
             svc_id -= 1;
         }
@@ -269,7 +271,6 @@ impl Weaver {
         };
 
         let attr_map = squash_attributes(&attrs, &sclass.pos)?;
-
         let resolved_attrs = self.resolve_attributes(
             attr_map
                 .into_values()
@@ -314,7 +315,6 @@ impl Weaver {
             let svc_class_attrs = attrs_for_class(class_idx, &ac.service.class);
             attrs.extend_from_slice(&svc_class_attrs);
             attrs.extend_from_slice(&ac.service.with);
-
             let svc_class = class_idx
                 .get(&ac.service.class)
                 .expect("service class not found in class index");
@@ -340,22 +340,22 @@ impl Weaver {
 
         let mut resolved_attrs = Vec::new();
         for a in attrs {
-            if a.name == zpl::ADAPTER_CN_ATTR {
+            let attr_name = a.zpl_key();
+            if attr_name == zpl::ADAPTER_CN_ATTR {
                 if a.tag {
                     return Err(CompilationError::ConfigError(format!(
                         "{} attribute used as a tag, but is a tuple attriubte",
-                        a.name
+                        attr_name
                     )));
                 }
                 resolved_attrs.push(a.clone());
                 self.used_trusted_services
                     .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
-            }
-            if a.name == zpl::DEFAULT_ATTR {
+            } else if attr_name == zpl::DEFAULT_ATTR {
                 if a.tag {
                     return Err(CompilationError::ConfigError(format!(
                         "{} attribute used as a tag, but is a tuple attribute",
-                        a.name
+                        attr_name
                     )));
                 }
                 resolved_attrs.push(a.set_name(zpl::ADAPTER_CN_ATTR));
@@ -366,16 +366,19 @@ impl Weaver {
                 // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
                 let mut matched = false;
                 for ts_name in &trusted_service_names {
+                    // TODO: We need to rethink the prefix stuff. PREFIX should not be part of the
+                    //       attribute name.
                     let ts_prefix = config
                         .must_get(&format!("/trusted_services/{}/prefix", ts_name))
                         .to_string();
-                    let already_prefixed = a.name.starts_with(&format!("{ts_prefix}."));
-
-                    let search_name = if already_prefixed {
-                        a.name[ts_prefix.len() + 1..].to_string()
-                    } else {
-                        a.name.clone()
-                    };
+                    println!("TODO: ignoring ts prefix {}", ts_prefix);
+                    //let already_prefixed = attr_name.starts_with(&format!("{ts_prefix}."));
+                    //let search_name = if already_prefixed {
+                    //    attr_name[ts_prefix.len() + 1..].to_string()
+                    //} else {
+                    //    attr_name.clone()
+                    //};
+                    let search_name = attr_name.clone();
                     let ts_attrs = if a.tag {
                         config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name))
                     } else {
@@ -385,27 +388,27 @@ impl Weaver {
                         if matched {
                             return Err(CompilationError::ConfigError(format!(
                                 "attribute {} found in multiple trusted services",
-                                a.name
+                                attr_name
                             )));
                         }
-                        let mut new_attr = a.clone();
-                        new_attr.name = format!("{ts_prefix}.{search_name}");
+                        let new_attr = a.clone();
+                        //new_attr.name = format!("{ts_prefix}.{search_name}");
                         resolved_attrs.push(new_attr);
                         self.used_trusted_services.insert(ts_name.clone());
                         matched = true;
                     }
 
-                    if already_prefixed && !matched {
-                        return Err(CompilationError::ConfigError(format!(
-                            "attribute {} not found in trusted service {}",
-                            a.name, ts_name
-                        )));
-                    }
+                    //if already_prefixed && !matched {
+                    //    return Err(CompilationError::ConfigError(format!(
+                    //        "attribute {} not found in trusted service {}",
+                    //        attr_name, ts_name
+                    //    )));
+                    //}
                 }
                 if !matched {
                     return Err(CompilationError::ConfigError(format!(
                         "attribute {} not found in any trusted service",
-                        a.name
+                        attr_name
                     )));
                 }
             }
@@ -505,7 +508,6 @@ impl Weaver {
             // Now we consolidate the attributes into a map, preferring attributes that have a value.
             let fp = FPos::from(&ac.device.class_tok);
             let attr_map = squash_attributes(&attrs, &fp)?;
-
             let required_attrs = self
                 .resolve_attributes(&attr_map.into_values().collect::<Vec<Attribute>>(), config)?;
 
@@ -757,7 +759,10 @@ impl Weaver {
                 })?;
 
             // The visa service can access the trusted service over its vs interface.
-            let vs_access_attrs = vec![Attribute::attr(zpl::KATTR_CN, zpl::VISA_SERVICE_CN)];
+            let vs_access_attrs = vec![Attribute::attr_or_panic(
+                zpl::KATTR_CN,
+                zpl::VISA_SERVICE_CN,
+            )];
             self.fabric
                 .add_condition_to_service(ts_name, &vs_access_attrs, true)?;
         }
@@ -915,7 +920,7 @@ mod test {
         zpr_address = "fd5a:5052:90de::1"
         interfaces = [ "in1" ]
         in1.netaddr = "127.0.0.1:5000"
-        provider = [["zpr.adapter.cn", "fee"]]
+        provider = [["device.zpr.adapter.cn", "fee"]]
 
         [visa_service]
         dock_node = "n0"
@@ -926,7 +931,7 @@ mod test {
 
         [services.foo]
         protocol = "fee"
-        provider = [["cn", "fee"]]
+        provider = [["device.zpr.adapter.cn", "fee"]]
 
         [services.bar]
         protocol = "fee"

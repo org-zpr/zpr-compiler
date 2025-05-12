@@ -338,7 +338,10 @@ impl Fabric {
                 )))
             }
         };
-        node_attrs.push(Attribute::attr(zpl::ZPR_ADDR_ATTR, &naddr.to_string()));
+        node_attrs.push(Attribute::zpr_internal_attr(
+            zpl::ZPR_ADDR_ATTR,
+            &naddr.to_string(),
+        ));
 
         // Note that we do not have line/col info from the config file.
         let attr_map = squash_attributes(&node_attrs, &FPos::default())?;

@@ -10,7 +10,7 @@ order = ["hosts", "dns"]
 
 [nodes."node.zpr.org"]
 key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
-provider = [ ["zpr.adapter.cn", "node.zpr.org"]]
+provider = [ ["device.zpr.adapter.cn", "node.zpr.org"]]
 zpr_address = "node0.zpr"
 interfaces = ["in1"]
 in1.netaddr = "node0.overlay:5000"
@@ -20,7 +20,7 @@ cert_path = "ca-cert.pem"
 
 [visa_service] # Only one visa service support at the moment.
 dock_node = "node.zpr.org"
-admin_attrs = [ [ "zpr.adapter.cn", "client.zpr.org" ] ]
+admin_attrs = [ [ "device.zpr.adapter.cn", "client.zpr.org" ] ]
 
 [protocols.ping]
 l4protocol = "iana.ICMP6"
