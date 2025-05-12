@@ -1,6 +1,7 @@
 # The ZPR ZPL Compiler Changelog
 
-## [x.x.x] MK WIP
+## [0.3.0] - 2025-05-12
+
 - `trusted_service` block requires provider (not for default).
 - Additions to `trusted_service` to support new authentication services.
 - In the `protocol` block, the `protocol` key has been renamed to `l4protocol`.
@@ -20,5 +21,6 @@ repository.
 
 
 
+[0.3.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.3.0
 [0.1.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.1.0
 

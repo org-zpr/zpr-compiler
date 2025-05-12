@@ -21,7 +21,7 @@ use zplc::zpl;
 /// Prints contents of a binary policy file to stdout.
 #[derive(Debug, Parser)]
 #[command(name = "zpdump")]
-#[command(version = "0.2.0", verbatim_doc_comment)]
+#[command(version, verbatim_doc_comment)]
 struct Cli {
     /// Path to the ZPL file.
     #[arg(value_name = "ZPL_FILE")]
