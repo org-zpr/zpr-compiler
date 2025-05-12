@@ -133,7 +133,7 @@ impl Weaver {
 
         // The provider of the visa service is a hardcoded CN value.
         let vs_attrs = vec![Attribute::attr_or_panic(
-            zpl::ADAPTER_CN_ATTR,
+            zpl::KATTR_CN,
             zpl::VISA_SERVICE_CN,
         )];
         let fab_svc_id = self.fabric.add_service(
@@ -341,18 +341,18 @@ impl Weaver {
         let mut resolved_attrs = Vec::new();
         for a in attrs {
             let attr_name = a.zpl_key();
-            if a.tag && a.zpl_value() == zpl::ADAPTER_CN_ATTR {
+            if a.tag && a.zpl_value() == zpl::KATTR_CN {
                 return Err(CompilationError::ConfigError(format!(
                     "{} attribute used as a tag, but is a tuple attribute",
                     a,
                 )));
             }
-            if attr_name == zpl::ADAPTER_CN_ATTR {
+            if attr_name == zpl::KATTR_CN {
                 resolved_attrs.push(a.clone());
                 self.used_trusted_services
                     .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
             } else if attr_name == zpl::DEFAULT_ATTR {
-                resolved_attrs.push(a.set_name(zpl::ADAPTER_CN_ATTR));
+                resolved_attrs.push(a.set_name(zpl::KATTR_CN));
                 self.used_trusted_services
                     .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
             } else {
@@ -360,18 +360,6 @@ impl Weaver {
                 // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
                 let mut matched = false;
                 for ts_name in &trusted_service_names {
-                    // TODO: We need to rethink the prefix stuff. PREFIX should not be part of the
-                    //       attribute name.
-                    let ts_prefix = config
-                        .must_get(&format!("/trusted_services/{}/prefix", ts_name))
-                        .to_string();
-                    println!("TODO: ignoring ts prefix {}", ts_prefix);
-                    //let already_prefixed = attr_name.starts_with(&format!("{ts_prefix}."));
-                    //let search_name = if already_prefixed {
-                    //    attr_name[ts_prefix.len() + 1..].to_string()
-                    //} else {
-                    //    attr_name.clone()
-                    //};
                     let search_name = attr_name.clone();
                     let ts_attrs = if a.tag {
                         config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name))
@@ -386,18 +374,10 @@ impl Weaver {
                             )));
                         }
                         let new_attr = a.clone();
-                        //new_attr.name = format!("{ts_prefix}.{search_name}");
                         resolved_attrs.push(new_attr);
                         self.used_trusted_services.insert(ts_name.clone());
                         matched = true;
                     }
-
-                    //if already_prefixed && !matched {
-                    //    return Err(CompilationError::ConfigError(format!(
-                    //        "attribute {} not found in trusted service {}",
-                    //        attr_name, ts_name
-                    //    )));
-                    //}
                 }
                 if !matched {
                     return Err(CompilationError::ConfigError(format!(
@@ -633,9 +613,6 @@ impl Weaver {
             let ts_api = config
                 .must_get(&format!("/trusted_services/{ts_name}/api"))
                 .to_string();
-            let ts_prefix = config
-                .must_get(&format!("/trusted_services/{ts_name}/prefix"))
-                .to_string();
             let client_svc = config
                 .must_get(&format!("/trusted_services/{ts_name}/client_service"))
                 .to_string();
@@ -742,7 +719,6 @@ impl Weaver {
                 .add_trusted_service(
                     ts_name,
                     &vs_svc_protocol.unwrap(),
-                    &ts_prefix,
                     &ts_api,
                     &ts_provider_attrs,
                     ts_cert,

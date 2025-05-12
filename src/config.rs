@@ -135,7 +135,6 @@ pub struct TrustedService {
     pub service: Option<String>, // Name of service for VS operations
     pub client: Option<String>,  // Name of service for client operations
     pub cert_path: Option<PathBuf>,
-    pub prefix: String,
     pub returns_attrs: Vec<Attribute>,
     pub identity_attrs: Vec<Attribute>,
     pub provider: Option<Vec<(String, String)>>, // required for non-default
@@ -601,20 +600,11 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
     } else {
         None
     };
-    let prefix: String;
     let returns_attrs: Vec<String>;
     let identity_attrs: Vec<String>;
     let client_svc: Option<String>;
     let service_svc: Option<String>;
     if !is_default {
-        if !ts.contains_key("prefix") {
-            prefix = ts_id.to_string();
-        } else {
-            prefix = ts["prefix"]
-                .as_str()
-                .ok_or(err_config!("trusted_service {} prefix parse error", ts_id))?
-                .to_string();
-        }
         returns_attrs = parse_string_array(ts, "returns_attributes", "trusted_service")?;
         identity_attrs = parse_string_array(ts, "identity_attributes", "trusted_service")?;
 
@@ -664,17 +654,8 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
                 "default trusted_service does not allow custom identity_attributes"
             ));
         }
-        prefix = zpl::DEFAULT_TS_PREFIX.to_string();
-        returns_attrs = vec![format!(
-            "{}.{}",
-            zpl::DEFAULT_TS_PREFIX,
-            zpl::DEFAULT_ATTR.to_string()
-        )];
-        identity_attrs = vec![format!(
-            "{}.{}",
-            zpl::DEFAULT_TS_PREFIX,
-            zpl::DEFAULT_ATTR.to_string()
-        )];
+        returns_attrs = vec![String::from(zpl::KATTR_CN)];
+        identity_attrs = vec![String::from(zpl::KATTR_CN)];
         client_svc = None;
         service_svc = None;
     }
@@ -712,7 +693,6 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
         id: ts_id.to_string(),
         api,
         cert_path,
-        prefix,
         returns_attrs: returns,
         identity_attrs: idents,
         provider,
@@ -1098,7 +1078,6 @@ mod test {
         assert_eq!(ts.id, "default");
         assert_eq!(ts.api, zpl::DEFAULT_TRUSTED_SERVICE_API);
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
-        assert_eq!(ts.prefix, zpl::DEFAULT_TS_PREFIX);
         assert_eq!(ts.returns_attrs.len(), 1);
         assert_eq!(ts.returns_attrs[0].zpl_key(), "device.zpr.adapter.cn");
         assert_eq!(ts.identity_attrs.len(), 1);
@@ -1144,7 +1123,6 @@ mod test {
         assert_eq!(ts.id, "other");
         assert_eq!(ts.api, "validation/2");
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
-        assert_eq!(ts.prefix, "bar.hop");
         assert_eq!(ts.returns_attrs.len(), 2);
         {
             let attr_names = ts
@@ -1182,7 +1160,6 @@ mod test {
         assert_eq!(ts.id, "other");
         assert_eq!(ts.api, "validation/2");
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
-        assert_eq!(ts.prefix, "other");
         assert_eq!(ts.returns_attrs.len(), 2);
         {
             let attr_names = ts
@@ -1221,7 +1198,6 @@ mod test {
         assert_eq!(ts.id, "bas");
         assert_eq!(ts.api, "validation/2");
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.crt")));
-        assert_eq!(ts.prefix, "bas");
         assert!(ts.provider.is_some());
         let provider = ts.provider.as_ref().unwrap();
         assert_eq!(provider.len(), 1);

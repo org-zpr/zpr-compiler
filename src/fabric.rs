@@ -33,7 +33,6 @@ pub struct FabricService {
     pub client_policies: Vec<ClientPolicy>, // List of consumer policies
     pub service_type: ServiceType,
     pub certificate: Option<Vec<u8>>, // Certificate for this (trusted) service
-    pub prefix: Option<String>,       // Only used for trusted services
     pub client_service_name: Option<String>, // For an AUTH service, the name of the optional client service.
 }
 
@@ -104,7 +103,6 @@ impl fmt::Display for Fabric {
             match s.service_type {
                 ServiceType::Trusted(ref api) => {
                     writeln!(f, "    API: {}", api)?;
-                    writeln!(f, "    prefix: {:?}", s.prefix)?;
                     writeln!(f, "    client-service: {:?}", s.client_service_name)?;
                 }
                 _ => {}
@@ -151,7 +149,6 @@ impl Fabric {
         &mut self,
         id: &str,
         protocol: &Protocol,
-        prefix: &str,
         api: &str,
         provider_attrs: &[Attribute],
         certificate: Option<Vec<u8>>,
@@ -180,7 +177,6 @@ impl Fabric {
             client_policies: Vec::new(),
             service_type: ServiceType::Trusted(api.to_string()),
             certificate,
-            prefix: Some(prefix.to_string()),
             client_service_name: Some(client_service_name),
         };
         self.services.push(fs);
@@ -242,7 +238,6 @@ impl Fabric {
             client_policies: Vec::new(),
             service_type: stype,
             certificate: None,
-            prefix: None,
             client_service_name: None,
         };
         self.services.push(fs);
@@ -284,7 +279,6 @@ impl Fabric {
             client_policies: Vec::new(),
             service_type: ServiceType::BuiltIn,
             certificate: None,
-            prefix: None,
             client_service_name: None,
         };
         self.services.push(fs);
@@ -339,7 +333,7 @@ impl Fabric {
             }
         };
         node_attrs.push(Attribute::zpr_internal_attr(
-            zpl::ZPR_ADDR_ATTR,
+            zpl::KATTR_ADDR,
             &naddr.to_string(),
         ));
 

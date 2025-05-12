@@ -222,7 +222,6 @@ fn validate_clause(
             ac.user.class_tok.col,
         ));
     }
-    // TODO: Check that attributes are in correct domains for each clause.
     Ok(())
 }
 

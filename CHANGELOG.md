@@ -7,7 +7,9 @@
 - A `service` block can override protocol details like `port` or ICMP.
 - Non default trusted services must have cooresponding services blocks for 
   their client and visa service components.
+- All attributes must be in one of our domains: user, device or service.
 - All attributes must come from a declared service.
+- Removed the `prefix` setting for a `trusted_service`.
 
 
 ## [0.1.0] - 2025-03-27

@@ -234,7 +234,6 @@ impl ConfigApi {
     // - /trusted_services/<foo>/tags -> list of attribute names (probably also need type)
     // - /trusted_services/<foo>/id_attributes -> list of attribute names (probably also need type)
     //
-    // (PREFIX - let's make prefix same as service ID.)
     //
     // Caller will want to get the service that provides attr FOO.
     // So caller can just load them all up and create an index.
@@ -495,7 +494,6 @@ impl ConfigApi {
                 };
                 Some(ConfigItem::BytesB64(BASE64_STANDARD.encode(&cert_data)))
             }
-            "prefix" => Some(ConfigItem::StrVal(svc.prefix.clone())),
             "vs_service" => match svc.service {
                 Some(ref vs) => Some(ConfigItem::StrVal(vs.clone())),
                 None => None,
