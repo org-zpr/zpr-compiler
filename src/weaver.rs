@@ -341,23 +341,17 @@ impl Weaver {
         let mut resolved_attrs = Vec::new();
         for a in attrs {
             let attr_name = a.zpl_key();
+            if a.tag && a.zpl_value() == zpl::ADAPTER_CN_ATTR {
+                return Err(CompilationError::ConfigError(format!(
+                    "{} attribute used as a tag, but is a tuple attribute",
+                    a,
+                )));
+            }
             if attr_name == zpl::ADAPTER_CN_ATTR {
-                if a.tag {
-                    return Err(CompilationError::ConfigError(format!(
-                        "{} attribute used as a tag, but is a tuple attriubte",
-                        attr_name
-                    )));
-                }
                 resolved_attrs.push(a.clone());
                 self.used_trusted_services
                     .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
             } else if attr_name == zpl::DEFAULT_ATTR {
-                if a.tag {
-                    return Err(CompilationError::ConfigError(format!(
-                        "{} attribute used as a tag, but is a tuple attribute",
-                        attr_name
-                    )));
-                }
                 resolved_attrs.push(a.set_name(zpl::ADAPTER_CN_ATTR));
                 self.used_trusted_services
                     .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
