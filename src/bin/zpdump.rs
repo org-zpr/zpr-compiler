@@ -248,11 +248,11 @@ fn main() {
         print_section_hdr("ATTRIBUTES");
         let key_idx_len = pol.attr_key_index.len();
         let val_idx_len = pol.attr_val_index.len();
-        println!("       {}{:>29}", "KEYS".bold(), "VALUES".bold());
+        println!("       {}{:>33}", "KEYS".bold(), "VALUES".bold());
         for i in 0..key_idx_len.max(val_idx_len) {
             if i < key_idx_len && i < val_idx_len {
                 print!(
-                    "     {:>3}: {:<20}",
+                    "     {:>3}: {:<24}",
                     format!("{}", i).yellow(),
                     pol.attr_key_index[i].yellow()
                 );
@@ -263,13 +263,13 @@ fn main() {
                 );
             } else if i < key_idx_len {
                 println!(
-                    "     {:>3}: {:<20}",
+                    "     {:>3}: {:<24}",
                     format!("{}", i).yellow(),
                     pol.attr_key_index[i].yellow()
                 );
             } else {
                 println!(
-                    "{:>32}{:>3}: {}",
+                    "{:>36}{:>3}: {}",
                     "",
                     format!("{}", i).yellow(),
                     pol.attr_val_index[i].yellow()

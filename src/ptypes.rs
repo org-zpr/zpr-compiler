@@ -188,19 +188,7 @@ pub enum AttrDomain {
     Device,
     User,
     Service,
-}
-
-impl TryFrom<&str> for AttrDomain {
-    type Error = AttributeError;
-
-    fn try_from(s: &str) -> Result<Self, AttributeError> {
-        match s {
-            zpl::ATTR_DOMAIN_DEVICE => Ok(AttrDomain::Device),
-            zpl::ATTR_DOMAIN_USER => Ok(AttrDomain::User),
-            zpl::ATTR_DOMAIN_SERVICE => Ok(AttrDomain::Service),
-            _ => Err(AttributeError::InvalidDomain(s.to_string())),
-        }
-    }
+    ZprInternal, // For compiler use only
 }
 
 impl fmt::Display for AttrDomain {
@@ -209,6 +197,7 @@ impl fmt::Display for AttrDomain {
             AttrDomain::Device => write!(f, "{}", zpl::ATTR_DOMAIN_DEVICE),
             AttrDomain::User => write!(f, "{}", zpl::ATTR_DOMAIN_USER),
             AttrDomain::Service => write!(f, "{}", zpl::ATTR_DOMAIN_SERVICE),
+            AttrDomain::ZprInternal => write!(f, "{}", zpl::ATTR_DOMAIN_ZPR_INTERNAL),
             AttrDomain::Unspecified => write!(f, "UNSPECIFIED"),
         }
     }
@@ -283,8 +272,8 @@ impl Attribute {
         }
     }
 
-    /// Parse off one the ZPR domains from the key.
-    /// Returns (<domain>, <rest>) from given key.
+    /// Parse off one the ZPR domains from the key.  Does not work with ZPR internal domain.
+    /// Returns `(<domain>, <rest>)` from given key.
     fn parse_domain(key: &str) -> Result<(AttrDomain, String), AttributeError> {
         if let Some(renamed) = key.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_DEVICE)) {
             Ok((AttrDomain::Device, renamed.to_string()))
@@ -342,16 +331,19 @@ impl Attribute {
 
     /// Hmm, special case.
     pub fn zpr_internal_attr(name: &str, value: &str) -> Self {
-        if !name.starts_with("zpr.") {
+        if let Some(name_without_domain) =
+            name.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_ZPR_INTERNAL))
+        {
+            return Attribute {
+                domain: AttrDomain::ZprInternal,
+                name: name_without_domain.to_string(),
+                value: Some(value.to_string()),
+                multi_valued: false,
+                tag: false,
+                optional: false,
+            };
+        } else {
             panic!("zpr internal attribute must start with 'zpr.'");
-        }
-        Attribute {
-            domain: AttrDomain::Unspecified, // TODO: Add the ZPR domain?
-            name: name.to_string(),
-            value: Some(value.to_string()),
-            multi_valued: false,
-            tag: false,
-            optional: false,
         }
     }
 

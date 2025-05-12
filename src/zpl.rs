@@ -32,6 +32,7 @@ pub const KATTR_CN: &str = "device.zpr.adapter.cn";
 pub const ATTR_DOMAIN_SERVICE: &str = "service";
 pub const ATTR_DOMAIN_USER: &str = "user";
 pub const ATTR_DOMAIN_DEVICE: &str = "device";
+pub const ATTR_DOMAIN_ZPR_INTERNAL: &str = "zpr";
 
 // For nodes to talk to VS
 pub const VISA_SERVICE_PORT: u16 = 5002; // TCP
