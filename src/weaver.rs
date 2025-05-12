@@ -71,7 +71,6 @@ pub fn weave(
     // By the time we get here, we have resolved all attributes and so know which trusted
     // services are in play.
     weaver.add_trusted_services(config, ctx)?;
-    // TODO: Add more policies for trusted service access (or is that in builder??)
     weaver.add_default_auth(config, ctx)?;
     weaver.add_bootstrap_records(config, ctx)?;
 
