@@ -283,15 +283,9 @@ impl Attribute {
         }
     }
 
-    pub fn is_valid_domain(key: &str) -> bool {
-        key.starts_with(&format!("{}.", zpl::ATTR_DOMAIN_DEVICE))
-            || key.starts_with(&format!("{}.", zpl::ATTR_DOMAIN_USER))
-            || key.starts_with(&format!("{}.", zpl::ATTR_DOMAIN_SERVICE))
-    }
-
     /// Parse off one the ZPR domains from the key.
     /// Returns (<domain>, <rest>) from given key.
-    pub fn parse_domain(key: &str) -> Result<(AttrDomain, String), AttributeError> {
+    fn parse_domain(key: &str) -> Result<(AttrDomain, String), AttributeError> {
         if let Some(renamed) = key.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_DEVICE)) {
             Ok((AttrDomain::Device, renamed.to_string()))
         } else if let Some(renamed) = key.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_USER)) {
@@ -392,7 +386,7 @@ impl Attribute {
     }
 
     /// Create and return a new attribute with the same characteristics of this one but with the new name provided.
-    /// If `new_name` includes a valid domain prefix, the returns attribute will have that domain.
+    /// If `new_name` includes a valid domain prefix, the returned attribute will have that domain.
     pub fn set_name(&self, new_name: &str) -> Self {
         let mut new_a = self.clone();
         let (dom, name) = Attribute::parse_domain(new_name).unwrap_or_else(|_| {
