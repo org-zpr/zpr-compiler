@@ -651,7 +651,7 @@ impl Weaver {
                 let ts_id_attrs =
                     config.must_get_keys(&format!("/trusted_services/{ts_name}/id_attributes"));
                 ctx.warn(&format!(
-                    "TODO add identity attrs for <{}> to policy: {:?}",
+                    "TODO add identity attributes for trused_service <{}> to policy: {:?}",
                     ts_name, ts_id_attrs
                 ))?;
             }
