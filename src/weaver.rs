@@ -352,7 +352,7 @@ impl Weaver {
                 self.used_trusted_services
                     .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
             } else if attr_name == zpl::DEFAULT_ATTR {
-                resolved_attrs.push(a.set_name(zpl::KATTR_CN));
+                resolved_attrs.push(a.clone_with_new_name(zpl::KATTR_CN));
                 self.used_trusted_services
                     .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
             } else {

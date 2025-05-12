@@ -182,13 +182,17 @@ impl Class {
     }
 }
 
+/// An attribute must live in one of our domains. When parsing sometimes we
+/// end up in an intermediate state where we don't know the domain yet so
+/// we use `Unspecified`.  An error will occur if we try to write policy
+/// and there remain any unspecified domains.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttrDomain {
     Unspecified,
     Device,
     User,
     Service,
-    ZprInternal, // For compiler use only
+    ZprInternal, // For compiler/visa-service use only
 }
 
 impl fmt::Display for AttrDomain {
@@ -214,7 +218,7 @@ impl AttrDomain {
     }
 }
 
-/// A ZPL attribute. Could be a tule type attibute, eg "role:marketing" or a
+/// A ZPL attribute. Could be a tule type attibute, eg "user.role:marketing" or a
 /// tag type.  An attribute may be optional or required, and may be multi-valued
 /// or single-valued.
 #[derive(Debug, Clone, PartialEq)]
@@ -299,6 +303,7 @@ impl Attribute {
         })
     }
 
+    /// Create a tag attribute and will set domain unspecified if not present on the `name`.
     pub fn tag_domain_opt(name: &str) -> Self {
         let (dom, rest) = Attribute::parse_domain(name)
             .unwrap_or_else(|_| (AttrDomain::Unspecified, name.to_string()));
@@ -325,11 +330,13 @@ impl Attribute {
         })
     }
 
+    /// Create a tuple type attribute or panic if name is invalid.
     pub fn attr_or_panic(name: &str, value: &str) -> Self {
         Attribute::attr(name, value).expect("invalid attribute")
     }
 
-    /// Hmm, special case.
+    /// Special constructor for ZPR internal attributes.
+    /// Panics if passed `name` must start with `zpr`.
     pub fn zpr_internal_attr(name: &str, value: &str) -> Self {
         if let Some(name_without_domain) =
             name.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_ZPR_INTERNAL))
@@ -347,6 +354,7 @@ impl Attribute {
         }
     }
 
+    /// Create a tuple type attribute and will set domain unspecified if not present on the `name`.
     pub fn attr_domain_opt(name: &str, value: &str) -> Self {
         let (dom, rest) = Attribute::parse_domain(name)
             .unwrap_or_else(|_| (AttrDomain::Unspecified, name.to_string()));
@@ -379,7 +387,7 @@ impl Attribute {
 
     /// Create and return a new attribute with the same characteristics of this one but with the new name provided.
     /// If `new_name` includes a valid domain prefix, the returned attribute will have that domain.
-    pub fn set_name(&self, new_name: &str) -> Self {
+    pub fn clone_with_new_name(&self, new_name: &str) -> Self {
         let mut new_a = self.clone();
         let (dom, name) = Attribute::parse_domain(new_name).unwrap_or_else(|_| {
             // If the new name does not have a domain prefix, use the current domain.
@@ -414,5 +422,52 @@ impl Attribute {
         } else {
             "".to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_attributes_kv() {
+        let a = Attribute::attr("user.role", "admin").unwrap();
+        assert_eq!(a.domain, AttrDomain::User);
+        assert_eq!(a.name, "role");
+        assert_eq!(a.value, Some("admin".to_string()));
+        assert_eq!(a.multi_valued, false);
+        assert_eq!(a.tag, false);
+        assert_eq!(a.optional, false);
+        assert_eq!("user.role:admin", a.to_string());
+        assert_eq!("user.role", a.zpl_key());
+        assert_eq!("admin", a.zpl_value());
+    }
+
+    #[test]
+    fn test_attributes_tag() {
+        let a = Attribute::tag("device.hardened").unwrap();
+        assert_eq!(a.domain, AttrDomain::Device);
+        assert_eq!(a.name, "hardened");
+        assert_eq!(a.value, None);
+        assert_eq!(a.multi_valued, false);
+        assert_eq!(a.tag, true);
+        assert_eq!(a.optional, false);
+        assert_eq!("#device.hardened", a.to_string());
+        assert_eq!("device.zpr.tag", a.zpl_key());
+        assert_eq!("device.hardened", a.zpl_value());
+    }
+
+    #[test]
+    fn test_attrributes_internal() {
+        let a = Attribute::zpr_internal_attr("zpr.role", "admin");
+        assert_eq!(a.domain, AttrDomain::ZprInternal);
+        assert_eq!(a.name, "role");
+        assert_eq!(a.value, Some("admin".to_string()));
+        assert_eq!(a.multi_valued, false);
+        assert_eq!(a.tag, false);
+        assert_eq!(a.optional, false);
+        assert_eq!("zpr.role:admin", a.to_string());
+        assert_eq!("zpr.role", a.zpl_key());
+        assert_eq!("admin", a.zpl_value());
     }
 }
