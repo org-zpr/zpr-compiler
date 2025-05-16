@@ -1,5 +1,6 @@
 //! policybuilder.rs - Build a protocol buffer policy from the fabric.
 
+use ::polio as polio;
 use chrono::prelude::*;
 use std::collections::HashMap;
 use std::env;
@@ -8,7 +9,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::context::CompilationCtx;
 use crate::errors::CompilationError;
 use crate::fabric::{Fabric, FabricService, ServiceType};
-use crate::polio;
 use crate::protocols::IcmpFlowType;
 use crate::ptypes::Attribute;
 use crate::zpl;
