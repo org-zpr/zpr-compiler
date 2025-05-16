@@ -7,12 +7,14 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
 
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@v2
 
       - name: Setup Git credentials
@@ -32,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@v2
 
       - name: Setup Git credentials
@@ -51,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@v2
 
       - name: Setup Git credentials
