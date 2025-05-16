@@ -785,8 +785,8 @@ dependencies = [
 
 [[package]]
 name = "zpr-policy"
-version = "0.1.0"
-source = "git+https://github.com/org-zpr/zpr-policy-rs.git?tag=v0.1.1#e42ea70069235c143118e9f4ab8d436143343523"
+version = "0.1.1"
+source = "git+https://github.com/org-zpr/zpr-policy-rs.git?tag=v0.1.1#ba30f09ee3f33a593d3979c4c40e08d465d8b2d2"
 dependencies = [
  "prost",
 ]
