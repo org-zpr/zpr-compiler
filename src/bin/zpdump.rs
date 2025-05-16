@@ -160,16 +160,23 @@ fn main() {
         print_section_hdr("SERVICES");
         for (i, service) in pol.services.iter().enumerate() {
             println!("service {}", format!("{}", i + 1).yellow());
-            println!("       type: {}", svct_to_string(service.r#type).yellow());
-            println!("       name: {}", service.name.yellow());
-            println!("     prefix: {}", service.prefix.yellow());
-            println!("     domain: {}", service.domain.yellow());
             println!(
-                "        api: query {} / validate {}",
-                format!("{}", service.query_api_version).yellow(),
-                format!("{}", service.validate_api_version).yellow()
+                "          type: {}",
+                svct_to_string(service.r#type).yellow()
             );
-            println!("       addr: {}", service.addr.yellow());
+            println!("          name: {}", service.name.yellow());
+            println!("        prefix: {}", service.prefix.yellow());
+            println!("        domain: {}", service.domain.yellow());
+            if service.query_uri.is_empty() {
+                println!("     query_uri: {}", "unsupported".red());
+            } else {
+                println!("     query_uri: {}", service.query_uri.yellow());
+            }
+            if service.validate_uri.is_empty() {
+                println!("  validate_uri: {}", "unsupported".red());
+            } else {
+                println!("  validate_uri: {}", service.validate_uri.yellow());
+            }
         }
     }
 

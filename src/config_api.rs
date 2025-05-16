@@ -62,7 +62,7 @@ pub enum ConfigItem {
     /// A network address (host, port). Host may be a hostname or an IP address.
     NetAddr(String, u16),
 
-    /// A protocol definition. This is a tuple of (name, protocol, ports-or-type-codes)
+    /// A protocol definition. This is a tuple of (name, l4-protocol, ports-or-type-codes)
     Protocol(String, IanaProtocol, PortArgT),
 }
 

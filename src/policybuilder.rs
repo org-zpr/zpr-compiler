@@ -14,7 +14,7 @@ use crate::ptypes::Attribute;
 use crate::zpl;
 
 /// Updeate this if we change the protobuf. This is checked by visa service during deserialization.
-pub const SERIAL_VERSION: u32 = 42;
+pub const SERIAL_VERSION: u32 = 43;
 
 /// This value for a PROC in a connect record means NO PROC.
 pub const NO_PROC: u32 = u32::MAX; // 0xffffffff
@@ -138,6 +138,7 @@ impl PolicyBuilder {
         self.set_policies(fabric)?;
         self.set_default_auth(fabric, ctx)?;
         self.set_bootstrap(fabric, ctx)?;
+        self.set_auth_services(fabric, ctx)?;
 
         if self.verbose {
             println!("  {} connect rules", self.policy.connects.len());
@@ -169,6 +170,83 @@ impl PolicyBuilder {
             name: zpl::DEFAULT_TS_PREFIX.to_string(),
         };
         self.policy.certificates.push(pcert);
+        Ok(())
+    }
+
+    fn set_auth_services(
+        &mut self,
+        fabric: &Fabric,
+        _ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
+        for svc in &fabric.services {
+            let apiname: String = match svc.service_type {
+                ServiceType::Trusted(ref t) => t.clone(),
+                _ => {
+                    continue; // not a trusted service
+                }
+            };
+
+            if apiname != zpl::TS_API_V2 {
+                return Err(CompilationError::ConfigError(format!(
+                    "trusted service {}: only 'validation/2' api supported, not '{}'",
+                    svc.config_id, apiname
+                )));
+            }
+
+            if svc.client_service_name.is_none() {
+                return Err(CompilationError::ConfigError(format!(
+                    "trusted service {}: missing client facing service name",
+                    svc.config_id
+                )));
+            }
+
+            // The trusted service actually has two addresses.
+            // The vs-address which is service named <id>-vs
+            // And the adapter auth address whic is at <id>-<client-service-name>
+
+            // The VS facing service details have been copied out of config.
+
+            if let Some((l7p, port)) = svc.get_l7protocol_and_port() {
+                let trusted_svc = polio::Service {
+                    r#type: polio::SvcT::SvctAuth.into(),
+                    name: svc.config_id.clone(),
+                    prefix: svc.config_id.clone(),
+                    domain: String::new(),
+                    query_uri: String::new(), // n/a
+                    validate_uri: format!("{}://[::1]:{}", l7p, port),
+                };
+                self.policy.services.push(trusted_svc);
+            } else {
+                return Err(CompilationError::ConfigError(format!(
+                    "trusted service {}: must have single port number",
+                    svc.config_id
+                )));
+            }
+
+            // The adapter facing auth service (if present) we register as a new-style "authentication" service.
+            if let Some(asvc) = fabric.get_service(svc.client_service_name.as_ref().unwrap()) {
+                if let Some((l7p, port)) = asvc.get_l7protocol_and_port() {
+                    let auth_svc = polio::Service {
+                        r#type: polio::SvcT::SvctActorAuth.into(),
+                        name: asvc.config_id.clone(),
+                        prefix: asvc.config_id.clone(),
+                        domain: String::new(),
+                        query_uri: String::new(), // n/a
+                        validate_uri: format!("{}://[::1]:{}", l7p, port),
+                    };
+                    self.policy.services.push(auth_svc);
+                } else {
+                    return Err(CompilationError::ConfigError(format!(
+                        "authentication service {}: must have single port number",
+                        asvc.config_id
+                    )));
+                }
+            } else {
+                // Not found. This means that either the service has no adapter facing offering
+                // (ie, it is a query only service). Or the user did not add any ZPL allowing
+                // access -- which is warned about in a previous parsing step.
+            }
+        }
         Ok(())
     }
 
@@ -320,7 +398,10 @@ impl PolicyBuilder {
             }
             // Any agent that provides a service can connect
             match svc.service_type {
-                ServiceType::Regular | ServiceType::Visa | ServiceType::BuiltIn => {
+                ServiceType::Regular
+                | ServiceType::Visa
+                | ServiceType::BuiltIn
+                | ServiceType::Authentication => {
                     let flags = if svc.service_type == ServiceType::Visa {
                         Some(PFlags::vs())
                     } else {
@@ -414,11 +495,13 @@ impl PolicyBuilder {
         args.push(polio::Argument {
             arg: Some(polio::argument::Arg::Strval(svc_id.to_string())),
         });
-        let svc_t = if matches!(svc_type, ServiceType::Trusted(_)) {
-            polio::SvcT::SvctAuth
-        } else {
-            polio::SvcT::SvctDef
+        let svc_t = match svc_type {
+            ServiceType::Regular | ServiceType::Visa | ServiceType::BuiltIn => polio::SvcT::SvctDef,
+            ServiceType::Authentication => polio::SvcT::SvctActorAuth,
+            ServiceType::Trusted(_) => polio::SvcT::SvctAuth,
+            ServiceType::Undefined => panic!("undefined service type"),
         };
+
         args.push(polio::Argument {
             arg: Some(polio::argument::Arg::Svcval(svc_t as i32)),
         });

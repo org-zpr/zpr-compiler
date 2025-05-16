@@ -42,6 +42,7 @@ pub enum ServiceType {
     #[default]
     Undefined,
     Trusted(String), // Takes the API name
+    Authentication,
     Visa,
     Regular,
     BuiltIn, // eg, noode access to VS, or VS access to VSS
@@ -154,20 +155,11 @@ impl Fabric {
         certificate: Option<Vec<u8>>,
         client_service_name: String,
     ) -> Result<(), CompilationError> {
-        let mut matched = false;
         for s in &self.services {
             if s.config_id == id {
                 // Caller should prevent this.
                 panic!("trusted service {} already exists in the fabric", id);
             }
-            if s.config_id == client_service_name {
-                matched = true;
-            }
-        }
-        if !matched {
-            return Err(CompilationError::ConfigError(format!(
-                "associated client service {client_service_name} for trusted service {id} not found in fabric",
-            )));
         }
         let fs = FabricService {
             config_id: id.to_string(),
@@ -294,6 +286,24 @@ impl Fabric {
     /// Return TRUE if the service with given fabric_id is in our fabric.
     pub fn has_service(&self, fabric_id: &str) -> bool {
         self.services.iter().any(|s| s.fabric_id == fabric_id)
+    }
+
+    /// Get a reference to one of the services.
+    pub fn get_service(&self, fabric_id: &str) -> Option<&FabricService> {
+        self.services.iter().find(|s| s.fabric_id == fabric_id)
+    }
+
+    pub fn update_service(
+        &mut self,
+        svc_id: &str,
+        mutator: impl FnOnce(&mut FabricService),
+    ) -> bool {
+        if let Some(svc) = self.services.iter_mut().find(|s| s.fabric_id == svc_id) {
+            mutator(svc);
+            true
+        } else {
+            false
+        }
     }
 
     /// Add a node to the fabric.  Must add visa service before calling this.
@@ -424,5 +434,45 @@ impl FabricService {
             }
         }
         true
+    }
+
+    /// Treat the layer4 protocol port value as a single port number.
+    /// If we find that we return it, else None.
+    pub fn get_port(&self) -> Option<u16> {
+        if let Some(ref p) = self.protocol {
+            if !p.has_port() {
+                return None;
+            }
+            if let Some(pstr) = p.get_port() {
+                if let Ok(port) = pstr.parse::<u16>() {
+                    return Some(port);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_l7protocol_and_port(&self) -> Option<(String, u16)> {
+        if let Some(ref p) = self.protocol {
+            if !p.has_port() {
+                return None;
+            }
+
+            let port = if let Some(pstr) = p.get_port() {
+                if let Ok(pnum) = pstr.parse::<u16>() {
+                    pnum
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+            if let Some(l7p) = p.get_layer7() {
+                return Some((l7p.to_string(), port));
+            } else if port > 0 {
+                return Some((String::new(), port));
+            }
+        }
+        None
     }
 }

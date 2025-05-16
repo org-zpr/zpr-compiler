@@ -11,7 +11,7 @@ use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
 use crate::fabric::{Fabric, ServiceType};
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
-use crate::protocols::{IanaProtocol, Protocol, ZPR_VALIDATION_2};
+use crate::protocols::{IanaProtocol, Protocol, ZPR_OAUTH_RSA, ZPR_VALIDATION_2};
 use crate::ptypes::{Attribute, Class, ClassFlavor, FPos, Policy};
 use crate::zpl;
 
@@ -269,6 +269,23 @@ impl Weaver {
             }
         };
 
+        // This service may be an adapter facing authentication service.
+        let mut svc_type = ServiceType::Regular;
+        match config.get("/trusted_services") {
+            Some(ConfigItem::KeySet(ts_names)) => {
+                for nam in ts_names {
+                    match config.get(&format!("/trusted_services/{nam}/client_service")) {
+                        Some(ConfigItem::StrVal(cs_name)) if cs_name == matched_service_name => {
+                            svc_type = ServiceType::Authentication;
+                            break;
+                        }
+                        _ => (),
+                    }
+                }
+            }
+            _ => (),
+        };
+
         let attr_map = squash_attributes(&attrs, &sclass.pos)?;
         let resolved_attrs = self.resolve_attributes(
             attr_map
@@ -278,19 +295,16 @@ impl Weaver {
             config,
         )?;
 
-        if resolved_attrs.is_empty() {
+        if svc_type == ServiceType::Regular && resolved_attrs.is_empty() {
             return Err(CompilationError::ConfigError(format!(
                 "service with no attributes {}",
                 matched_service_name
             )));
         }
 
-        let fabric_svc_id = self.fabric.add_service(
-            &matched_service_name,
-            &prot,
-            &resolved_attrs,
-            ServiceType::Regular,
-        )?;
+        let fabric_svc_id =
+            self.fabric
+                .add_service(&matched_service_name, &prot, &resolved_attrs, svc_type)?;
         self.allowid_to_fab_svc.insert(svc_id, fabric_svc_id);
 
         Ok(())
@@ -662,6 +676,17 @@ impl Weaver {
 
             for svc_name in vec![&client_svc, &vs_svc] {
                 if self.fabric.has_service(&svc_name) {
+                    if svc_name == &vs_svc {
+                        panic!("error: visa service should not yet exist in fabric");
+                    }
+                } else if svc_name == &client_svc {
+                    // This implies that there is no ZPL allowing access to the client facing
+                    // authentication service.  Warn user.
+                    // TODO: This is actually perfectly fine if the service only supports query.
+                    ctx.warn(&format!(
+                        "no ZPL policy allowing access to client authentication service {}",
+                        client_svc
+                    ))?;
                     continue;
                 }
                 // service must have a protocol
@@ -691,19 +716,23 @@ impl Weaver {
                     }
                     vs_svc_protocol = Some(vsp);
                 } else {
-                    // We do not need to add the visa-service facing service to the fabric, we just
-                    // use it to gather additional data for the trusted service.
-                    let fname = self.fabric.add_service(
-                        &svc_name,
-                        &prot,
-                        &ts_provider_attrs,
-                        ServiceType::Regular,
-                    )?;
-                    if &fname != svc_name {
-                        panic!(
-                            "fabric altered name of auth client svc {} becomes {}",
-                            svc_name, fname
-                        );
+                    // Fold in additional details about the client facing authentication service.
+                    let mut auth_prot = prot.clone();
+                    auth_prot.set_layer7(ZPR_OAUTH_RSA); // TODO: Return layer7 name from config_api. Hardcoded to "zpr-oauthrsa" for now.
+
+                    println!(
+                        "XXX updating details for client-facing auth service: {}",
+                        svc_name
+                    );
+
+                    let found = self.fabric.update_service(svc_name, |svc| {
+                        svc.protocol = Some(auth_prot.clone());
+                        svc.provider_attrs = ts_provider_attrs.clone();
+                        svc.service_type = ServiceType::Authentication;
+                    });
+                    if !found {
+                        // Programming error we checked above that the service was in the fabcir.
+                        panic!("error: service {} not found in fabric", svc_name);
                     }
                 }
             }
