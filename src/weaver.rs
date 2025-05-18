@@ -719,12 +719,6 @@ impl Weaver {
                     // Fold in additional details about the client facing authentication service.
                     let mut auth_prot = prot.clone();
                     auth_prot.set_layer7(ZPR_OAUTH_RSA); // TODO: Return layer7 name from config_api. Hardcoded to "zpr-oauthrsa" for now.
-
-                    println!(
-                        "XXX updating details for client-facing auth service: {}",
-                        svc_name
-                    );
-
                     let found = self.fabric.update_service(svc_name, |svc| {
                         svc.protocol = Some(auth_prot.clone());
                         svc.provider_attrs = ts_provider_attrs.clone();
