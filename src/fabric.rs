@@ -153,7 +153,7 @@ impl Fabric {
         api: &str,
         provider_attrs: &[Attribute],
         certificate: Option<Vec<u8>>,
-        client_service_name: String,
+        client_service_name: &str,
     ) -> Result<(), CompilationError> {
         for s in &self.services {
             if s.config_id == id {
@@ -169,7 +169,7 @@ impl Fabric {
             client_policies: Vec::new(),
             service_type: ServiceType::Trusted(api.to_string()),
             certificate,
-            client_service_name: Some(client_service_name),
+            client_service_name: Some(client_service_name.to_string()),
         };
         self.services.push(fs);
         Ok(())
@@ -372,7 +372,7 @@ impl Fabric {
             )));
         }
         let vss_prot = Protocol::new_l4_with_port(
-            "zpr-vss",
+            "zpr-vss".to_string(),
             IanaProtocol::TCP,
             format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT),
         );

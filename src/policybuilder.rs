@@ -438,7 +438,7 @@ impl PolicyBuilder {
                     self.add_connect(pconnect);
                     if let Some(cert_data) = &svc.certificate {
                         let pcert = polio::Cert {
-                            id: self.policy.certificates.len() as u32 + 1,
+                            id: self.policy.certificates.len() as u32 + 1, // note: we do not use ID of 0
                             asn1data: cert_data.clone(),
                             name: svc.fabric_id.clone(),
                         };

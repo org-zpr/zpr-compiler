@@ -88,7 +88,7 @@ impl TryFrom<u32> for IanaProtocol {
 impl IanaProtocol {
     /// Convert a ZPL string (with or without leading 'iana') to an IANA protocol number enum.
     pub fn parse(s: &str) -> Option<Self> {
-        let s = s.trim_start_matches("iana.");
+        let s = s.strip_prefix("iana.").unwrap_or(s);
         match s.to_lowercase().as_str() {
             "icmp" | "icmp4" | "icmpv4" => Some(IanaProtocol::ICMP),
             "tcp" => Some(IanaProtocol::TCP),
@@ -118,14 +118,14 @@ impl Protocol {
     /// Flexible constructor for a protocol.
     /// You can create partially valid protocols (eg, no port or icmp)
     pub fn new(
-        label: &str,
+        label: String,
         layer4: IanaProtocol,
         port: Option<String>,
         icmp: Option<IcmpFlowType>,
         layer7: Option<String>,
     ) -> Self {
         Protocol {
-            label: label.to_string(),
+            label: label,
             layer7,
             layer4,
             port,
@@ -136,8 +136,8 @@ impl Protocol {
     /// Create new for a ZPR namespace protocol.
     /// - `l7_protocol` is the layer 7 protocol name, eg "zpr-oauthrsa"
     pub fn new_zpr(
-        label: &str,
-        l7_protocol: &str,
+        label: String,
+        l7_protocol: String,
         port: Option<String>,
     ) -> Result<Self, ProtocolError> {
         let (prot, port_adj) = match l7_protocol.to_lowercase().as_str() {
@@ -162,7 +162,7 @@ impl Protocol {
             }
         };
         Ok(Protocol {
-            label: label.to_string(),
+            label: label,
             layer7: Some(l7_protocol.to_lowercase()),
             layer4: prot,
             port: port_adj,
@@ -171,8 +171,8 @@ impl Protocol {
     }
 
     pub fn new_l7_with_port(
-        label: &str,
-        l7_protocol: &str,
+        label: String,
+        l7_protocol: String,
         l4_protocol: IanaProtocol,
         port: Option<String>,
     ) -> Result<Self, ProtocolError> {
@@ -180,7 +180,7 @@ impl Protocol {
             return Self::new_zpr(label, l7_protocol, port);
         }
         Ok(Protocol {
-            label: label.to_string(),
+            label: label,
             layer7: Some(l7_protocol.to_lowercase()),
             layer4: l4_protocol,
             port,
@@ -189,8 +189,8 @@ impl Protocol {
     }
 
     pub fn new_l7_with_icmp(
-        label: &str,
-        l7_protocol: &str,
+        label: String,
+        l7_protocol: String,
         l4_protocol: IanaProtocol,
         icmp: Option<IcmpFlowType>,
     ) -> Result<Self, ProtocolError> {
@@ -198,7 +198,7 @@ impl Protocol {
             return Err(ProtocolError::InvalidIcmp(l7_protocol.to_string()));
         }
         Ok(Protocol {
-            label: label.to_string(),
+            label: label,
             layer7: Some(l7_protocol.to_lowercase()),
             layer4: l4_protocol,
             port: None,
@@ -206,9 +206,9 @@ impl Protocol {
         })
     }
 
-    pub fn new_l4_with_port(label: &str, protocol: IanaProtocol, port: String) -> Self {
+    pub fn new_l4_with_port(label: String, protocol: IanaProtocol, port: String) -> Self {
         Protocol {
-            label: label.to_string(),
+            label: label,
             layer7: None,
             layer4: protocol,
             port: Some(port),
@@ -216,9 +216,9 @@ impl Protocol {
         }
     }
 
-    pub fn new_l4_with_icmp(label: &str, protocol: IanaProtocol, icmp: IcmpFlowType) -> Self {
+    pub fn new_l4_with_icmp(label: String, protocol: IanaProtocol, icmp: IcmpFlowType) -> Self {
         Protocol {
-            label: label.to_string(),
+            label: label,
             layer7: None,
             layer4: protocol,
             port: None,
@@ -226,18 +226,18 @@ impl Protocol {
         }
     }
 
-    pub fn set_port(&mut self, port: &str) {
+    pub fn set_port(&mut self, port: String) {
         if !self.layer4.takes_port_arg() {
             panic!("Protocol::set_port called on non-port protocol");
         }
-        self.port = Some(port.to_string());
+        self.port = Some(port);
     }
 
-    pub fn set_icmp(&mut self, icmp: &IcmpFlowType) {
+    pub fn set_icmp(&mut self, icmp: IcmpFlowType) {
         if !self.layer4.is_icmp() {
             panic!("Protocol::set_icmp called on non-icmp protocol");
         }
-        self.icmp = Some(icmp.clone());
+        self.icmp = Some(icmp);
     }
 
     pub fn get_label(&self) -> &String {
@@ -248,8 +248,8 @@ impl Protocol {
         self.layer7.as_ref()
     }
 
-    pub fn set_layer7(&mut self, layer7: &str) {
-        self.layer7 = Some(layer7.to_string());
+    pub fn set_layer7(&mut self, layer7: String) {
+        self.layer7 = Some(layer7);
     }
 
     pub fn get_layer4(&self) -> IanaProtocol {

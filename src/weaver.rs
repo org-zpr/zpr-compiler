@@ -125,7 +125,7 @@ impl Weaver {
         ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         let vs_protocol = Protocol::new_l4_with_port(
-            "zpr-vs",
+            "zpr-vs".to_string(),
             IanaProtocol::TCP,
             zpl::VISA_SERVICE_PORT.to_string(),
         );
@@ -150,7 +150,7 @@ impl Weaver {
 
         // Now add a service for the admin HTTPS API.
         let admin_api_protocol = Protocol::new_l4_with_port(
-            "zpr-vsadmin",
+            "zpr-vsadmin".to_string(),
             IanaProtocol::TCP,
             zpl::VISA_SERVICE_ADMIN_PORT.to_string(),
         );
@@ -707,7 +707,7 @@ impl Weaver {
                 if svc_name == &vs_svc {
                     let mut vsp = prot.clone();
                     if ts_api == zpl::TS_API_V2 {
-                        vsp.set_layer7(ZPR_VALIDATION_2);
+                        vsp.set_layer7(ZPR_VALIDATION_2.to_string());
                     } else {
                         return Err(CompilationError::ConfigError(format!(
                             "trusted service {} has unknown API version {}",
@@ -718,7 +718,7 @@ impl Weaver {
                 } else {
                     // Fold in additional details about the client facing authentication service.
                     let mut auth_prot = prot.clone();
-                    auth_prot.set_layer7(ZPR_OAUTH_RSA); // TODO: Return layer7 name from config_api. Hardcoded to "zpr-oauthrsa" for now.
+                    auth_prot.set_layer7(ZPR_OAUTH_RSA.to_string()); // TODO: Return layer7 name from config_api. Hardcoded to "zpr-oauthrsa" for now.
                     let found = self.fabric.update_service(svc_name, |svc| {
                         svc.protocol = Some(auth_prot.clone());
                         svc.provider_attrs = ts_provider_attrs.clone();
@@ -744,7 +744,7 @@ impl Weaver {
                     &ts_api,
                     &ts_provider_attrs,
                     ts_cert,
-                    client_svc,
+                    &client_svc,
                 )
                 .map_err(|e| {
                     CompilationError::ConfigError(format!("error adding trusted service: {}", e))

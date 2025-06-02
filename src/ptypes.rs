@@ -252,7 +252,7 @@ impl fmt::Display for Attribute {
 }
 
 impl Attribute {
-    /// Crate new attribute. If the `name` includes a valid domain prefix, the domain will be set to that.
+    /// Create new attribute. If the `name` includes a valid domain prefix, the domain will be set to that.
     /// Otherwise the domain will be set to `domain_hint`.
     pub fn new_with_domain_hint(
         domain_hint: AttrDomain,

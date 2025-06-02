@@ -168,9 +168,10 @@ impl From<&ConfigItem> for Protocol {
                     }
                 };
                 if port_arg.is_some() {
-                    Protocol::new_l4_with_port(name, *prot, port_arg.unwrap()) // todo -- use TryFrom instead?
+                    Protocol::new_l4_with_port(name.clone(), *prot, port_arg.unwrap())
+                // todo -- use TryFrom instead?
                 } else {
-                    Protocol::new_l4_with_icmp(name, *prot, icmp_arg.unwrap())
+                    Protocol::new_l4_with_icmp(name.clone(), *prot, icmp_arg.unwrap())
                 }
             }
             _ => panic!("ConfigItem is not a protocol"),

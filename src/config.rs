@@ -67,10 +67,10 @@ pub struct ProtocolRefinement {
 impl ProtocolRefinement {
     pub fn apply(&self, protocol: &mut Protocol) {
         if let Some(refine) = &self.port {
-            protocol.set_port(refine);
+            protocol.set_port(refine.clone());
         }
         if let Some(refine) = &self.icmp {
-            protocol.set_icmp(refine);
+            protocol.set_icmp(refine.clone());
         }
     }
 }
@@ -199,7 +199,7 @@ impl ConfigParse {
         for pname in ZPR_L7_BUILTINS {
             protocols.insert(
                 pname.to_string(),
-                Protocol::new_zpr(pname, pname, None).unwrap(),
+                Protocol::new_zpr(pname.to_string(), pname.to_string(), None).unwrap(),
             );
         }
     }
@@ -754,7 +754,13 @@ fn parse_protocol(prot_label: &str, prot: &Table) -> Result<Protocol, Compilatio
         None
     };
     if let Some(l4) = IanaProtocol::parse(&protocol_name) {
-        Ok(Protocol::new(prot_label, l4, port, icmp, l7protocol))
+        Ok(Protocol::new(
+            prot_label.to_string(),
+            l4,
+            port,
+            icmp,
+            l7protocol,
+        ))
     } else {
         Err(err_config!(
             "protocol {}: invalid l4 protocol name: {}",
@@ -1268,11 +1274,11 @@ mod test {
         let mut protocols = HashMap::new();
         protocols.insert(
             String::from("ping"),
-            Protocol::new("ping", IanaProtocol::ICMPv6, None, None, None),
+            Protocol::new("ping".to_string(), IanaProtocol::ICMPv6, None, None, None),
         );
         protocols.insert(
             String::from("pong"),
-            Protocol::new("pong", IanaProtocol::ICMPv6, None, None, None),
+            Protocol::new("pong".to_string(), IanaProtocol::ICMPv6, None, None, None),
         );
         let services = cparser.parse_services(&ctx, &protocols);
         if services.is_err() {
