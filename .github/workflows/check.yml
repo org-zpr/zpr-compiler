@@ -7,38 +7,66 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
 
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@v2
-      - name: check warnings etc
-        timeout-minutes: 5
+
+      - name: Setup Git credentials
+        timeout-minutes: 1
         run: |
-          sudo apt install -u protobuf-compiler
-          make check
+          echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
+          chmod +x "$HOME/.git-askpass"
+          echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
+
+      - name: check warnings etc
+        env:
+          ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+        timeout-minutes: 5
+        run: make check
 
   test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@v2
-      - name: run tests
-        timeout-minutes: 5
+
+      - name: Setup Git credentials
+        timeout-minutes: 1
         run: |
-          sudo apt install -u protobuf-compiler
-          make test
+          echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
+          chmod +x "$HOME/.git-askpass"
+          echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
+
+      - name: run tests
+        env:
+          ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+        timeout-minutes: 5
+        run: make test
 
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal
       - uses: Swatinem/rust-cache@v2
-      - name: build
-        timeout-minutes: 5
+
+      - name: Setup Git credentials
+        timeout-minutes: 1
         run: |
-          sudo apt install -u protobuf-compiler
-          make build
+          echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
+          chmod +x "$HOME/.git-askpass"
+          echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
+
+      - name: build
+        env:
+          ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+        timeout-minutes: 5
+        run: make build
 

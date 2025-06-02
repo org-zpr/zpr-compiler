@@ -1,3 +1,5 @@
+use ::polio;
+use ::polio::{Policy, PolicyContainer};
 use clap::Parser;
 use colored::Colorize;
 use std::net::IpAddr;
@@ -10,9 +12,6 @@ use openssl::x509::X509;
 use prost::Message;
 
 use zplc::policybuilder::{NO_PROC, SERIAL_VERSION};
-use zplc::polio;
-use zplc::polio::Policy;
-use zplc::polio::PolicyContainer;
 use zplc::protocols::IanaProtocol;
 use zplc::zpl;
 

@@ -1,3 +1,4 @@
+use ::polio;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -12,7 +13,6 @@ use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
 use crate::policybuilder::PolicyBuilder;
-use crate::polio;
 use crate::weaver::weave;
 
 /// Updeate this if we change the container format. This is checked by visa service during deserialization.
