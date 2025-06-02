@@ -5,7 +5,7 @@ use std::iter::Peekable;
 
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{Attribute, Class, ClassFlavor};
+use crate::ptypes::{AttrDomain, Attribute, Class, ClassFlavor};
 use crate::putil;
 use crate::zpl;
 
@@ -232,25 +232,27 @@ where
                         tok.col,
                     ));
                 }
-                let attr = Attribute {
-                    name: name.clone(),
-                    value: Some(value.clone()),
-                    multi_valued: multiple,
-                    tag: false,
+                let attr = Attribute::new_with_domain_hint(
+                    AttrDomain::from_flavor(class.flavor),
+                    &name,
+                    Some(value.clone()),
+                    multiple,
+                    false,
                     optional,
-                };
+                );
                 class.with_attrs.push(attr);
                 multiple = false;
                 and = false;
             }
             TokenType::Literal(s) => {
-                let attr = Attribute {
-                    name: s.clone(),
-                    value: None,
-                    multi_valued: multiple,
-                    tag: tags || tag,
+                let attr = Attribute::new_with_domain_hint(
+                    AttrDomain::from_flavor(class.flavor),
+                    &s,
+                    None,
+                    multiple,
+                    tags || tag,
                     optional,
-                };
+                );
                 class.with_attrs.push(attr);
                 multiple = false;
                 and = false;

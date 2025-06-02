@@ -124,6 +124,9 @@ pub fn sign_pkcs1v15_sha256(key: &Rsa<Private>, data: &[u8]) -> Result<Vec<u8>, 
     let mut signer = Signer::new(MessageDigest::sha256(), &private_key)
         .map_err(|e| CompilationError::CryptoError(format!("error creating signer: {}", e)))?;
     signer
+        .set_rsa_padding(openssl::rsa::Padding::PKCS1)
+        .map_err(|e| CompilationError::CryptoError(format!("error setting padding: {}", e)))?;
+    signer
         .update(data)
         .map_err(|e| CompilationError::CryptoError(format!("error updating signer: {}", e)))?;
     signer

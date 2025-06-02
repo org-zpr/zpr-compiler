@@ -12,7 +12,7 @@ use toml::Table;
 use crate::context::CompilationCtx;
 use crate::crypto::sha256;
 use crate::errors::CompilationError;
-use crate::protocols::{self, IanaProtocol, IcmpFlowType, Protocol};
+use crate::protocols::{IanaProtocol, IcmpFlowType, Protocol, ZPR_L7_BUILTINS};
 use crate::ptypes::Attribute;
 use crate::zpl;
 
@@ -53,8 +53,26 @@ struct ConfigParse {
 #[derive(Debug)]
 pub struct Service {
     pub id: String,
-    pub protocol_id: String, // TODO: Could consider using a list here
+    pub protocol_id: String, // Known protocol.  TODO: Could consider using a list here
+    pub protocol_refinement: Option<ProtocolRefinement>, // optional protocol refinement
     pub provider: Option<Vec<(String, String)>>, // optional provider attributes
+}
+
+#[derive(Debug)]
+pub struct ProtocolRefinement {
+    pub port: Option<String>,       // override protocol port
+    pub icmp: Option<IcmpFlowType>, // override protocol icmp (needed??)
+}
+
+impl ProtocolRefinement {
+    pub fn apply(&self, protocol: &mut Protocol) {
+        if let Some(refine) = &self.port {
+            protocol.set_port(refine.clone());
+        }
+        if let Some(refine) = &self.icmp {
+            protocol.set_icmp(refine.clone());
+        }
+    }
 }
 
 /// Resolver table.
@@ -114,10 +132,12 @@ pub struct Bootstrap {
 pub struct TrustedService {
     pub id: String,
     pub api: String,
+    pub service: Option<String>, // Name of service for VS operations
+    pub client: Option<String>,  // Name of service for client operations
     pub cert_path: Option<PathBuf>,
-    pub prefix: String,
     pub returns_attrs: Vec<Attribute>,
     pub identity_attrs: Vec<Attribute>,
+    pub provider: Option<Vec<(String, String)>>, // required for non-default
 }
 
 impl Config {
@@ -158,8 +178,9 @@ impl ConfigParse {
         let visa_service = self.parse_visa_service(ctx)?;
         let bootstrap = self.parse_bootstrap(ctx)?;
         let trusted_services = self.parse_trusted_services(ctx)?;
-        let protocols = self.parse_protocols(ctx)?;
-        let services = self.parse_services(ctx)?;
+        let mut protocols = self.parse_protocols(ctx)?;
+        self.add_default_protocols(&mut protocols);
+        let services = self.parse_services(ctx, &protocols)?;
 
         Ok(Config {
             digest: self.digest,
@@ -171,6 +192,16 @@ impl ConfigParse {
             protocols,
             services,
         })
+    }
+
+    // Note that these are added with their default ports.
+    fn add_default_protocols(&self, protocols: &mut HashMap<String, Protocol>) {
+        for pname in ZPR_L7_BUILTINS {
+            protocols.insert(
+                pname.to_string(),
+                Protocol::new_zpr(pname.to_string(), pname.to_string(), None).unwrap(),
+            );
+        }
     }
 
     /// Parse the resolver section which is optional.  The defualt is just
@@ -367,7 +398,11 @@ impl ConfigParse {
     }
 
     /// Parse the services.<ID> tables
-    fn parse_services(&mut self, ctx: &CompilationCtx) -> Result<Vec<Service>, CompilationError> {
+    fn parse_services(
+        &mut self,
+        ctx: &CompilationCtx,
+        protocols: &HashMap<String, Protocol>,
+    ) -> Result<Vec<Service>, CompilationError> {
         if !self.ctoml.contains_key("services") {
             ctx.warn("no services in configuration")?;
             return Ok(Vec::new());
@@ -381,6 +416,7 @@ impl ConfigParse {
                 sid,
                 v.as_table()
                     .ok_or(err_config!("service {} is not a table", sid))?,
+                protocols,
             )?;
             ret.push(s);
         }
@@ -564,17 +600,11 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
     } else {
         None
     };
-    let prefix: String;
     let returns_attrs: Vec<String>;
     let identity_attrs: Vec<String>;
+    let client_svc: Option<String>;
+    let service_svc: Option<String>;
     if !is_default {
-        if !ts.contains_key("prefix") {
-            return Err(err_config!("trusted_service {} missing prefix", ts_id));
-        }
-        prefix = ts["prefix"]
-            .as_str()
-            .ok_or(err_config!("trusted_service {} prefix parse error", ts_id))?
-            .to_string();
         returns_attrs = parse_string_array(ts, "returns_attributes", "trusted_service")?;
         identity_attrs = parse_string_array(ts, "identity_attributes", "trusted_service")?;
 
@@ -587,6 +617,26 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
                     ia
                 ));
             }
+        }
+        if ts.contains_key("client") {
+            client_svc = Some(
+                ts["client"]
+                    .as_str()
+                    .ok_or(err_config!("trusted_service {} client parse error", ts_id))?
+                    .to_string(),
+            );
+        } else {
+            client_svc = Some(format!("{}-client", ts_id));
+        }
+        if ts.contains_key("service") {
+            service_svc = Some(
+                ts["service"]
+                    .as_str()
+                    .ok_or(err_config!("trusted_service {} service parse error", ts_id))?
+                    .to_string(),
+            );
+        } else {
+            service_svc = Some(format!("{}-vs", ts_id));
         }
     } else {
         if ts.contains_key("prefix") {
@@ -604,9 +654,10 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
                 "default trusted_service does not allow custom identity_attributes"
             ));
         }
-        prefix = zpl::DEFAULT_TS_PREFIX.to_string();
-        returns_attrs = vec![zpl::DEFAULT_ATTR.to_string()];
-        identity_attrs = vec![zpl::DEFAULT_ATTR.to_string()];
+        returns_attrs = vec![String::from(zpl::KATTR_CN)];
+        identity_attrs = vec![String::from(zpl::KATTR_CN)];
+        client_svc = None;
+        service_svc = None;
     }
 
     // We have a simple way to specify tags in the config toml: prefix name with hash '#'.
@@ -615,9 +666,9 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
     let mut returns = Vec::new();
     for ra in &returns_attrs {
         if let Some(stripped) = ra.strip_prefix("#") {
-            returns.push(Attribute::tag(stripped));
+            returns.push(Attribute::tag(stripped)?);
         } else {
-            returns.push(Attribute::attr_name_only(ra));
+            returns.push(Attribute::attr_name_only(ra)?);
         }
     }
 
@@ -626,16 +677,27 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
         if ra.starts_with("#") {
             return Err(err_config!("identity attribute cannot be a tag: '{}'", ra));
         }
-        idents.push(Attribute::attr_name_only(ra));
+        idents.push(Attribute::attr_name_only(ra)?);
     }
+
+    let provider = if ts.contains_key("provider") {
+        Some(parse_provider(&format!("trusted_service {ts_id}"), ts)?)
+    } else {
+        if !is_default {
+            return Err(err_config!("trusted_service {} missing provider", ts_id));
+        }
+        None
+    };
 
     Ok(TrustedService {
         id: ts_id.to_string(),
         api,
         cert_path,
-        prefix,
         returns_attrs: returns,
         identity_attrs: idents,
+        provider,
+        client: client_svc,
+        service: service_svc,
     })
 }
 
@@ -659,42 +721,60 @@ fn parse_string_array(ts: &Table, key: &str, ctx: &str) -> Result<Vec<String>, C
 }
 
 /// Parse an individual protocol table.
-fn parse_protocol(prot_id: &str, prot: &Table) -> Result<Protocol, CompilationError> {
-    let protocol_name = prot["protocol"]
+/// Allow fields are:
+/// - l4protocol (iana protocol name)
+/// - 7lprotocol (app layer protocol name eg, HTTP or a ZPR protocol name)
+/// - port (optional)
+/// - icmp_type
+/// - icmp_codes
+fn parse_protocol(prot_label: &str, prot: &Table) -> Result<Protocol, CompilationError> {
+    if !prot.contains_key("l4protocol") {
+        return Err(err_config!(
+            "protocol {} missing key 'l4protocol'",
+            prot_label
+        ));
+    }
+    let protocol_name = prot["l4protocol"]
         .as_str()
-        .ok_or(err_config!("protocol {} missing protocol", prot_id))?
+        .ok_or(err_config!("protocol {} missing protocol", prot_label))?
         .to_string();
-
-    let protocol: IanaProtocol = if protocol_name.starts_with("iana.") {
-        let iana_name = protocol_name.split(".").nth(1).ok_or(err_config!(
-            "protocol {} invalid IANA protocol name: {}",
-            prot_id,
-            protocol_name
-        ))?;
-        protocols::parse(iana_name).ok_or(err_config!(
-            "protocol {} unknown IANA protocol name: {}",
-            prot_id,
-            protocol_name
-        ))?
+    let is_icmp = prot.contains_key("icmp_type") || prot.contains_key("icmp_codes");
+    let (port, icmp) = parse_port_and_or_icmp(prot_label, is_icmp, prot)?;
+    let l7protocol = if prot.contains_key("l7protocol") {
+        Some(
+            prot["l7protocol"]
+                .as_str()
+                .ok_or(err_config!(
+                    "protocol {} l7protocol is not a string",
+                    prot_label
+                ))?
+                .to_string(),
+        )
     } else {
-        // TODO: Not sure what it means to have non-iana protocol yet.
-        return Err(err_config!(
-            "protocol {} non-IANA protocols not yet supported: {}",
-            prot_id,
-            protocol_name
-        ));
+        None
     };
-
-    if protocol.takes_port_arg() && !prot.contains_key("port") {
-        return Err(err_config!("protocol {} missing port", prot_id));
+    if let Some(l4) = IanaProtocol::parse(&protocol_name) {
+        Ok(Protocol::new(
+            prot_label.to_string(),
+            l4,
+            port,
+            icmp,
+            l7protocol,
+        ))
+    } else {
+        Err(err_config!(
+            "protocol {}: invalid l4 protocol name: {}",
+            prot_label,
+            protocol_name
+        ))
     }
-    if !protocol.takes_port_arg() && prot.contains_key("port") {
-        return Err(err_config!(
-            "protocol {} has port but does not take one",
-            prot_id
-        ));
-    }
+}
 
+fn parse_port_and_or_icmp(
+    ctx: &str,
+    is_icmp: bool,
+    prot: &Table,
+) -> Result<(Option<String>, Option<IcmpFlowType>), CompilationError> {
     // For now we treat the port value as a string. But is really going to be a port spec so could
     // be a range of ports or a sequence of ports, etc.  In TOML this may come through as a number.
     let port = if prot.contains_key("port") {
@@ -707,37 +787,40 @@ fn parse_protocol(prot_id: &str, prot: &Table) -> Result<Protocol, CompilationEr
         None
     };
 
-    let icmp = if protocol.is_icmp() {
-        Some(parse_icmp_details(prot_id, prot)?)
+    let icmp = if is_icmp {
+        Some(parse_icmp_details(ctx, prot)?)
     } else {
         if prot.contains_key("icmp_type") {
             return Err(err_config!(
                 "protocol {} has icmp_type but is not an ICMP protocol",
-                prot_id
+                ctx
             ));
         }
         if prot.contains_key("icmp_codes") {
             return Err(err_config!(
                 "protocol {} has icmp_codes but is not an ICMP protocol",
-                prot_id
+                ctx,
             ));
         }
         None
     };
 
-    Ok(Protocol {
-        protocol,
-        port,
-        icmp,
-    })
+    Ok((port, icmp))
 }
 
 /// Parse the very bare bones individual service table.
-fn parse_service(sid: &str, s: &Table) -> Result<Service, CompilationError> {
+///
+/// A service must reference a defined protocol using the `protocol` key, it can also
+/// additionally override a port or icmp setting in a defined protocol.
+fn parse_service(
+    sid: &str,
+    s: &Table,
+    protocols: &HashMap<String, Protocol>,
+) -> Result<Service, CompilationError> {
     if !s.contains_key("protocol") {
         return Err(err_config!("service {} missing protocol", sid));
     }
-    let protocol_id = s["protocol"]
+    let protocol_label = s["protocol"]
         .as_str()
         .ok_or(err_config!("service {} missing protocol", sid))?
         .to_string();
@@ -746,9 +829,49 @@ fn parse_service(sid: &str, s: &Table) -> Result<Service, CompilationError> {
     } else {
         None
     };
+
+    let Some(matched_protocol) = protocols.get(&protocol_label) else {
+        return Err(err_config!(
+            "service {} references unknown protocol {}",
+            sid,
+            protocol_label
+        ));
+    };
+
+    // The service could contain overrides for protocol.
+    let looks_like_icmp = s.contains_key("icmp_type") || s.contains_key("icmp_codes");
+    let (port, icmp) = parse_port_and_or_icmp(sid, looks_like_icmp, s)?;
+    let opt_refine =
+        // Is in our table.  Did this clause specify any sort of override?
+        if port.is_some() || icmp.is_some() {
+            if port.is_some() && matched_protocol.is_icmp() {
+                return Err(err_config!(
+                    "service {}: cannot override port for ICMP protocol: {}",
+                    sid,
+                    protocol_label
+                ));
+            }
+            if icmp.is_some() && !matched_protocol.is_icmp() {
+                return Err(err_config!(
+                    "service {}: cannot override icmp for non-ICMP protocol: {}",
+                    sid,
+                    protocol_label
+                ));
+            }
+            let refinement = ProtocolRefinement {
+                port,
+                icmp,
+            };
+            Some(refinement)
+        } else {
+            // No override, just use the protocol as is.
+            None
+        };
+
     Ok(Service {
         id: sid.to_string(),
-        protocol_id,
+        protocol_id: protocol_label,
+        protocol_refinement: opt_refine,
         provider,
     })
 }
@@ -950,18 +1073,21 @@ mod test {
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
         let services = cparser.parse_trusted_services(&ctx);
-        assert!(services.is_ok());
+        assert!(
+            services.is_ok(),
+            "parse failed: {:?}",
+            services.unwrap_err()
+        );
         let services = services.unwrap();
         assert_eq!(services.len(), 1);
         let ts = services.get(0).unwrap();
         assert_eq!(ts.id, "default");
         assert_eq!(ts.api, zpl::DEFAULT_TRUSTED_SERVICE_API);
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
-        assert_eq!(ts.prefix, zpl::DEFAULT_TS_PREFIX);
         assert_eq!(ts.returns_attrs.len(), 1);
-        assert!(ts.returns_attrs[0].zpl_key() == "cn");
+        assert_eq!(ts.returns_attrs[0].zpl_key(), "device.zpr.adapter.cn");
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert!(ts.identity_attrs[0].zpl_key() == "cn");
+        assert_eq!(ts.identity_attrs[0].zpl_key(), "device.zpr.adapter.cn");
     }
 
     #[test]
@@ -973,6 +1099,7 @@ mod test {
         prefix = "bar.hop"
         returns_attributes = ["a", "c"]
         identity_attributes = ["c"]
+        provider = [["foo", "bar"]]
         "#;
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
@@ -982,11 +1109,90 @@ mod test {
         // and with api succeeds
         let tstr = r#"
         [trusted_services.other]
-        api = "validation/1"
+        api = "validation/2"
         cert_path = "foo.pem"
         prefix = "bar.hop"
-        returns_attributes = ["a", "c"]
-        identity_attributes = ["c"]
+        returns_attributes = ["user.a", "user.c"]
+        identity_attributes = ["user.c"]
+        provider = [["foo", "bar"]]
+        "#;
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let services = cparser.parse_trusted_services(&ctx);
+        if services.is_err() {
+            panic!("parse_trusted_services failed: {:?}", services);
+        }
+        assert!(services.is_ok());
+        let services = services.unwrap();
+        assert_eq!(services.len(), 1);
+        let ts = services.get(0).unwrap();
+        assert_eq!(ts.id, "other");
+        assert_eq!(ts.api, "validation/2");
+        assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
+        assert_eq!(ts.returns_attrs.len(), 2);
+        {
+            let attr_names = ts
+                .returns_attrs
+                .iter()
+                .map(|a| a.zpl_key())
+                .collect::<Vec<String>>();
+            assert!(attr_names.contains(&"user.a".to_string()));
+            assert!(attr_names.contains(&"user.c".to_string()));
+        }
+        assert_eq!(ts.identity_attrs.len(), 1);
+        assert!(ts.identity_attrs[0].zpl_key() == "user.c");
+    }
+
+    #[test]
+    fn test_parse_trusted_service_prefix_not_required() {
+        let tstr = r#"
+        [trusted_services.other]
+        api = "validation/2"
+        cert_path = "foo.pem"
+        returns_attributes = ["user.a", "user.c"]
+        identity_attributes = ["user.c"]
+        provider = [["foo", "bar"]]
+        "#;
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let services = cparser.parse_trusted_services(&ctx);
+        if services.is_err() {
+            panic!("parse_trusted_services failed: {:?}", services);
+        }
+        assert!(services.is_ok());
+        let services = services.unwrap();
+        assert_eq!(services.len(), 1);
+        let ts = services.get(0).unwrap();
+        assert_eq!(ts.id, "other");
+        assert_eq!(ts.api, "validation/2");
+        assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
+        assert_eq!(ts.returns_attrs.len(), 2);
+        {
+            let attr_names = ts
+                .returns_attrs
+                .iter()
+                .map(|a| a.zpl_key())
+                .collect::<Vec<String>>();
+            assert!(attr_names.contains(&"user.a".to_string()));
+            assert!(attr_names.contains(&"user.c".to_string()));
+        }
+        assert_eq!(ts.identity_attrs.len(), 1);
+        assert!(ts.identity_attrs[0].zpl_key() == "user.c");
+        assert_eq!(ts.client, Some("other-client".to_string()));
+        assert_eq!(ts.service, Some("other-vs".to_string()));
+    }
+
+    #[test]
+    fn test_parse_trusted_service_bas() {
+        let tstr = r#"
+        [trusted_services.bas]
+        api = "validation/2"
+        cert_path = "foo.crt"
+        returns_attributes = ["user.a", "user.c"]
+        identity_attributes = ["user.c"]
+        provider = [["foo", "bar"]]
+        client = "bas-client-interface"
+        service = "bas-vs-interface"
         "#;
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
@@ -995,10 +1201,13 @@ mod test {
         let services = services.unwrap();
         assert_eq!(services.len(), 1);
         let ts = services.get(0).unwrap();
-        assert_eq!(ts.id, "other");
-        assert_eq!(ts.api, "validation/1");
-        assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
-        assert_eq!(ts.prefix, "bar.hop");
+        assert_eq!(ts.id, "bas");
+        assert_eq!(ts.api, "validation/2");
+        assert_eq!(ts.cert_path, Some(PathBuf::from("foo.crt")));
+        assert!(ts.provider.is_some());
+        let provider = ts.provider.as_ref().unwrap();
+        assert_eq!(provider.len(), 1);
+        assert!(provider.contains(&("foo".to_string(), "bar".to_string())));
         assert_eq!(ts.returns_attrs.len(), 2);
         {
             let attr_names = ts
@@ -1006,22 +1215,24 @@ mod test {
                 .iter()
                 .map(|a| a.zpl_key())
                 .collect::<Vec<String>>();
-            assert!(attr_names.contains(&"a".to_string()));
-            assert!(attr_names.contains(&"c".to_string()));
+            assert!(attr_names.contains(&"user.a".to_string()));
+            assert!(attr_names.contains(&"user.c".to_string()));
         }
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert!(ts.identity_attrs[0].zpl_key() == "c");
+        assert!(ts.identity_attrs[0].zpl_key() == "user.c");
+        assert_eq!(ts.client, Some("bas-client-interface".to_string()));
+        assert_eq!(ts.service, Some("bas-vs-interface".to_string()));
     }
 
     #[test]
     fn test_parse_protocols() {
         let tstr = r#"
         [protocols.http]
-        protocol = "iana.Tcp"
+        l4protocol = "iana.Tcp"
         port = "80"
 
         [protocols.ping]
-        protocol = "iana.ICMP6"
+        l4protocol = "iana.ICMP6"
         icmp_type = "request-response"
         icmp_codes = [128, 129]
         "#;
@@ -1032,13 +1243,13 @@ mod test {
         let prots = prots.unwrap();
         assert_eq!(prots.len(), 2);
         let http = prots.get("http").unwrap();
-        assert_eq!(http.protocol, IanaProtocol::TCP);
-        assert_eq!(http.port, Some("80".to_string()));
-        assert!(http.icmp.is_none());
+        assert_eq!(http.get_layer4(), IanaProtocol::TCP);
+        assert_eq!(http.get_port(), Some(&String::from("80")));
+        assert!(!http.is_icmp());
         let ping = prots.get("ping").unwrap();
-        assert_eq!(ping.protocol, IanaProtocol::ICMPv6);
-        assert!(ping.port.is_none());
-        let icmp = ping.icmp.as_ref().unwrap();
+        assert_eq!(ping.get_layer4(), IanaProtocol::ICMPv6);
+        assert!(!ping.has_port());
+        let icmp = ping.get_icmp().unwrap();
         match icmp {
             IcmpFlowType::RequestResponse(c0, c1) => {
                 assert_eq!(*c0, 128);
@@ -1060,7 +1271,19 @@ mod test {
         "#;
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
-        let services = cparser.parse_services(&ctx);
+        let mut protocols = HashMap::new();
+        protocols.insert(
+            String::from("ping"),
+            Protocol::new("ping".to_string(), IanaProtocol::ICMPv6, None, None, None),
+        );
+        protocols.insert(
+            String::from("pong"),
+            Protocol::new("pong".to_string(), IanaProtocol::ICMPv6, None, None, None),
+        );
+        let services = cparser.parse_services(&ctx, &protocols);
+        if services.is_err() {
+            panic!("parse_services failed: {:?}", services);
+        }
         assert!(services.is_ok());
         let services = services.unwrap();
         assert_eq!(services.len(), 2);
@@ -1084,6 +1307,31 @@ mod test {
             }
         }
         assert_eq!(hits, 0x3); // or did not hit both services.
+    }
+
+    #[test]
+    fn test_parse_services_with_ports() {
+        let tstr = r#"
+        [services.MyService]
+        protocol = "zpr-oauthrsa"
+        port = "3000"
+        "#;
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let mut protocols = HashMap::new();
+        cparser.add_default_protocols(&mut protocols);
+        let services = cparser.parse_services(&ctx, &protocols);
+        if services.is_err() {
+            panic!("parse_services failed: {:?}", services);
+        }
+        assert!(services.is_ok());
+        let services = services.unwrap();
+        assert_eq!(services.len(), 1);
+        let parsed = services.get(0).unwrap();
+        assert_eq!(parsed.id, "MyService");
+        assert!(parsed.protocol_refinement.is_some());
+        let pr = parsed.protocol_refinement.as_ref().unwrap();
+        assert_eq!(pr.port, Some("3000".to_string()));
     }
 
     #[test]

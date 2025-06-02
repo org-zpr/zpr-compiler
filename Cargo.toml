@@ -1,6 +1,6 @@
 [package]
 name = "zplc"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
@@ -17,7 +17,7 @@ ring = "0.17.8"
 serde = { version = "1.0.217", features = ["derive"] }
 thiserror = "2.0.8"
 toml = "0.8.19"
-zpr-policy = { git = "https://github.com/org-zpr/zpr-policy-rs.git", tag = "v0.1.1" }
+zpr-policy = { git = "https://github.com/org-zpr/zpr-policy-rs.git", tag = "v0.2.1" }
 
 [lib]
 test = false

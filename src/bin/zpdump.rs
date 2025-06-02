@@ -20,7 +20,7 @@ use zplc::zpl;
 /// Prints contents of a binary policy file to stdout.
 #[derive(Debug, Parser)]
 #[command(name = "zpdump")]
-#[command(version = "0.2.0", verbatim_doc_comment)]
+#[command(version, verbatim_doc_comment)]
 struct Cli {
     /// Path to the ZPL file.
     #[arg(value_name = "ZPL_FILE")]
@@ -142,6 +142,16 @@ fn main() {
             println!("     service_id: {}", cp.service_id.yellow());
             println!("             id: {}", cp.id.yellow());
             println!("          scope: {}", scopes_to_string(&cp.scope).yellow());
+            for cond in &cp.conditions {
+                println!("     cond {}:", format!("{}", cond.id).yellow());
+                for aexp in &cond.attr_exprs {
+                    println!(
+                        "         {} {}",
+                        format!("{}", "󰞘").dimmed(),
+                        attr_exp_to_string(aexp, &pol.attr_key_index, &pol.attr_val_index).yellow()
+                    );
+                }
+            }
         }
     }
 
@@ -149,16 +159,23 @@ fn main() {
         print_section_hdr("SERVICES");
         for (i, service) in pol.services.iter().enumerate() {
             println!("service {}", format!("{}", i + 1).yellow());
-            println!("       type: {}", svct_to_string(service.r#type).yellow());
-            println!("       name: {}", service.name.yellow());
-            println!("     prefix: {}", service.prefix.yellow());
-            println!("     domain: {}", service.domain.yellow());
             println!(
-                "        api: query {} / validate {}",
-                format!("{}", service.query_api_version).yellow(),
-                format!("{}", service.validate_api_version).yellow()
+                "          type: {}",
+                svct_to_string(service.r#type).yellow()
             );
-            println!("       addr: {}", service.addr.yellow());
+            println!("          name: {}", service.name.yellow());
+            println!("        prefix: {}", service.prefix.yellow());
+            println!("        domain: {}", service.domain.yellow());
+            if service.query_uri.is_empty() {
+                println!("     query_uri: {}", "unsupported".red());
+            } else {
+                println!("     query_uri: {}", service.query_uri.yellow());
+            }
+            if service.validate_uri.is_empty() {
+                println!("  validate_uri: {}", "unsupported".red());
+            } else {
+                println!("  validate_uri: {}", service.validate_uri.yellow());
+            }
         }
     }
 
@@ -237,11 +254,11 @@ fn main() {
         print_section_hdr("ATTRIBUTES");
         let key_idx_len = pol.attr_key_index.len();
         let val_idx_len = pol.attr_val_index.len();
-        println!("       {}{:>29}", "KEYS".bold(), "VALUES".bold());
+        println!("       {}{:>33}", "KEYS".bold(), "VALUES".bold());
         for i in 0..key_idx_len.max(val_idx_len) {
             if i < key_idx_len && i < val_idx_len {
                 print!(
-                    "     {:>3}: {:<20}",
+                    "     {:>3}: {:<24}",
                     format!("{}", i).yellow(),
                     pol.attr_key_index[i].yellow()
                 );
@@ -252,13 +269,13 @@ fn main() {
                 );
             } else if i < key_idx_len {
                 println!(
-                    "     {:>3}: {:<20}",
+                    "     {:>3}: {:<24}",
                     format!("{}", i).yellow(),
                     pol.attr_key_index[i].yellow()
                 );
             } else {
                 println!(
-                    "{:>32}{:>3}: {}",
+                    "{:>36}{:>3}: {}",
                     "",
                     format!("{}", i).yellow(),
                     pol.attr_val_index[i].yellow()

@@ -5,7 +5,7 @@ use crate::context::CompilationCtx;
 use crate::define::{parse_define, resolve_class_flavors};
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{Class, Policy};
+use crate::ptypes::{AttrDomain, Class, Policy};
 
 #[derive(Default)]
 pub struct ParsingResult {
@@ -98,6 +98,22 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
     // Take a pass over the defines to resolve all the child/parent relationships and
     // compute the correct flavors.
     resolve_class_flavors(&mut classes)?;
+
+    // Now make sure all attributes have a domain.
+    for (_, class) in classes.iter_mut() {
+        for attr in class.with_attrs.iter_mut() {
+            if attr.is_unspecified_domain() {
+                attr.set_domain(AttrDomain::from_flavor(class.flavor));
+            }
+            if attr.is_unspecified_domain() {
+                return Err(CompilationError::ParseError(
+                    format!("attribute {} has no domain", attr.zpl_key()),
+                    class.pos.line,
+                    class.pos.col,
+                ));
+            }
+        }
+    }
 
     // Next parse all the allows.
     for (i, statement) in statements.iter().enumerate() {
@@ -197,33 +213,36 @@ allow devices with marketing-emps to access role:marketing services
         assert_eq!(emp.flavor, ClassFlavor::User);
         assert_eq!(emp.with_attrs.len(), 5);
         for attr in &emp.with_attrs {
-            match attr.name.as_str() {
-                "ID-number" => {
+            match attr.zpl_key().as_str() {
+                "user.ID-number" => {
                     assert_eq!(attr.multi_valued, false);
                     assert_eq!(attr.tag, false);
                     assert_eq!(attr.optional, false);
                 }
-                "roles" => {
+                "user.roles" => {
                     assert_eq!(attr.multi_valued, true);
                     assert_eq!(attr.tag, false);
                     assert_eq!(attr.optional, false);
                 }
-                "full-time" => {
+                "user.zpr.tag" if attr.zpl_value() == "user.full-time" => {
                     assert_eq!(attr.multi_valued, false);
                     assert_eq!(attr.tag, true);
                     assert_eq!(attr.optional, true);
                 }
-                "part-time" => {
+                "user.zpr.tag" if attr.zpl_value() == "user.part-time" => {
                     assert_eq!(attr.multi_valued, false);
                     assert_eq!(attr.tag, true);
                     assert_eq!(attr.optional, true);
                 }
-                "intern" => {
+                "user.zpr.tag" if attr.zpl_value() == "user.intern" => {
                     assert_eq!(attr.multi_valued, false);
                     assert_eq!(attr.tag, true);
                     assert_eq!(attr.optional, true);
                 }
-                _ => panic!("unexpected attribute name: {}", attr.name),
+                "user.zpr.tag" => {
+                    panic!("unexpected tag: {}", attr.zpl_value());
+                }
+                _ => panic!("unexpected attribute name: {}", attr.zpl_key()),
             }
         }
     }

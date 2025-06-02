@@ -52,9 +52,6 @@ pub enum CompilationError {
     #[error("[ line {1}, column {2} ]  conflicting values for attribute {0}")]
     AttributeValueConflict(String, usize, usize),
 
-    #[error("attribute error: {0}")]
-    AttributeError(String),
-
     #[error("[ line {1}, column {2} ] {0}")]
     ZPLError(String, usize, usize),
 
@@ -78,4 +75,19 @@ pub enum CompilationError {
 
     #[error("warning: {0}")]
     Warning(String),
+
+    #[error("protocol error: {0}")]
+    ProtocolError(#[from] crate::protocols::ProtocolError),
+
+    #[error("attribute error: {0}")]
+    AttributeError(#[from] AttributeError),
+}
+
+#[derive(Debug, Error)]
+pub enum AttributeError {
+    #[error("Invalid attribute domain: {0}")]
+    InvalidDomain(String),
+
+    #[error("Invalid attribute: {0}")]
+    ParseError(String),
 }

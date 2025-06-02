@@ -1,5 +1,18 @@
 # The ZPR ZPL Compiler Changelog
 
+## [0.x.0] - in progress
+
+- `trusted_service` block requires provider (not for default).
+- Additions to `trusted_service` to support new authentication services.
+- In the `protocol` block, the `protocol` key has been renamed to `l4protocol`.
+- A `service` block can override protocol details like `port` or ICMP.
+- Non default trusted services must have cooresponding services blocks for 
+  their client and visa service components.
+- All attributes must be in one of our domains: user, device or service.
+- All attributes must come from a declared service.
+- Removed the `prefix` setting for a `trusted_service`.
+
+
 ## [0.2.0] - 2025-05-01
 
 - Support for adding bootstrap keys to policy.

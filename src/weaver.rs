@@ -1,6 +1,6 @@
 //! weaver.rs - Poetically named module that can "weave" a "fabric" from a ZPL policy and configuration.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use base64::prelude::*;
 
@@ -11,7 +11,7 @@ use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
 use crate::fabric::{Fabric, ServiceType};
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
-use crate::protocols::{IanaProtocol, Protocol};
+use crate::protocols::{IanaProtocol, Protocol, ZPR_OAUTH_RSA, ZPR_VALIDATION_2};
 use crate::ptypes::{Attribute, Class, ClassFlavor, FPos, Policy};
 use crate::zpl;
 
@@ -20,6 +20,9 @@ pub struct Weaver {
 
     // Map the allow clause ID to the fabric service ID.
     allowid_to_fab_svc: HashMap<usize, String>,
+
+    // Track the IDs of the in-use trusted services.
+    used_trusted_services: HashSet<String>,
 }
 
 /// Weave produces the fabric from the ZPL and Configuration data structures,
@@ -62,23 +65,12 @@ pub fn weave(
         class_idx.insert(cl.name.clone(), cl);
     }
 
-    // We do not yet support non-default trusted services though we will parse them and
-    // we do grab their attributes so that we can parse ZPL that uses them.
-    //
-    // But since we don't put this into the binary policy yet, the resulting policy
-    // will not be readable by visa service.
-    for ts_id in &config.must_get_keys("/trusted_services") {
-        if ts_id != zpl::DEFAULT_TRUSTED_SERVICE_ID {
-            ctx.warn(&format!(
-                "trusted_service '{}': non-default trusted services not supported",
-                ts_id
-            ))?;
-        }
-    }
-
     weaver.init_services(&class_idx, policy, config, ctx)?;
     weaver.init_nodes(config)?;
     weaver.add_client_policies(&class_idx, policy, config)?;
+    // By the time we get here, we have resolved all attributes and so know which trusted
+    // services are in play.
+    weaver.add_trusted_services(config, ctx)?;
     weaver.add_default_auth(config, ctx)?;
     weaver.add_bootstrap_records(config, ctx)?;
 
@@ -90,6 +82,7 @@ impl Weaver {
         Self {
             fabric: Fabric::default(),
             allowid_to_fab_svc: HashMap::new(),
+            used_trusted_services: HashSet::new(),
         }
     }
 
@@ -131,14 +124,17 @@ impl Weaver {
         config: &ConfigApi,
         ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
-        let vs_protocol = Protocol {
-            protocol: IanaProtocol::TCP,
-            port: Some(zpl::VISA_SERVICE_PORT.to_string()),
-            icmp: None,
-        };
+        let vs_protocol = Protocol::new_l4_with_port(
+            "zpr-vs".to_string(),
+            IanaProtocol::TCP,
+            zpl::VISA_SERVICE_PORT.to_string(),
+        );
 
         // The provider of the visa service is a hardcoded CN value.
-        let vs_attrs = vec![Attribute::attr(zpl::ADAPTER_CN_ATTR, zpl::VISA_SERVICE_CN)];
+        let vs_attrs = vec![Attribute::attr_or_panic(
+            zpl::KATTR_CN,
+            zpl::VISA_SERVICE_CN,
+        )];
         let fab_svc_id = self.fabric.add_service(
             zpl::VS_SERVICE_NAME,
             &vs_protocol,
@@ -148,16 +144,16 @@ impl Weaver {
 
         // Visa service has policy that allows nodes to access it.  We use a node role attribute so
         // we don't care about individual node names.
-        let vs_access_attrs = vec![Attribute::attr(zpl::KATTR_ROLE, "node")];
+        let vs_access_attrs = vec![Attribute::zpr_internal_attr(zpl::KATTR_ROLE, "node")];
         self.fabric
             .add_condition_to_service(&fab_svc_id, &vs_access_attrs, true)?;
 
         // Now add a service for the admin HTTPS API.
-        let admin_api_protocol = Protocol {
-            protocol: IanaProtocol::TCP,
-            port: Some(zpl::VISA_SERVICE_ADMIN_PORT.to_string()),
-            icmp: None,
-        };
+        let admin_api_protocol = Protocol::new_l4_with_port(
+            "zpr-vsadmin".to_string(),
+            IanaProtocol::TCP,
+            zpl::VISA_SERVICE_ADMIN_PORT.to_string(),
+        );
 
         // This AMIN service is provided by the visa service too.
         let fab_admin_svc_id = self.fabric.add_builtin_service(
@@ -183,6 +179,7 @@ impl Weaver {
 
         // TODO: When we get around to trusted services, we need to add builtin rules
         //       that grant VS access to the trusted services.
+        //       And adapters also have rules (to access the OAuth endpoints).
         Ok(())
     }
 
@@ -208,7 +205,6 @@ impl Weaver {
             let mut attrs = Vec::new();
             let svc_class_attrs = attrs_for_class(class_idx, &define.name);
             attrs.extend_from_slice(&svc_class_attrs);
-
             self.add_service(class_idx, define, &attrs, svc_id, config)?;
             svc_id -= 1;
         }
@@ -273,8 +269,24 @@ impl Weaver {
             }
         };
 
-        let attr_map = squash_attributes(&attrs, &sclass.pos)?;
+        // This service may be an adapter facing authentication service.
+        let mut svc_type = ServiceType::Regular;
+        match config.get("/trusted_services") {
+            Some(ConfigItem::KeySet(ts_names)) => {
+                for nam in ts_names {
+                    match config.get(&format!("/trusted_services/{nam}/client_service")) {
+                        Some(ConfigItem::StrVal(cs_name)) if cs_name == matched_service_name => {
+                            svc_type = ServiceType::Authentication;
+                            break;
+                        }
+                        _ => (),
+                    }
+                }
+            }
+            _ => (),
+        };
 
+        let attr_map = squash_attributes(&attrs, &sclass.pos)?;
         let resolved_attrs = self.resolve_attributes(
             attr_map
                 .into_values()
@@ -283,19 +295,16 @@ impl Weaver {
             config,
         )?;
 
-        if resolved_attrs.is_empty() {
+        if svc_type == ServiceType::Regular && resolved_attrs.is_empty() {
             return Err(CompilationError::ConfigError(format!(
                 "service with no attributes {}",
                 matched_service_name
             )));
         }
 
-        let fabric_svc_id = self.fabric.add_service(
-            &matched_service_name,
-            &prot,
-            &resolved_attrs,
-            ServiceType::Regular,
-        )?;
+        let fabric_svc_id =
+            self.fabric
+                .add_service(&matched_service_name, &prot, &resolved_attrs, svc_type)?;
         self.allowid_to_fab_svc.insert(svc_id, fabric_svc_id);
 
         Ok(())
@@ -319,7 +328,6 @@ impl Weaver {
             let svc_class_attrs = attrs_for_class(class_idx, &ac.service.class);
             attrs.extend_from_slice(&svc_class_attrs);
             attrs.extend_from_slice(&ac.service.with);
-
             let svc_class = class_idx
                 .get(&ac.service.class)
                 .expect("service class not found in class index");
@@ -329,12 +337,12 @@ impl Weaver {
         Ok(())
     }
 
-    // Every attribute needs to come from a trusted service. Since right now (TODO) the
-    // only service is the default one, the only attribute we accept is "cn" or the full
-    // expansion of that "zpr.adapter.cn".
+    // Every attribute needs to come from a trusted service.
+    //
+    // As a side effect, this updates our local set of in-use trusted services.
     //
     fn resolve_attributes(
-        &self,
+        &mut self,
         attrs: &[Attribute],
         config: &ConfigApi,
     ) -> Result<Vec<Attribute>, CompilationError> {
@@ -345,38 +353,27 @@ impl Weaver {
 
         let mut resolved_attrs = Vec::new();
         for a in attrs {
-            if a.name == zpl::ADAPTER_CN_ATTR {
-                if a.tag {
-                    return Err(CompilationError::ConfigError(format!(
-                        "{} attribute used as a tag, but is a tuple attriubte",
-                        a.name
-                    )));
-                }
-                resolved_attrs.push(a.clone());
+            let attr_name = a.zpl_key();
+            if a.tag && a.zpl_value() == zpl::KATTR_CN {
+                return Err(CompilationError::ConfigError(format!(
+                    "{} attribute used as a tag, but is a tuple attribute",
+                    a,
+                )));
             }
-            if a.name == zpl::DEFAULT_ATTR {
-                if a.tag {
-                    return Err(CompilationError::ConfigError(format!(
-                        "{} attribute used as a tag, but is a tuple attribute",
-                        a.name
-                    )));
-                }
-                resolved_attrs.push(a.set_name(zpl::ADAPTER_CN_ATTR));
+            if attr_name == zpl::KATTR_CN {
+                resolved_attrs.push(a.clone());
+                self.used_trusted_services
+                    .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+            } else if attr_name == zpl::DEFAULT_ATTR {
+                resolved_attrs.push(a.clone_with_new_name(zpl::KATTR_CN));
+                self.used_trusted_services
+                    .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
             } else {
                 // TODO: This should be cached
                 // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
                 let mut matched = false;
                 for ts_name in &trusted_service_names {
-                    let ts_prefix = config
-                        .must_get(&format!("/trusted_services/{}/prefix", ts_name))
-                        .to_string();
-                    let already_prefixed = a.name.starts_with(&format!("{ts_prefix}."));
-
-                    let search_name = if already_prefixed {
-                        a.name[ts_prefix.len() + 1..].to_string()
-                    } else {
-                        a.name.clone()
-                    };
+                    let search_name = attr_name.clone();
                     let ts_attrs = if a.tag {
                         config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name))
                     } else {
@@ -386,42 +383,19 @@ impl Weaver {
                         if matched {
                             return Err(CompilationError::ConfigError(format!(
                                 "attribute {} found in multiple trusted services",
-                                a.name
+                                attr_name
                             )));
                         }
-                        let mut new_attr = a.clone();
-                        new_attr.name = format!("{ts_prefix}.{search_name}");
+                        let new_attr = a.clone();
                         resolved_attrs.push(new_attr);
+                        self.used_trusted_services.insert(ts_name.clone());
                         matched = true;
-                    }
-
-                    let ts_id_attrs = config
-                        .must_get_keys(&format!("/trusted_services/{}/id_attributes", ts_name));
-                    if ts_id_attrs.contains(&search_name) {
-                        if matched {
-                            return Err(CompilationError::ConfigError(format!(
-                                "attribute {} found in multiple trusted services",
-                                a.name
-                            )));
-                        }
-                        // TODO: We need attr type info from config
-                        let mut new_attr = a.clone();
-                        new_attr.name = format!("{ts_prefix}.{search_name}");
-                        resolved_attrs.push(new_attr);
-                        matched = true;
-                    }
-
-                    if already_prefixed && !matched {
-                        return Err(CompilationError::ConfigError(format!(
-                            "attribute {} not found in trusted service {}",
-                            a.name, ts_name
-                        )));
                     }
                 }
                 if !matched {
                     return Err(CompilationError::ConfigError(format!(
                         "attribute {} not found in any trusted service",
-                        a.name
+                        attr_name
                     )));
                 }
             }
@@ -460,6 +434,23 @@ impl Weaver {
                 vs_dock_node, node_keys[0]
             )));
         }
+
+        // Before handing off to fabric, we need to check the node provider attributes to see
+        // if they reference any trusted services.
+        for node_key in &node_keys {
+            let node_attrs = match config.get(&format!("zpr/nodes/{node_key}/provider")) {
+                Some(ConfigItem::AttrList(attrs)) => vec_to_attributes(&attrs)?,
+                _ => {
+                    return Err(CompilationError::ConfigError(format!(
+                        "node {node_key} missing provider attributes",
+                    )));
+                }
+            };
+            // We don't care here what the attributes are (the fabric calls for them itself), we just want
+            // to make sure they all resolve.
+            let _ = self.resolve_attributes(&node_attrs, config)?;
+        }
+
         self.fabric.add_node(&vs_dock_node, config)
     }
 
@@ -504,7 +495,6 @@ impl Weaver {
             // Now we consolidate the attributes into a map, preferring attributes that have a value.
             let fp = FPos::from(&ac.device.class_tok);
             let attr_map = squash_attributes(&attrs, &fp)?;
-
             let required_attrs = self
                 .resolve_attributes(&attr_map.into_values().collect::<Vec<Attribute>>(), config)?;
 
@@ -576,6 +566,198 @@ impl Weaver {
         };
 
         self.fabric.default_auth_cert_asn = cert_data;
+        Ok(())
+    }
+
+    /// Check that the providers of trusted services are expressed using attributes that
+    /// we know the source of.  This may add to the list of active trusted services --
+    /// since it's possible that some trusted services are only used when defining other
+    /// trusted services.
+    fn resolve_trusted_service_providers(
+        &mut self,
+        config: &ConfigApi,
+        _ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
+        let active_set_count = self.used_trusted_services.len();
+        let mut checked_services = HashSet::new();
+
+        loop {
+            let active_trusted_services = self.used_trusted_services.clone();
+            for ts_name in &active_trusted_services {
+                if ts_name == zpl::DEFAULT_TRUSTED_SERVICE_ID {
+                    continue;
+                }
+                if checked_services.contains(ts_name) {
+                    continue;
+                }
+                checked_services.insert(ts_name.clone());
+                let ts_provider_attrs =
+                    match config.get(&format!("/trusted_services/{ts_name}/provider")) {
+                        Some(ConfigItem::AttrList(attrs)) => vec_to_attributes(&attrs)?,
+                        _ => {
+                            return Err(CompilationError::ConfigError(format!(
+                                "trusted service {ts_name} missing provider attributes",
+                            )));
+                        }
+                    };
+
+                // Call resolve which may add to the list of active trusted services.
+                let _ = self.resolve_attributes(&ts_provider_attrs, config)?;
+            }
+            if self.used_trusted_services.len() == active_set_count {
+                break; // no change? We are done.
+            }
+        }
+        Ok(())
+    }
+
+    /// Add non-default trusted services to the fabric.
+    fn add_trusted_services(
+        &mut self,
+        config: &ConfigApi,
+        ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
+        self.resolve_trusted_service_providers(config, ctx)?;
+        for ts_name in &self.used_trusted_services {
+            if ts_name == zpl::DEFAULT_TRUSTED_SERVICE_ID {
+                continue;
+            }
+
+            let ts_api = config
+                .must_get(&format!("/trusted_services/{ts_name}/api"))
+                .to_string();
+            let client_svc = config
+                .must_get(&format!("/trusted_services/{ts_name}/client_service"))
+                .to_string();
+            let vs_svc = config
+                .must_get(&format!("/trusted_services/{ts_name}/vs_service"))
+                .to_string();
+            let ts_cert = match config.get(&format!("/trusted_services/{ts_name}/certificate")) {
+                Some(ConfigItem::BytesB64(b64data)) => match BASE64_STANDARD.decode(b64data) {
+                    Ok(cert_data) => Some(cert_data),
+                    Err(e) => {
+                        return Err(CompilationError::ConfigError(format!(
+                            "error decoding certificate data: {}",
+                            e
+                        )));
+                    }
+                },
+                _ => None,
+            };
+            let ts_provider_attrs =
+                match config.get(&format!("/trusted_services/{ts_name}/provider")) {
+                    Some(ConfigItem::AttrList(attrs)) => vec_to_attributes(&attrs)?,
+                    _ => {
+                        return Err(CompilationError::ConfigError(format!(
+                            "trusted service {ts_name} missing provider attributes",
+                        )));
+                    }
+                };
+
+            // We don't care about the tags or attributes. Those are only needed to do syntax checking.
+            // However, we should tell the visa service about our "identity attributes".
+            //
+            // TODO: Need to alter the policy.proto so we can put the identity attributes in there.
+            //
+            // Issuing warning here so I don't forget.
+            {
+                let ts_id_attrs =
+                    config.must_get_keys(&format!("/trusted_services/{ts_name}/id_attributes"));
+                ctx.warn(&format!(
+                    "TODO add identity attributes for trused_service <{}> to policy: {:?}",
+                    ts_name, ts_id_attrs
+                ))?;
+            }
+
+            // We copy the visa service facing service protocol onto the fabric trusted-service record.
+            // TODO: We have lost the layer7 info here due to limitations in config_api, but we use the
+            // api value in the trusted-service record to determine that.
+            let mut vs_svc_protocol: Option<Protocol> = None;
+
+            for svc_name in vec![&client_svc, &vs_svc] {
+                if self.fabric.has_service(&svc_name) {
+                    if svc_name == &vs_svc {
+                        panic!("error: visa service should not yet exist in fabric");
+                    }
+                } else if svc_name == &client_svc {
+                    // This implies that there is no ZPL allowing access to the client facing
+                    // authentication service.  Warn user.
+                    // TODO: This is actually perfectly fine if the service only supports query.
+                    ctx.warn(&format!(
+                        "no ZPL policy allowing access to client authentication service {}",
+                        client_svc
+                    ))?;
+                    continue;
+                }
+                // service must have a protocol
+                let prot = match config.get(&format!("/services/{svc_name}/protocol")) {
+                    Some(citem) => match &citem {
+                        ConfigItem::Protocol(_, _, _) => Protocol::from(citem),
+                        _ => {
+                            panic!("error: protocol must be a protocol enum");
+                        }
+                    },
+                    None => {
+                        return Err(CompilationError::ConfigError(format!(
+                            "protocol for service {} not found in configuration",
+                            svc_name,
+                        )))
+                    }
+                };
+                if svc_name == &vs_svc {
+                    let mut vsp = prot.clone();
+                    if ts_api == zpl::TS_API_V2 {
+                        vsp.set_layer7(ZPR_VALIDATION_2.to_string());
+                    } else {
+                        return Err(CompilationError::ConfigError(format!(
+                            "trusted service {} has unknown API version {}",
+                            ts_name, ts_api
+                        )));
+                    }
+                    vs_svc_protocol = Some(vsp);
+                } else {
+                    // Fold in additional details about the client facing authentication service.
+                    let mut auth_prot = prot.clone();
+                    auth_prot.set_layer7(ZPR_OAUTH_RSA.to_string()); // TODO: Return layer7 name from config_api. Hardcoded to "zpr-oauthrsa" for now.
+                    let found = self.fabric.update_service(svc_name, |svc| {
+                        svc.protocol = Some(auth_prot.clone());
+                        svc.provider_attrs = ts_provider_attrs.clone();
+                        svc.service_type = ServiceType::Authentication;
+                    });
+                    if !found {
+                        // Programming error we checked above that the service was in the fabcir.
+                        panic!("error: service {} not found in fabric", svc_name);
+                    }
+                }
+            }
+
+            if vs_svc_protocol.is_none() {
+                return Err(CompilationError::ConfigError(format!(
+                    "trusted service {} missing visa service facing service protocol",
+                    ts_name
+                )));
+            }
+            self.fabric
+                .add_trusted_service(
+                    ts_name,
+                    &vs_svc_protocol.unwrap(),
+                    &ts_api,
+                    &ts_provider_attrs,
+                    ts_cert,
+                    &client_svc,
+                )
+                .map_err(|e| {
+                    CompilationError::ConfigError(format!("error adding trusted service: {}", e))
+                })?;
+
+            // The visa service can access the trusted service over its vs interface.
+            let vs_access_attrs = vec![Attribute::attr_or_panic(
+                zpl::KATTR_CN,
+                zpl::VISA_SERVICE_CN,
+            )];
+            self.fabric
+                .add_condition_to_service(ts_name, &vs_access_attrs, true)?;
+        }
         Ok(())
     }
 
@@ -730,21 +912,21 @@ mod test {
         zpr_address = "fd5a:5052:90de::1"
         interfaces = [ "in1" ]
         in1.netaddr = "127.0.0.1:5000"
-        provider = [["foo", "fee"]]
+        provider = [["device.zpr.adapter.cn", "fee"]]
 
         [visa_service]
         dock_node = "n0"
 
         [protocols.fee]
-        protocol = "iana.TCP"
+        l4protocol = "iana.TCP"
         port = 80
 
         [services.foo]
         protocol = "fee"
-        provider = [["cn", "fee"]]
+        provider = [["device.zpr.adapter.cn", "fee"]]
 
         [services.bar]
-        protocol = "boo"
+        protocol = "fee"
         "#;
 
         let mut class_idx = HashMap::new();

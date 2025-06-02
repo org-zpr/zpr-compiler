@@ -3,6 +3,7 @@ use ring::digest::Digest;
 use std::collections::HashMap;
 use std::fmt;
 
+use crate::errors::AttributeError;
 use crate::lex::Token;
 use crate::zpl;
 
@@ -114,7 +115,7 @@ impl fmt::Display for Clause {
 }
 
 /// A defined class in ZPL has a type which we call "flavor".
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum ClassFlavor {
     Undefined, // they all start here
     Device,
@@ -181,12 +182,49 @@ impl Class {
     }
 }
 
-/// A ZPL attribute. Could be a tule type attibute, eg "role:marketing" or a
+/// An attribute must live in one of our domains. When parsing sometimes we
+/// end up in an intermediate state where we don't know the domain yet so
+/// we use `Unspecified`.  An error will occur if we try to write policy
+/// and there remain any unspecified domains.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AttrDomain {
+    Unspecified,
+    Device,
+    User,
+    Service,
+    ZprInternal, // For compiler/visa-service use only
+}
+
+impl fmt::Display for AttrDomain {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            AttrDomain::Device => write!(f, "{}", zpl::ATTR_DOMAIN_DEVICE),
+            AttrDomain::User => write!(f, "{}", zpl::ATTR_DOMAIN_USER),
+            AttrDomain::Service => write!(f, "{}", zpl::ATTR_DOMAIN_SERVICE),
+            AttrDomain::ZprInternal => write!(f, "{}", zpl::ATTR_DOMAIN_ZPR_INTERNAL),
+            AttrDomain::Unspecified => write!(f, "UNSPECIFIED"),
+        }
+    }
+}
+
+impl AttrDomain {
+    pub fn from_flavor(class: ClassFlavor) -> Self {
+        match class {
+            ClassFlavor::Device => AttrDomain::Device,
+            ClassFlavor::User => AttrDomain::User,
+            ClassFlavor::Service => AttrDomain::Service,
+            ClassFlavor::Undefined => AttrDomain::Unspecified,
+        }
+    }
+}
+
+/// A ZPL attribute. Could be a tule type attibute, eg "user.role:marketing" or a
 /// tag type.  An attribute may be optional or required, and may be multi-valued
 /// or single-valued.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Attribute {
-    pub name: String,
+    domain: AttrDomain,
+    name: String,
     pub value: Option<String>,
     pub multi_valued: bool,
     pub tag: bool,
@@ -195,12 +233,13 @@ pub struct Attribute {
 
 impl fmt::Display for Attribute {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let key = format!("{}.{}", self.domain, self.name);
         if let Some(v) = &self.value {
-            write!(f, "{}:{}", self.name, v)?
+            write!(f, "{}:{}", key, v)?
         } else if self.tag {
-            write!(f, "#{}", self.name)?
+            write!(f, "#{}", key)?
         } else {
-            write!(f, "{}", self.name)?
+            write!(f, "{}", key)?
         }
         if self.multi_valued {
             write!(f, "+")?
@@ -213,10 +252,64 @@ impl fmt::Display for Attribute {
 }
 
 impl Attribute {
-    /// Easy way top create a TAG type attribute.
-    pub fn tag(name: &str) -> Self {
+    /// Create new attribute. If the `name` includes a valid domain prefix, the domain will be set to that.
+    /// Otherwise the domain will be set to `domain_hint`.
+    pub fn new_with_domain_hint(
+        domain_hint: AttrDomain,
+        name: &str,
+        value: Option<String>,
+        multi_valued: bool,
+        tag: bool,
+        optional: bool,
+    ) -> Self {
+        let (dom, rest) = Attribute::parse_domain(name).unwrap_or_else(|_| {
+            // If the new name does not have a domain prefix, use the current domain.
+            (domain_hint.clone(), name.to_string())
+        });
         Attribute {
-            name: name.to_string(),
+            domain: dom,
+            name: rest,
+            value,
+            multi_valued,
+            tag,
+            optional,
+        }
+    }
+
+    /// Parse off one the ZPR domains from the key.  Does not work with ZPR internal domain.
+    /// Returns `(<domain>, <rest>)` from given key.
+    fn parse_domain(key: &str) -> Result<(AttrDomain, String), AttributeError> {
+        if let Some(renamed) = key.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_DEVICE)) {
+            Ok((AttrDomain::Device, renamed.to_string()))
+        } else if let Some(renamed) = key.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_USER)) {
+            Ok((AttrDomain::User, renamed.to_string()))
+        } else if let Some(renamed) = key.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_SERVICE)) {
+            Ok((AttrDomain::Service, renamed.to_string()))
+        } else {
+            Err(AttributeError::InvalidDomain(key.to_string()))
+        }
+    }
+
+    /// Easy way top create a TAG type attribute.
+    pub fn tag(name: &str) -> Result<Self, AttributeError> {
+        let (dom, rest) = Attribute::parse_domain(name)?;
+        Ok(Attribute {
+            domain: dom,
+            name: rest,
+            value: None,
+            multi_valued: false,
+            tag: true,
+            optional: false,
+        })
+    }
+
+    /// Create a tag attribute and will set domain unspecified if not present on the `name`.
+    pub fn tag_domain_opt(name: &str) -> Self {
+        let (dom, rest) = Attribute::parse_domain(name)
+            .unwrap_or_else(|_| (AttrDomain::Unspecified, name.to_string()));
+        Attribute {
+            domain: dom,
+            name: rest,
             value: None,
             multi_valued: false,
             tag: true,
@@ -225,9 +318,49 @@ impl Attribute {
     }
 
     /// Easy way to create a tuple type attribute.
-    pub fn attr(name: &str, value: &str) -> Self {
+    pub fn attr(name: &str, value: &str) -> Result<Self, AttributeError> {
+        let (dom, rest) = Attribute::parse_domain(name)?;
+        Ok(Attribute {
+            domain: dom,
+            name: rest,
+            value: Some(value.to_string()),
+            multi_valued: false,
+            tag: false,
+            optional: false,
+        })
+    }
+
+    /// Create a tuple type attribute or panic if name is invalid.
+    pub fn attr_or_panic(name: &str, value: &str) -> Self {
+        Attribute::attr(name, value).expect("invalid attribute")
+    }
+
+    /// Special constructor for ZPR internal attributes.
+    /// Panics if passed `name` must start with `zpr`.
+    pub fn zpr_internal_attr(name: &str, value: &str) -> Self {
+        if let Some(name_without_domain) =
+            name.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_ZPR_INTERNAL))
+        {
+            return Attribute {
+                domain: AttrDomain::ZprInternal,
+                name: name_without_domain.to_string(),
+                value: Some(value.to_string()),
+                multi_valued: false,
+                tag: false,
+                optional: false,
+            };
+        } else {
+            panic!("zpr internal attribute must start with 'zpr.'");
+        }
+    }
+
+    /// Create a tuple type attribute and will set domain unspecified if not present on the `name`.
+    pub fn attr_domain_opt(name: &str, value: &str) -> Self {
+        let (dom, rest) = Attribute::parse_domain(name)
+            .unwrap_or_else(|_| (AttrDomain::Unspecified, name.to_string()));
         Attribute {
-            name: name.to_string(),
+            domain: dom,
+            name: rest,
             value: Some(value.to_string()),
             multi_valued: false,
             tag: false,
@@ -235,42 +368,106 @@ impl Attribute {
         }
     }
 
+    pub fn is_unspecified_domain(&self) -> bool {
+        self.domain == AttrDomain::Unspecified
+    }
+
     /// Create required, tuple type attribute without specifying a value.
-    pub fn attr_name_only(name: &str) -> Self {
-        Attribute {
-            name: name.to_string(),
+    pub fn attr_name_only(name: &str) -> Result<Self, AttributeError> {
+        let (dom, rest) = Attribute::parse_domain(name)?;
+        Ok(Attribute {
+            domain: dom,
+            name: rest,
             value: None,
             multi_valued: false,
             tag: false,
             optional: false,
-        }
+        })
     }
 
     /// Create and return a new attribute with the same characteristics of this one but with the new name provided.
-    pub fn set_name(&self, new_name: &str) -> Self {
+    /// If `new_name` includes a valid domain prefix, the returned attribute will have that domain.
+    pub fn clone_with_new_name(&self, new_name: &str) -> Self {
         let mut new_a = self.clone();
-        new_a.name = new_name.to_string();
+        let (dom, name) = Attribute::parse_domain(new_name).unwrap_or_else(|_| {
+            // If the new name does not have a domain prefix, use the current domain.
+            (self.domain.clone(), new_name.to_string())
+        });
+        new_a.name = name;
+        new_a.domain = dom;
         new_a
     }
 
+    /// Update the domain.
+    pub fn set_domain(&mut self, domain: AttrDomain) {
+        self.domain = domain;
+    }
+
     /// The the ZPL name for the key of this attribute. The key is just the attribute name
-    /// unless this is a tag, in which case the key is "zpr.tag".
+    /// unless this is a tag, in which case the key is "<domain>.zpr.tag".
     pub fn zpl_key(&self) -> String {
         if self.tag {
-            "zpr.tag".to_string()
+            format!("{}.zpr.tag", self.domain)
         } else {
-            self.name.clone()
+            format!("{}.{}", self.domain, self.name)
         }
     }
 
     /// The ZPL value for this attribute. If there is no value an empty string is returned.
     pub fn zpl_value(&self) -> String {
         if self.tag {
-            self.name.clone()
+            format!("{}.{}", self.domain, self.name)
         } else if let Some(v) = &self.value {
             v.clone()
         } else {
             "".to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_attributes_kv() {
+        let a = Attribute::attr("user.role", "admin").unwrap();
+        assert_eq!(a.domain, AttrDomain::User);
+        assert_eq!(a.name, "role");
+        assert_eq!(a.value, Some("admin".to_string()));
+        assert_eq!(a.multi_valued, false);
+        assert_eq!(a.tag, false);
+        assert_eq!(a.optional, false);
+        assert_eq!("user.role:admin", a.to_string());
+        assert_eq!("user.role", a.zpl_key());
+        assert_eq!("admin", a.zpl_value());
+    }
+
+    #[test]
+    fn test_attributes_tag() {
+        let a = Attribute::tag("device.hardened").unwrap();
+        assert_eq!(a.domain, AttrDomain::Device);
+        assert_eq!(a.name, "hardened");
+        assert_eq!(a.value, None);
+        assert_eq!(a.multi_valued, false);
+        assert_eq!(a.tag, true);
+        assert_eq!(a.optional, false);
+        assert_eq!("#device.hardened", a.to_string());
+        assert_eq!("device.zpr.tag", a.zpl_key());
+        assert_eq!("device.hardened", a.zpl_value());
+    }
+
+    #[test]
+    fn test_attrributes_internal() {
+        let a = Attribute::zpr_internal_attr("zpr.role", "admin");
+        assert_eq!(a.domain, AttrDomain::ZprInternal);
+        assert_eq!(a.name, "role");
+        assert_eq!(a.value, Some("admin".to_string()));
+        assert_eq!(a.multi_valued, false);
+        assert_eq!(a.tag, false);
+        assert_eq!(a.optional, false);
+        assert_eq!("zpr.role:admin", a.to_string());
+        assert_eq!("zpr.role", a.zpl_key());
+        assert_eq!("admin", a.zpl_value());
     }
 }

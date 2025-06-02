@@ -14,7 +14,7 @@ use crate::ptypes::Attribute;
 use crate::zpl;
 
 /// Updeate this if we change the protobuf. This is checked by visa service during deserialization.
-pub const SERIAL_VERSION: u32 = 42;
+pub const SERIAL_VERSION: u32 = 43;
 
 /// This value for a PROC in a connect record means NO PROC.
 pub const NO_PROC: u32 = u32::MAX; // 0xffffffff
@@ -114,8 +114,8 @@ impl PolicyBuilder {
     ///   - The attribute keys and values lookup tables.
     ///   - The set of communication policies which set which agents can access which services.
     ///   - The links which are empty for now as only a single node is supported (TODO).
-    ///   - The services which is only used for AUTH services. TODO: empty for now.
-    ///   - The certificates used for trusted services (TODO) and for the default/internal auth service.
+    ///   - The services which is only used for AUTH services.
+    ///   - The certificates used for trusted services and for the default/internal auth service.
     ///
     /// This does most of the work in building the policy.
     pub fn with_fabric(
@@ -138,6 +138,7 @@ impl PolicyBuilder {
         self.set_policies(fabric)?;
         self.set_default_auth(fabric, ctx)?;
         self.set_bootstrap(fabric, ctx)?;
+        self.set_auth_services(fabric, ctx)?;
 
         if self.verbose {
             println!("  {} connect rules", self.policy.connects.len());
@@ -160,15 +161,92 @@ impl PolicyBuilder {
         ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         if fabric.default_auth_cert_asn.is_empty() {
-            ctx.warn("refusing to add empty default certificate to policy")?;
+            ctx.warn("trusted_services.default missing certificate")?;
             return Ok(());
         }
         let pcert = polio::Cert {
-            id: 1,
+            id: (self.policy.certificates.len() + 1) as u32,
             asn1data: fabric.default_auth_cert_asn.clone(),
             name: zpl::DEFAULT_TS_PREFIX.to_string(),
         };
         self.policy.certificates.push(pcert);
+        Ok(())
+    }
+
+    fn set_auth_services(
+        &mut self,
+        fabric: &Fabric,
+        _ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
+        for svc in &fabric.services {
+            let apiname: String = match svc.service_type {
+                ServiceType::Trusted(ref t) => t.clone(),
+                _ => {
+                    continue; // not a trusted service
+                }
+            };
+
+            if apiname != zpl::TS_API_V2 {
+                return Err(CompilationError::ConfigError(format!(
+                    "trusted service {}: only 'validation/2' api supported, not '{}'",
+                    svc.config_id, apiname
+                )));
+            }
+
+            if svc.client_service_name.is_none() {
+                return Err(CompilationError::ConfigError(format!(
+                    "trusted service {}: missing client facing service name",
+                    svc.config_id
+                )));
+            }
+
+            // The trusted service actually has two addresses.
+            // The vs-address which is service named <id>-vs
+            // And the adapter auth address whic is at <id>-<client-service-name>
+
+            // The VS facing service details have been copied out of config.
+
+            if let Some((l7p, port)) = svc.get_l7protocol_and_port() {
+                let trusted_svc = polio::Service {
+                    r#type: polio::SvcT::SvctAuth.into(),
+                    name: svc.config_id.clone(),
+                    prefix: svc.config_id.clone(),
+                    domain: String::new(),
+                    query_uri: String::new(), // n/a
+                    validate_uri: format!("{}://[::1]:{}", l7p, port),
+                };
+                self.policy.services.push(trusted_svc);
+            } else {
+                return Err(CompilationError::ConfigError(format!(
+                    "trusted service {}: must have single port number",
+                    svc.config_id
+                )));
+            }
+
+            // The adapter facing auth service (if present) we register as a new-style "authentication" service.
+            if let Some(asvc) = fabric.get_service(svc.client_service_name.as_ref().unwrap()) {
+                if let Some((l7p, port)) = asvc.get_l7protocol_and_port() {
+                    let auth_svc = polio::Service {
+                        r#type: polio::SvcT::SvctActorAuth.into(),
+                        name: asvc.config_id.clone(),
+                        prefix: asvc.config_id.clone(),
+                        domain: String::new(),
+                        query_uri: String::new(), // n/a
+                        validate_uri: format!("{}://[::1]:{}", l7p, port),
+                    };
+                    self.policy.services.push(auth_svc);
+                } else {
+                    return Err(CompilationError::ConfigError(format!(
+                        "authentication service {}: must have single port number",
+                        asvc.config_id
+                    )));
+                }
+            } else {
+                // Not found. This means that either the service has no adapter facing offering
+                // (ie, it is a query only service). Or the user did not add any ZPL allowing
+                // access -- which is warned about in a previous parsing step.
+            }
+        }
         Ok(())
     }
 
@@ -226,6 +304,7 @@ impl PolicyBuilder {
     }
 
     /// Create a polio::Scope from a FabricService.protocol.
+    /// Only services with protocols should be passed here.
     fn scope_for_service(
         &self,
         svc: &FabricService,
@@ -238,7 +317,15 @@ impl PolicyBuilder {
 
         let parg: polio::scope::Protarg;
 
-        match &svc.protocol.icmp {
+        if svc.protocol.is_none() {
+            panic!(
+                "cannot call scope_for_service on a service with no protocol: {}",
+                svc.config_id
+            );
+        }
+        let svc_prot = svc.protocol.clone().unwrap();
+
+        match &svc_prot.get_icmp() {
             Some(icmp) => {
                 let picmp = match icmp {
                     IcmpFlowType::OneShot(codes) => {
@@ -259,7 +346,7 @@ impl PolicyBuilder {
                 parg = polio::scope::Protarg::Icmp(picmp);
             }
             None => {
-                match &svc.protocol.port {
+                match &svc_prot.get_port() {
                     Some(port_str) => {
                         let port_num: u16 = match port_str.parse() {
                             Ok(n) => n,
@@ -289,7 +376,7 @@ impl PolicyBuilder {
         }
 
         let scope = polio::Scope {
-            protocol: svc.protocol.protocol.into(),
+            protocol: svc_prot.get_layer4().into(),
             protarg: Some(parg),
         };
         scopes.push(scope);
@@ -311,7 +398,10 @@ impl PolicyBuilder {
             }
             // Any agent that provides a service can connect
             match svc.service_type {
-                ServiceType::Regular | ServiceType::Visa | ServiceType::BuiltIn => {
+                ServiceType::Regular
+                | ServiceType::Visa
+                | ServiceType::BuiltIn
+                | ServiceType::Authentication => {
                     let flags = if svc.service_type == ServiceType::Visa {
                         Some(PFlags::vs())
                     } else {
@@ -319,8 +409,8 @@ impl PolicyBuilder {
                     };
                     let proc = self.create_service_proc(
                         &svc.fabric_id,
-                        svc.service_type,
-                        &svc.protocol.to_endpoint_str(),
+                        &svc.service_type,
+                        &svc.protocol.as_ref().unwrap().to_endpoint_str(),
                         flags,
                     );
                     self.policy.procs.push(proc);
@@ -331,10 +421,29 @@ impl PolicyBuilder {
                     };
                     self.add_connect(pconnect);
                 }
-                ServiceType::Trusted => {
-                    return Err(CompilationError::ConfigError(
-                        "trusted service not yet implemented".to_string(),
-                    ))
+
+                ServiceType::Trusted(_) => {
+                    let proc = self.create_service_proc(
+                        &svc.fabric_id,
+                        &svc.service_type,
+                        &svc.protocol.as_ref().unwrap().to_endpoint_str(),
+                        None,
+                    );
+                    self.policy.procs.push(proc);
+                    let proc_idx = self.policy.procs.len() as u32 - 1;
+                    let pconnect = polio::Connect {
+                        attr_exprs: self.attr_list_to_attrexpr(&svc.provider_attrs),
+                        proc: proc_idx,
+                    };
+                    self.add_connect(pconnect);
+                    if let Some(cert_data) = &svc.certificate {
+                        let pcert = polio::Cert {
+                            id: self.policy.certificates.len() as u32 + 1, // note: we do not use ID of 0
+                            asn1data: cert_data.clone(),
+                            name: svc.fabric_id.clone(),
+                        };
+                        self.policy.certificates.push(pcert);
+                    };
                 }
                 ServiceType::Undefined => {
                     panic!("undefined service type in fabric{}", svc.config_id);
@@ -350,7 +459,7 @@ impl PolicyBuilder {
             // So this registers as node service but uses a bogus endpoint.
             let proc = self.create_service_proc(
                 format!("/zpr/{}", &node.node_id).as_str(),
-                ServiceType::Regular,
+                &ServiceType::Regular,
                 "TCP/1",
                 Some(PFlags::node()),
             );
@@ -374,7 +483,7 @@ impl PolicyBuilder {
     fn create_service_proc(
         &self,
         svc_id: &str,
-        svc_type: ServiceType,
+        svc_type: &ServiceType,
         endpoint_str: &str,
         flags: Option<PFlags>,
     ) -> polio::Proc {
@@ -386,11 +495,13 @@ impl PolicyBuilder {
         args.push(polio::Argument {
             arg: Some(polio::argument::Arg::Strval(svc_id.to_string())),
         });
-        let svc_t = if svc_type == ServiceType::Trusted {
-            polio::SvcT::SvctAuth
-        } else {
-            polio::SvcT::SvctDef
+        let svc_t = match svc_type {
+            ServiceType::Regular | ServiceType::Visa | ServiceType::BuiltIn => polio::SvcT::SvctDef,
+            ServiceType::Authentication => polio::SvcT::SvctActorAuth,
+            ServiceType::Trusted(_) => polio::SvcT::SvctAuth,
+            ServiceType::Undefined => panic!("undefined service type"),
         };
+
         args.push(polio::Argument {
             arg: Some(polio::argument::Arg::Svcval(svc_t as i32)),
         });

@@ -28,18 +28,21 @@ pub struct Fabric {
 pub struct FabricService {
     pub config_id: String, // Service name as specified in configuration and ZPL.
     pub fabric_id: String, // Service name assigned in the fabric
-    pub protocol: Protocol,
+    pub protocol: Option<Protocol>, // For an auth service this is the visa-service facing protocol.
     pub provider_attrs: Vec<Attribute>, // Set of provider attributes required to offer the service
     pub client_policies: Vec<ClientPolicy>, // List of consumer policies
     pub service_type: ServiceType,
+    pub certificate: Option<Vec<u8>>, // Certificate for this (trusted) service
+    pub client_service_name: Option<String>, // For an AUTH service, the name of the optional client service.
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Default, Clone, PartialEq, Copy)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub enum ServiceType {
     #[default]
     Undefined,
-    Trusted,
+    Trusted(String), // Takes the API name
+    Authentication,
     Visa,
     Regular,
     BuiltIn, // eg, noode access to VS, or VS access to VSS
@@ -98,6 +101,17 @@ impl fmt::Display for Fabric {
         )?;
         for s in &self.services {
             writeln!(f, "  service: {}  (type={:?})", s.fabric_id, s.service_type)?;
+            match s.service_type {
+                ServiceType::Trusted(ref api) => {
+                    writeln!(f, "    API: {}", api)?;
+                    writeln!(f, "    client-service: {:?}", s.client_service_name)?;
+                }
+                _ => {}
+            }
+            match s.protocol {
+                Some(ref p) => writeln!(f, "    protocol: {:?}", p)?,
+                None => writeln!(f, "    protocol: (none)")?,
+            }
             writeln!(f, "    provider attrs:")?;
             for a in &s.provider_attrs {
                 writeln!(f, "      {}", a)?;
@@ -131,6 +145,36 @@ impl fmt::Display for Fabric {
 }
 
 impl Fabric {
+    /// You must add client services associated with the trusted service before adding a trusted service.
+    pub fn add_trusted_service(
+        &mut self,
+        id: &str,
+        protocol: &Protocol,
+        api: &str,
+        provider_attrs: &[Attribute],
+        certificate: Option<Vec<u8>>,
+        client_service_name: &str,
+    ) -> Result<(), CompilationError> {
+        for s in &self.services {
+            if s.config_id == id {
+                // Caller should prevent this.
+                panic!("trusted service {} already exists in the fabric", id);
+            }
+        }
+        let fs = FabricService {
+            config_id: id.to_string(),
+            fabric_id: id.to_string(),
+            protocol: Some(protocol.clone()),
+            provider_attrs: provider_attrs.to_vec(),
+            client_policies: Vec::new(),
+            service_type: ServiceType::Trusted(api.to_string()),
+            certificate,
+            client_service_name: Some(client_service_name.to_string()),
+        };
+        self.services.push(fs);
+        Ok(())
+    }
+
     /// Add the service and the attributes that are required to provide it.
     /// There may be many services with the same `id`, but they must then have
     /// different attribute lists.
@@ -144,8 +188,12 @@ impl Fabric {
         stype: ServiceType,
     ) -> Result<String, CompilationError> {
         assert!(stype != ServiceType::Undefined); // programming error
-        if stype == ServiceType::BuiltIn {
-            panic!("not allowed to explicity add a BUILTIN service: {}", id);
+        match &stype {
+            ServiceType::BuiltIn => {
+                panic!("not allowed to explicity add a BUILTIN service: {}", id)
+            }
+            ServiceType::Trusted(_) => panic!("use add_trusted_service to add a TRUSTED service"),
+            _ => {}
         }
         if stype == ServiceType::Regular && id.starts_with("/zpr") {
             return Err(CompilationError::ConfigError(format!(
@@ -177,10 +225,12 @@ impl Fabric {
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: fabric_id.clone(),
-            protocol: protocol.clone(),
+            protocol: Some(protocol.clone()),
             provider_attrs: attrs.to_vec(),
             client_policies: Vec::new(),
             service_type: stype,
+            certificate: None,
+            client_service_name: None,
         };
         self.services.push(fs);
         Ok(fabric_id)
@@ -216,10 +266,12 @@ impl Fabric {
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: fabric_id.clone(),
-            protocol: protocol.clone(),
+            protocol: Some(protocol.clone()),
             provider_attrs: attrs.to_vec(),
             client_policies: Vec::new(),
             service_type: ServiceType::BuiltIn,
+            certificate: None,
+            client_service_name: None,
         };
         self.services.push(fs);
         Ok(fabric_id)
@@ -234,6 +286,24 @@ impl Fabric {
     /// Return TRUE if the service with given fabric_id is in our fabric.
     pub fn has_service(&self, fabric_id: &str) -> bool {
         self.services.iter().any(|s| s.fabric_id == fabric_id)
+    }
+
+    /// Get a reference to one of the services.
+    pub fn get_service(&self, fabric_id: &str) -> Option<&FabricService> {
+        self.services.iter().find(|s| s.fabric_id == fabric_id)
+    }
+
+    pub fn update_service(
+        &mut self,
+        svc_id: &str,
+        mutator: impl FnOnce(&mut FabricService),
+    ) -> bool {
+        if let Some(svc) = self.services.iter_mut().find(|s| s.fabric_id == svc_id) {
+            mutator(svc);
+            true
+        } else {
+            false
+        }
     }
 
     /// Add a node to the fabric.  Must add visa service before calling this.
@@ -272,7 +342,10 @@ impl Fabric {
                 )))
             }
         };
-        node_attrs.push(Attribute::attr(zpl::ZPR_ADDR_ATTR, &naddr.to_string()));
+        node_attrs.push(Attribute::zpr_internal_attr(
+            zpl::KATTR_ADDR,
+            &naddr.to_string(),
+        ));
 
         // Note that we do not have line/col info from the config file.
         let attr_map = squash_attributes(&node_attrs, &FPos::default())?;
@@ -298,12 +371,11 @@ impl Fabric {
                 &svc_name
             )));
         }
-
-        let vss_prot = Protocol {
-            protocol: IanaProtocol::TCP,
-            port: Some(format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT)),
-            icmp: None,
-        };
+        let vss_prot = Protocol::new_l4_with_port(
+            "zpr-vss".to_string(),
+            IanaProtocol::TCP,
+            format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT),
+        );
         let vss_id = self.add_builtin_service(&svc_name, &vss_prot, &provider_attrs)?;
         self.add_condition_to_service(&vss_id, &vs_provider_attrs, false)?;
         Ok(())
@@ -362,5 +434,45 @@ impl FabricService {
             }
         }
         true
+    }
+
+    /// Treat the layer4 protocol port value as a single port number.
+    /// If we find that we return it, else None.
+    pub fn get_port(&self) -> Option<u16> {
+        if let Some(ref p) = self.protocol {
+            if !p.has_port() {
+                return None;
+            }
+            if let Some(pstr) = p.get_port() {
+                if let Ok(port) = pstr.parse::<u16>() {
+                    return Some(port);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn get_l7protocol_and_port(&self) -> Option<(String, u16)> {
+        if let Some(ref p) = self.protocol {
+            if !p.has_port() {
+                return None;
+            }
+
+            let port = if let Some(pstr) = p.get_port() {
+                if let Ok(pnum) = pstr.parse::<u16>() {
+                    pnum
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+            if let Some(l7p) = p.get_layer7() {
+                return Some((l7p.to_string(), port));
+            } else if port > 0 {
+                return Some((String::new(), port));
+            }
+        }
+        None
     }
 }
