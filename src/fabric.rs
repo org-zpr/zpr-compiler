@@ -34,6 +34,8 @@ pub struct FabricService {
     pub service_type: ServiceType,
     pub certificate: Option<Vec<u8>>, // Certificate for this (trusted) service
     pub client_service_name: Option<String>, // For an AUTH service, the name of the optional client service.
+    pub returns_attrs: Option<Vec<String>>, // list of attribute keys (with domains) -- only for trusted services
+    pub identity_attrs: Option<Vec<String>>, // list of attribute keys (with domains) -- only for trusted services
 }
 
 #[allow(dead_code)]
@@ -154,6 +156,8 @@ impl Fabric {
         provider_attrs: &[Attribute],
         certificate: Option<Vec<u8>>,
         client_service_name: &str,
+        returns_attrs: Option<Vec<String>>,
+        identity_attrs: Option<Vec<String>>,
     ) -> Result<(), CompilationError> {
         for s in &self.services {
             if s.config_id == id {
@@ -170,6 +174,8 @@ impl Fabric {
             service_type: ServiceType::Trusted(api.to_string()),
             certificate,
             client_service_name: Some(client_service_name.to_string()),
+            returns_attrs: returns_attrs,
+            identity_attrs: identity_attrs,
         };
         self.services.push(fs);
         Ok(())
@@ -231,6 +237,8 @@ impl Fabric {
             service_type: stype,
             certificate: None,
             client_service_name: None,
+            returns_attrs: None,
+            identity_attrs: None,
         };
         self.services.push(fs);
         Ok(fabric_id)
@@ -272,6 +280,8 @@ impl Fabric {
             service_type: ServiceType::BuiltIn,
             certificate: None,
             client_service_name: None,
+            returns_attrs: None,
+            identity_attrs: None,
         };
         self.services.push(fs);
         Ok(fabric_id)

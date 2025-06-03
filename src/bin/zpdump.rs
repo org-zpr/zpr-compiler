@@ -176,6 +176,25 @@ fn main() {
             } else {
                 println!("  validate_uri: {}", service.validate_uri.yellow());
             }
+            // auth type services have attributes.
+            if service.r#type == polio::SvcT::SvctAuth as i32 {
+                if service.attrs.is_empty() {
+                    println!("         attrs: {}", "none".red());
+                } else {
+                    println!(
+                        "         attrs: {}",
+                        array_to_string(&service.attrs).yellow()
+                    );
+                }
+                if service.id_attrs.is_empty() {
+                    println!("      id_attrs: {}", "none".red());
+                } else {
+                    println!(
+                        "      id_attrs: {}",
+                        array_to_string(&service.id_attrs).yellow()
+                    );
+                }
+            }
         }
     }
 
@@ -481,4 +500,15 @@ fn attr_opt_t_to_string(opval: i32) -> String {
         Ok(o) => o.as_str_name(),
         Err(_) => "!ERR!",
     })
+}
+
+fn array_to_string(arr: &[String]) -> String {
+    if arr.is_empty() {
+        return String::from("[]");
+    }
+    let mut s = String::new();
+    s.push('[');
+    s.push_str(&arr.join(", "));
+    s.push(']');
+    s
 }

@@ -52,7 +52,7 @@ A trusted service for validation is really two services: the service that the vi
 talks to to confirm authentication and retrieve attributes, and the service that an actor
 talks to to perform authentication.  These services use varying protocols and ports like
 any service on the ZPRnet.  To configure these services, the compiler requires that there
-are `service` blocks defined in the usual way.  The IDs attached to these blocks are either
+are `services` blocks defined in the usual way.  The IDs attached to these blocks are either
 defaults or are set using the `service` and `client` properties of the trusted service
 (see above).
 

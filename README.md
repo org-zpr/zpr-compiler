@@ -1,7 +1,7 @@
 # ZPL Compiler
 
 Can compile simple (new) ZPL into binary policies that the prototype visa
-service can process.  This comes bundled with a tool to examine the 
+service can process.  This comes bundled with a tool to examine the
 contents of a "compiled" binary policy, `zpdump`.
 
 ## Example usage
