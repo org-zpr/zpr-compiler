@@ -732,10 +732,10 @@ fn check_attr_keys_domain_and_uniqueness(
     identity_attrs: &[String],
 ) -> Result<(), CompilationError> {
     // Gather all the attributes without regard to wehether they are in the returns or identity attributes.
-    let mut uniq_attrs = HashMap::<String, ()>::new();
+    let mut uniq_attrs = HashMap::<&str, ()>::new();
     for attr_list in [returns_attrs, identity_attrs] {
         for attr in attr_list {
-            uniq_attrs.insert(attr.to_string(), ());
+            uniq_attrs.insert(attr, ());
         }
     }
 
@@ -759,7 +759,7 @@ fn check_attr_keys_domain_and_uniqueness(
                         key
                     ));
                 }
-                uniq_keys.insert(key.to_string(), ());
+                uniq_keys.insert(key, ());
             }
             Err(_) => {
                 return Err(err_config!(
