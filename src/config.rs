@@ -1,6 +1,7 @@
 //! config.rs - load/parse a ZPL configuration TOML file
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
@@ -732,16 +733,16 @@ fn check_attr_keys_domain_and_uniqueness(
     identity_attrs: &[String],
 ) -> Result<(), CompilationError> {
     // Gather all the attributes without regard to wehether they are in the returns or identity attributes.
-    let mut uniq_attrs = HashMap::<&str, ()>::new();
+    let mut uniq_attrs = HashSet::<&str>::new();
     for attr_list in [returns_attrs, identity_attrs] {
         for attr in attr_list {
-            uniq_attrs.insert(attr, ());
+            uniq_attrs.insert(attr);
         }
     }
 
-    let mut uniq_keys = HashMap::<String, ()>::new();
+    let mut uniq_keys = HashSet::<String>::new();
 
-    for attr in uniq_attrs.keys() {
+    for attr in &uniq_attrs {
         // The attrs in a config may have a special char '#' on the front to indicate a tag.
         // We strip that off.
         let attr = if attr.starts_with('#') {
@@ -751,7 +752,7 @@ fn check_attr_keys_domain_and_uniqueness(
         };
         match Attribute::parse_domain(attr) {
             Ok((_domain, key)) => {
-                if uniq_keys.contains_key(&key) {
+                if uniq_keys.contains(&key) {
                     return Err(err_config!(
                         "trusted_service {} attribute '{}' uses key '{}' which is not unique",
                         ts_id,
@@ -759,7 +760,7 @@ fn check_attr_keys_domain_and_uniqueness(
                         key
                     ));
                 }
-                uniq_keys.insert(key, ());
+                uniq_keys.insert(key);
             }
             Err(_) => {
                 return Err(err_config!(
