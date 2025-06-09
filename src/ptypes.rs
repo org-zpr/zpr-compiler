@@ -278,7 +278,7 @@ impl Attribute {
 
     /// Parse off one the ZPR domains from the key.  Does not work with ZPR internal domain.
     /// Returns `(<domain>, <rest>)` from given key.
-    fn parse_domain(key: &str) -> Result<(AttrDomain, String), AttributeError> {
+    pub fn parse_domain(key: &str) -> Result<(AttrDomain, String), AttributeError> {
         if let Some(renamed) = key.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_DEVICE)) {
             Ok((AttrDomain::Device, renamed.to_string()))
         } else if let Some(renamed) = key.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_USER)) {

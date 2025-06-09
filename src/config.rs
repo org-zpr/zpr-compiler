@@ -1,6 +1,7 @@
 //! config.rs - load/parse a ZPL configuration TOML file
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
@@ -607,6 +608,7 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
     if !is_default {
         returns_attrs = parse_string_array(ts, "returns_attributes", "trusted_service")?;
         identity_attrs = parse_string_array(ts, "identity_attributes", "trusted_service")?;
+        check_attr_keys_domain_and_uniqueness(ts_id, &returns_attrs, &identity_attrs)?;
 
         // Identity attributes (if any) must be listed in returns attributes
         for ia in &identity_attrs {
@@ -718,6 +720,58 @@ fn parse_string_array(ts: &Table, key: &str, ctx: &str) -> Result<Vec<String>, C
         );
     }
     Ok(ret)
+}
+
+/// Every attribute needs to be in a domain which is indicated the the ZPL configuration.
+/// When we talk to trusted services we only get back the key parts without any domain.
+/// So in order to map the returned keys to the correct domain we require that all the keys
+/// are unique.  So you cannot have attributes in different domains with the same key.
+/// For exmaple this is not allowed: ["device.id", "user.id"].
+fn check_attr_keys_domain_and_uniqueness(
+    ts_id: &str,
+    returns_attrs: &[String],
+    identity_attrs: &[String],
+) -> Result<(), CompilationError> {
+    // Gather all the attributes without regard to wehether they are in the returns or identity attributes.
+    let mut uniq_attrs = HashSet::<&str>::new();
+    for attr_list in [returns_attrs, identity_attrs] {
+        for attr in attr_list {
+            uniq_attrs.insert(attr);
+        }
+    }
+
+    let mut uniq_keys = HashSet::<String>::new();
+
+    for attr in &uniq_attrs {
+        // The attrs in a config may have a special char '#' on the front to indicate a tag.
+        // We strip that off.
+        let attr = if attr.starts_with('#') {
+            &attr[1..]
+        } else {
+            attr
+        };
+        match Attribute::parse_domain(attr) {
+            Ok((_domain, key)) => {
+                if uniq_keys.contains(&key) {
+                    return Err(err_config!(
+                        "trusted_service {} attribute '{}' uses key '{}' which is not unique",
+                        ts_id,
+                        attr,
+                        key
+                    ));
+                }
+                uniq_keys.insert(key);
+            }
+            Err(_) => {
+                return Err(err_config!(
+                    "trusted_service {} attribute '{}' is not in a valid domain",
+                    ts_id,
+                    attr,
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Parse an individual protocol table.
@@ -1097,14 +1151,19 @@ mod test {
         [trusted_services.other]
         cert_path = "foo.pem"
         prefix = "bar.hop"
-        returns_attributes = ["a", "c"]
-        identity_attributes = ["c"]
+        returns_attributes = ["user.a", "user.c"]
+        identity_attributes = ["user.c"]
         provider = [["foo", "bar"]]
         "#;
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
         let services = cparser.parse_trusted_services(&ctx);
-        assert!(services.is_err());
+        let err = services.unwrap_err();
+        assert!(
+            err.to_string().contains("missing api"),
+            "expected error about missing api, got: {}",
+            err
+        );
 
         // and with api succeeds
         let tstr = r#"
@@ -1141,6 +1200,34 @@ mod test {
         }
         assert_eq!(ts.identity_attrs.len(), 1);
         assert!(ts.identity_attrs[0].zpl_key() == "user.c");
+    }
+
+    #[test]
+    fn test_parse_trusted_service_unique_keys() {
+        // Should fail because we have duplicate keys (even though different namespaces)
+        let tstr = r##"
+        [trusted_services.other]
+        api = "validation/2"
+        cert_path = "foo.pem"
+        prefix = "bar.hop"
+        returns_attributes = ["user.foo", "user.fee", "#device.foo"]
+        identity_attributes = ["user.foo"]
+        provider = [["foo", "bar"]]
+        "##;
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let services = cparser.parse_trusted_services(&ctx);
+        assert!(services.is_err());
+        // check that error message contains the duplicate key
+        if let Err(e) = services {
+            assert!(
+                e.to_string().contains("which is not unique"),
+                "expected error about non-unique key, got: {}",
+                e
+            );
+        } else {
+            panic!("parse_trusted_services should have failed");
+        }
     }
 
     #[test]
