@@ -214,6 +214,8 @@ impl PolicyBuilder {
                     domain: String::new(),
                     query_uri: String::new(), // n/a
                     validate_uri: format!("{}://[::1]:{}", l7p, port),
+                    attrs: svc.returns_attrs.clone().unwrap_or_default(),
+                    id_attrs: svc.identity_attrs.clone().unwrap_or_default(),
                 };
                 self.policy.services.push(trusted_svc);
             } else {
@@ -233,6 +235,8 @@ impl PolicyBuilder {
                         domain: String::new(),
                         query_uri: String::new(), // n/a
                         validate_uri: format!("{}://[::1]:{}", l7p, port),
+                        attrs: Vec::new(),    // do not set for adapter facing
+                        id_attrs: Vec::new(), // do not set for adapter facing
                     };
                     self.policy.services.push(auth_svc);
                 } else {

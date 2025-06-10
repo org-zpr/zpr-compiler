@@ -1,6 +1,11 @@
 # The ZPR ZPL Compiler Changelog
 
-## [0.x.0] - in progress
+## In Progress
+
+- Stores the return and identity attributes in the policy binary.
+
+
+## [0.3.0] - 2025-06-02
 
 - `trusted_service` block requires provider (not for default).
 - Additions to `trusted_service` to support new authentication services.
@@ -27,6 +32,7 @@ repository.
 
 
 
+[0.3.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.3.0
 [0.2.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.2.0
 [0.1.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.1.0
 

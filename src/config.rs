@@ -641,11 +641,6 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
             service_svc = Some(format!("{}-vs", ts_id));
         }
     } else {
-        if ts.contains_key("prefix") {
-            return Err(err_config!(
-                "default trusted_service does not allow custom prefix"
-            ));
-        }
         if ts.contains_key("returns_attributes") {
             return Err(err_config!(
                 "default trusted_service does not allow custom returns_attributes"
