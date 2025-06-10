@@ -618,13 +618,16 @@ impl Weaver {
     ) -> Result<(), CompilationError> {
         self.resolve_trusted_service_providers(config, ctx)?;
 
-        // Rather elaboratly copy the used trusted service names into a stand alone vector to avoid
+        // Copy the used trusted service names into a stand alone vector to avoid
         // holding an immutable ref to self in the following loop.
+        let used_trusted_service_names = self.used_trusted_services.clone();
+        /*
         let used_trusted_service_names = self
             .used_trusted_services
             .iter()
             .map(|s| s.clone())
             .collect::<Vec<String>>();
+        */
 
         for ts_name in used_trusted_service_names {
             if ts_name == zpl::DEFAULT_TRUSTED_SERVICE_ID {

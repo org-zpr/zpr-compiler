@@ -5,7 +5,7 @@ ZPLC uses TOML syntax.  Work in progress.
 
 ## Trusted Services
 
-The trustred block contains details about the API to use to talk to it, as
+The trusted services block contains details about the API to use to talk to it, as
 well as things like attributes returned.
 
 Syntax:
@@ -60,7 +60,7 @@ Communication with the trusted service uses a set of pre-defined protocols which
 supported by the ZPR implementation.  The protocols defined in the ZPR Referernce
 Implementation are:
 
-* `zpr-authrsa` - An actor OAuth-derived HTTPS protocol used by an adapter to authenicate its
+* `zpr-oauthrsa` - An actor OAuth-derived HTTPS protocol used by an adapter to authenicate its
   actor using an RSA key.
 * `zpr-validation/2`- A visa service HTTPS OAuth protocol which allows the visa service to
   request an authentication token based on an identifier.
