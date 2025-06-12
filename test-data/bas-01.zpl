@@ -22,7 +22,7 @@ allow zpr.adapter.cn: devices to access AuthService
 note: In policy you can define "administrators" in any way you want.
 define NetAdmins as users with device.zpr.adapter.cn:'admin.zpr.org'
 
-note: PROPOSAL -> VisaService is a reserved name.
+note: VisaService is a reserved name.
 allow NetAdmins to access VisaService
 
 
