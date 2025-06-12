@@ -158,10 +158,9 @@ impl PolicyBuilder {
     fn set_default_auth(
         &mut self,
         fabric: &Fabric,
-        ctx: &CompilationCtx,
+        _ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         if fabric.default_auth_cert_asn.is_empty() {
-            ctx.warn("trusted_services.default missing certificate")?;
             return Ok(());
         }
         let pcert = polio::Cert {

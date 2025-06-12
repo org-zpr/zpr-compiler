@@ -133,6 +133,7 @@ pub struct Class {
     pub aka: String,
     pub pos: FPos, // location of the define token
     pub with_attrs: Vec<Attribute>,
+    pub extensible: bool,
     // TODO: withouts
 }
 
@@ -143,6 +144,7 @@ impl Class {
             Class::default_user(),
             Class::default_service(),
             Class::default_device(),
+            Class::default_visa_service(),
         ]
     }
     pub fn default_user() -> Class {
@@ -153,6 +155,7 @@ impl Class {
             aka: zpl::DEF_CLASS_USER_AKA.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
+            extensible: true,
         }
     }
     pub fn default_service() -> Class {
@@ -163,6 +166,18 @@ impl Class {
             aka: zpl::DEF_CLASS_SERVICE_AKA.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
+            extensible: true,
+        }
+    }
+    pub fn default_visa_service() -> Class {
+        Class {
+            flavor: ClassFlavor::Service,
+            parent: zpl::DEF_CLASS_SERVICE_NAME.to_string(),
+            name: zpl::DEF_CLASS_VISA_SERVICE_NAME.to_string(),
+            aka: zpl::DEF_CLASS_VISA_SERVICE_AKA.to_string(),
+            pos: FPos { line: 0, col: 0 },
+            with_attrs: vec![],
+            extensible: false,
         }
     }
     pub fn default_device() -> Class {
@@ -173,12 +188,14 @@ impl Class {
             aka: zpl::DEF_CLASS_DEVICE_AKA.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
+            extensible: true,
         }
     }
     pub fn is_builtin(&self) -> bool {
         self.name == zpl::DEF_CLASS_USER_NAME
             || self.name == zpl::DEF_CLASS_SERVICE_NAME
             || self.name == zpl::DEF_CLASS_DEVICE_NAME
+            || self.name == zpl::DEF_CLASS_VISA_SERVICE_NAME
     }
 }
 

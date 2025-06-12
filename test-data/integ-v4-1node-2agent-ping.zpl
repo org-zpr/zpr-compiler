@@ -19,6 +19,7 @@ allow A2 to access A1Svc
 allow Node to access PingableVs
 allow Vs to access PingableNode
 
+allow zpr.adapter.cn:'client.zpr.org' devices to access VisaService
 
 
 

@@ -21,7 +21,6 @@ cert_path = "ca-cert.pem"
 
 [visa_service] # Only one visa service support at the moment.
 dock_node = "node.zpr.org"
-admin_attrs = [ [ "device.zpr.adapter.cn", "client.zpr.org" ] ]
 
 [protocols.ping]
 l4protocol = "iana.ICMP6"

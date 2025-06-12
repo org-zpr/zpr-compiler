@@ -262,7 +262,6 @@ impl ConfigApi {
     //
     // - zpr/visa_services -> returns list of visa service IDs (KeySet)
     // - zpr/visa_services/<id> -> returns (?)
-    // - zpr/visa_services/<id>/admin_attrs -> returns (list of attr k/v tuples)
     // - zpr/visa_services/<id>/dock_node_id -> returns (docking node id)
     //
     //
@@ -582,9 +581,6 @@ impl ConfigApi {
         }
         let key = key_path[1];
         match key {
-            "admin_attrs" => Some(ConfigItem::AttrList(
-                self.config.visa_service.admin_attrs.clone(),
-            )),
             "dock_node_id" => Some(ConfigItem::StrVal(
                 self.config.visa_service.dock_node_id.clone(),
             )),
