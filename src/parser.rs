@@ -403,4 +403,28 @@ allow devices with marketing-emps to access role:marketing services
             };
         }
     }
+
+    #[test]
+    fn test_cannot_subclass_visa_service() {
+        let invalids = vec!["Define MyVs as a VisaService with device.color:green"];
+        let ctx = CompilationCtx::default();
+        for valid in invalids {
+            let tokens: Result<Tokenization, CompilationError> =
+                tokenize_str(valid, &ctx).or_else(|e| {
+                    panic!("failed to tokenize '{}': {:?}", valid, e);
+                });
+            let _pol = match parse(tokens.unwrap().tokens, &ctx) {
+                Ok(_policy) => {
+                    panic!("should not have parsed '{}'", valid);
+                }
+                Err(e) => {
+                    assert!(
+                        e.to_string().contains("is not extensible"),
+                        "unexpected error: {:?}",
+                        e
+                    );
+                }
+            };
+        }
+    }
 }

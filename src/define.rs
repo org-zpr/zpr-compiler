@@ -85,6 +85,7 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
         aka: aka_name.clone(),
         pos: root_tok.into(),
         with_attrs: Vec::new(),
+        extensible: true,
     };
 
     match tokens.peek() {
@@ -289,7 +290,20 @@ pub fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(),
         for name in needs_parent {
             let parentless_ref = classes.get(&name).unwrap();
             let parent_flavor = match classes.get(parentless_ref.parent.as_str()) {
-                Some(parent) => parent.flavor.clone(),
+                Some(parent) => {
+                    // Ensure parent allows subclassing.
+                    if !parent.extensible {
+                        return Err(CompilationError::DefineStmtParseError(
+                            format!(
+                                "class {} extends {} which is not extensible",
+                                name, parent.name,
+                            ),
+                            parentless_ref.pos.line,
+                            parentless_ref.pos.col,
+                        ));
+                    }
+                    parent.flavor.clone()
+                }
                 None => {
                     // This is an error, the parent class does not exist.
                     return Err(CompilationError::DefineStmtParseError(

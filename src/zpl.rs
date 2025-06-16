@@ -1,6 +1,9 @@
 pub const DEF_CLASS_SERVICE_NAME: &str = "service";
 pub const DEF_CLASS_SERVICE_AKA: &str = "services";
 
+pub const DEF_CLASS_VISA_SERVICE_NAME: &str = "VisaService";
+pub const DEF_CLASS_VISA_SERVICE_AKA: &str = "VisaServices";
+
 pub const DEF_CLASS_USER_NAME: &str = "user";
 pub const DEF_CLASS_USER_AKA: &str = "users";
 

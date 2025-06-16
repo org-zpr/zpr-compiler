@@ -18,4 +18,5 @@ allow SpecialClient to access PingableService
 Note: any connected adapter can ping the node
 allow adapter to access PingableNode
 
+allow zpr.adapter.cn:'client.zpr.org' devices to access VisaService
 

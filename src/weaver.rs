@@ -110,7 +110,7 @@ impl Weaver {
     ) -> Result<(), CompilationError> {
         self.defines_to_services(class_idx, policy, config)?;
         self.allow_clauses_to_services(class_idx, policy, config)?;
-        self.visa_services_to_services(config, ctx)?;
+        self.visa_services_to_services(class_idx, policy, config, ctx)?;
 
         Ok(())
     }
@@ -121,6 +121,8 @@ impl Weaver {
     /// admin HTTPS API.
     fn visa_services_to_services(
         &mut self,
+        class_idx: &HashMap<String, &Class>,
+        policy: &Policy,
         config: &ConfigApi,
         ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
@@ -162,19 +164,42 @@ impl Weaver {
             &vs_attrs,
         )?;
 
-        let admin_access_attrs = match config.get("zpr/visa_services/default/admin_attrs") {
-            Some(ConfigItem::AttrList(alist)) => vec_to_attributes(&alist)?,
-            _ => {
-                vec![]
+        // The admin permissions come from ZPL allow statements, not from configuration.
+        let mut condition_count = 0;
+        for ac in &policy.allows {
+            if ac.service.class != zpl::DEF_CLASS_VISA_SERVICE_NAME {
+                continue;
             }
-        };
-        if admin_access_attrs.is_empty() {
+
+            // TODO: User may be able to shoot themselves in the foot here if they add
+            // too many attributes to VisaService. May want to consider disallowing
+            // any attributes on the service (but allow on user and device).
+            let mut admin_access_attrs = ac.user.with.clone();
+            admin_access_attrs.extend_from_slice(&ac.device.with);
+            admin_access_attrs.extend_from_slice(&ac.service.with);
+
+            admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.user.class));
+            admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.device.class));
+            admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.service.class));
+
+            let fp = FPos::from(&ac.device.class_tok);
+            let attr_map = squash_attributes(&admin_access_attrs, &fp)?;
+            let resolved_attrs = self.resolve_attributes(
+                attr_map
+                    .into_values()
+                    .collect::<Vec<Attribute>>()
+                    .as_slice(),
+                config,
+            )?;
+            if !resolved_attrs.is_empty() {
+                self.fabric
+                    .add_condition_to_service(&fab_admin_svc_id, &resolved_attrs, false)?;
+                condition_count += 1;
+            }
+        }
+        if condition_count == 0 {
             // TODO: is this an error?
-            ctx.warn("no admin attributes set for visa service admin access")?;
-        } else {
-            self.fabric
-                .add_condition_to_service(&fab_admin_svc_id, &admin_access_attrs, false)?;
-            // also allow admin to connect
+            ctx.warn("no policy granting VisaService admin access")?;
         }
 
         // TODO: When we get around to trusted services, we need to add builtin rules
@@ -220,7 +245,6 @@ impl Weaver {
         config: &ConfigApi,
     ) -> Result<(), CompilationError> {
         let service_name = &sclass.name;
-
         let mut attrs = Vec::new();
         attrs.extend_from_slice(initial_attrs);
 
@@ -322,6 +346,10 @@ impl Weaver {
                 // connect rules.  But it will create access rules.
                 continue;
             }
+            if ac.service.class == zpl::DEF_CLASS_VISA_SERVICE_NAME {
+                // Handled elswhere.
+                continue;
+            }
 
             let mut attrs = Vec::new();
 
@@ -331,7 +359,6 @@ impl Weaver {
             let svc_class = class_idx
                 .get(&ac.service.class)
                 .expect("service class not found in class index");
-
             self.add_service(class_idx, svc_class, &attrs, ac.id, config)?;
         }
         Ok(())
@@ -465,6 +492,11 @@ impl Weaver {
         // Every allow is an access condition (aka rule, aka policy).
         // We need the attributes from the user and device clauses.
         for ac in &policy.allows {
+            if ac.service.class == zpl::DEF_CLASS_VISA_SERVICE_NAME {
+                // Visa service is handled separately.
+                continue;
+            }
+
             // Here we collect all attributes -- some will have no values.
             let mut attrs = Vec::new();
 
@@ -1023,6 +1055,7 @@ mod test {
             aka: "foos".to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
+            extensible: true,
         };
         class_idx.insert("foo".to_string(), &foo_cls);
 

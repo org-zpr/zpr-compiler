@@ -3,7 +3,9 @@
 ## In Progress
 
 - Stores the return and identity attributes in the policy binary.
-
+- The `admin_attrs` for `visa_service` block is no longer supported.
+  Instead you must write `allow` statements in your ZPL targeting the
+  special reserved service named `VisaService`.
 
 ## [0.3.0] - 2025-06-02
 

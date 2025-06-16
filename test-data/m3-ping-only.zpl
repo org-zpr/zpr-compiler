@@ -8,4 +8,5 @@ define ZServicePingable as a service with device.zpr.adapter.cn:'service.zpr.org
 
 allow zpr.adapter.cn:'client.zpr.org' adapter to access ZServicePingable
 
+allow zpr.adapter.cn:'client.zpr.org' devices to access VisaService
 

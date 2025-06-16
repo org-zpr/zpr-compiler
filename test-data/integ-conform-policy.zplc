@@ -21,7 +21,6 @@ cert_path = "ca-cert.pem"
 
 [visa_service]
 dock_node = "node.zpr.org"
-admin_attrs = [ ["device.zpr.adapter.cn", "client.zpr.org"] ]
 
 [protocols.http]
 l4protocol = "iana.TCP"

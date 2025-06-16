@@ -118,7 +118,6 @@ pub struct Interface {
 #[derive(Debug)]
 pub struct VisaService {
     pub dock_node_id: String,
-    pub admin_attrs: Vec<(String, String)>,
 }
 
 pub struct Bootstrap {
@@ -182,7 +181,6 @@ impl ConfigParse {
         let mut protocols = self.parse_protocols(ctx)?;
         self.add_default_protocols(&mut protocols);
         let services = self.parse_services(ctx, &protocols)?;
-
         Ok(Config {
             digest: self.digest,
             resolver,
@@ -286,7 +284,7 @@ impl ConfigParse {
     /// Parse the very basic visa_service section.
     fn parse_visa_service(
         &mut self,
-        ctx: &CompilationCtx,
+        _ctx: &CompilationCtx,
     ) -> Result<VisaService, CompilationError> {
         if !self.ctoml.contains_key("visa_service") {
             return Err(err_config!("missing section: visa_service"));
@@ -302,19 +300,7 @@ impl ConfigParse {
             .ok_or(err_config!("visa_service missing dock_node"))?
             .to_string();
 
-        let admin_attrs = if vs.contains_key("admin_attrs") {
-            let tuples = vs["admin_attrs"]
-                .as_array()
-                .ok_or(err_config!("visa_service missing admin_attrs list"))?;
-            tuples_to_tuple_str_vec("visa_service", tuples)?
-        } else {
-            ctx.warn("visa service has no admin_attrs")?;
-            Vec::new()
-        };
-        Ok(VisaService {
-            dock_node_id,
-            admin_attrs,
-        })
+        Ok(VisaService { dock_node_id })
     }
 
     // Parse optional boostrap section. Each entry in the table is of the form: `<CN> = <KEYFILE>`.
@@ -1089,28 +1075,6 @@ mod test {
         assert!(vs.is_ok());
         let vs = vs.unwrap();
         assert_eq!(vs.dock_node_id, "n0");
-    }
-
-    #[test]
-    fn test_parse_visa_service_with_admin() {
-        let tstr = r#"
-        [visa_service]
-        dock_node = "n0"
-        admin_attrs = [["cn", "foo"], ["bar", "baz"]]
-        "#;
-        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let ctx = CompilationCtx::default();
-        let vs = cparser.parse_visa_service(&ctx);
-        assert!(vs.is_ok());
-        let vs = vs.unwrap();
-        assert_eq!(vs.dock_node_id, "n0");
-        assert_eq!(vs.admin_attrs.len(), 2);
-        assert!(vs
-            .admin_attrs
-            .contains(&("cn".to_string(), "foo".to_string())));
-        assert!(vs
-            .admin_attrs
-            .contains(&("bar".to_string(), "baz".to_string())));
     }
 
     #[test]
