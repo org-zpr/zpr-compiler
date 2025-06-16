@@ -2,10 +2,16 @@
 
 ## In Progress
 
+(n/a)
+
+
+## [0.4.0] - 2025-06-16
+
 - Stores the return and identity attributes in the policy binary.
 - The `admin_attrs` for `visa_service` block is no longer supported.
   Instead you must write `allow` statements in your ZPL targeting the
   special reserved service named `VisaService`.
+
 
 ## [0.3.0] - 2025-06-02
 
@@ -34,6 +40,7 @@ repository.
 
 
 
+[0.4.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.4.0
 [0.3.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.3.0
 [0.2.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.2.0
 [0.1.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.1.0
