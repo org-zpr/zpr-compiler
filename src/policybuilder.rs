@@ -13,9 +13,6 @@ use crate::protocols::IcmpFlowType;
 use crate::ptypes::Attribute;
 use crate::zpl;
 
-/// Updeate this if we change the protobuf. This is checked by visa service during deserialization.
-pub const SERIAL_VERSION: u32 = 43;
-
 /// This value for a PROC in a connect record means NO PROC.
 pub const NO_PROC: u32 = u32::MAX; // 0xffffffff
 
@@ -71,7 +68,6 @@ impl PolicyBuilder {
         let policy_version = tsnow.as_secs();
 
         let pp = polio::Policy {
-            serial_version: SERIAL_VERSION,
             policy_date: policy_date.clone(),
             policy_version: policy_version,
             policy_metadata: metadata(&policy_date),
