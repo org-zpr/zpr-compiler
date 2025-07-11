@@ -17,7 +17,7 @@ ring = "0.17.8"
 serde = { version = "1.0.217", features = ["derive"] }
 thiserror = "2.0.8"
 toml = "0.8.19"
-zpr-policy = { git = "https://github.com/org-zpr/zpr-policy-rs.git", tag = "v0.3.0" }
+zpr-policy = { git = "https://github.com/org-zpr/zpr-policy-rs.git", tag = "v0.5.0" }
 
 [lib]
 test = false
