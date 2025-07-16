@@ -15,9 +15,6 @@ use crate::parser::parse;
 use crate::policybuilder::PolicyBuilder;
 use crate::weaver::weave;
 
-/// Updeate this if we change the container format. This is checked by visa service during deserialization.
-pub const CONTAINER_VERSION: u32 = 1121;
-
 /// Create one of these with the [CompilationBuilder].
 pub struct Compilation {
     pub verbose: bool,
@@ -27,6 +24,27 @@ pub struct Compilation {
     pub output_file: PathBuf,
     pub parse_only: bool,
     private_key: Option<Rsa<Private>>,
+}
+
+pub fn get_compiler_version() -> (u32, u32, u32) {
+    let version = env!("CARGO_PKG_VERSION");
+    let version_parts: Vec<&str> = version.split('.').collect();
+    let major = version_parts
+        .get(0)
+        .unwrap_or(&"0")
+        .parse::<u32>()
+        .unwrap_or(0);
+    let minor = version_parts
+        .get(1)
+        .unwrap_or(&"0")
+        .parse::<u32>()
+        .unwrap_or(0);
+    let patch = version_parts
+        .get(2)
+        .unwrap_or(&"0")
+        .parse::<u32>()
+        .unwrap_or(0);
+    (major, minor, patch)
 }
 
 impl Compilation {
@@ -132,8 +150,12 @@ impl Compilation {
             }
         };
 
+        let (major, minor, patch) = get_compiler_version();
+
         let container = polio::PolicyContainer {
-            container_version: CONTAINER_VERSION,
+            version_major: major,
+            version_minor: minor,
+            version_patch: patch,
             policy_date: pol.policy_date.clone(),
             policy_version: pol.policy_version,
             policy_revision: pol.policy_revision.clone(),

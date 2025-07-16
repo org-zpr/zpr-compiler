@@ -11,7 +11,8 @@ use openssl::rsa::Rsa;
 use openssl::x509::X509;
 use prost::Message;
 
-use zplc::policybuilder::{NO_PROC, SERIAL_VERSION};
+use zplc::compilation::get_compiler_version;
+use zplc::policybuilder::NO_PROC;
 use zplc::protocols::IanaProtocol;
 use zplc::zpl;
 
@@ -37,11 +38,28 @@ fn main() {
     let container: PolicyContainer =
         PolicyContainer::decode(encoded_buf).expect("failed to decode binary policy file");
 
+    let (current_version, version_mismatch) = {
+        let (major, minor, patch) = get_compiler_version();
+        (
+            format!("{}.{}.{}", major, minor, patch),
+            container.version_major != major
+                || container.version_minor != minor
+                || container.version_patch != patch,
+        )
+    };
+
     println!("              file: {}", fname.yellow());
-    println!(
-        " container_version: {}",
-        format!("{}", container.container_version).yellow()
+    print!(
+        "  compiler_version: {}.{}.{}",
+        format!("{}", container.version_major).yellow(),
+        format!("{}", container.version_minor).yellow(),
+        format!("{}", container.version_patch).yellow()
     );
+    if version_mismatch {
+        println!(" (current is {})", current_version.red());
+    } else {
+        println!();
+    }
     println!("       policy_date: {}", container.policy_date.yellow());
     println!(
         "    policy_version: {}",
@@ -62,19 +80,6 @@ fn main() {
     let encoded_buf = Bytes::from(container.policy);
     let pol: Policy = Policy::decode(encoded_buf).expect("failed to decode policy");
 
-    print!(
-        "         serial_version: {:>3}",
-        format!("{}", pol.serial_version).yellow().bold()
-    );
-    if pol.serial_version != SERIAL_VERSION {
-        println!(
-            "      {} != {}",
-            String::from("*mismatch*").red(),
-            format!("{}", SERIAL_VERSION).bold()
-        );
-    } else {
-        println!();
-    }
     print!(
         "       connection rules: {:>3}",
         format!("{}", pol.connects.len()).yellow()
