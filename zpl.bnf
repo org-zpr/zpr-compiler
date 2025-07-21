@@ -1,0 +1,82 @@
+// Extracted from ZRFC 15.4
+// Not included: conditions and limits
+
+<zpl-policy> ::= <statement>*
+
+<statement> ::= <permission-statement> | <denial-statement> | <define-statement>
+
+<permission-statement> ::= "allow" <subject-clause> "to" "access" <object-clause> 
+                          <through-clause>? <limit-clause>? <signal-clause>? "." <eol>
+
+<denial-statement> ::= "never" "allow" <subject-clause> "to" "access" <object-clause>
+                       <signal-clause>? "." <eol>
+
+<define-statement> ::= "define" <name> <aka-clause>? "as" <article> <class-name> 
+                      <with-attributes-clause>? "." <eol>
+
+<subject-clause> ::= <entity-spec> <with-device-clause>?
+
+<with-device-clause> ::= ("with" | "on") <entity-spec>
+
+<object-clause> ::= <entity-spec> | <service-spec>
+
+<through-clause> ::= "through" <name>
+
+<signal-clause> ::= "," "and" "signal" <string> "to" <name>
+
+<aka-clause> ::= "aka" <name>
+
+<article> ::= "a" | "an"
+
+<with-attributes-clause> ::= "with" <attribute-list>
+
+<attribute-list> ::= <attribute-spec> ("," <attribute-spec>)*
+
+<attribute-spec> ::= <name> | 
+                    "optional" "tags" <name> ("," <name>)* ("and" <name>)?
+
+<entity-spec> ::= <attribute-expr>* <class-name>
+
+<service-spec> ::= <attribute-expr>* <class-name> | <name>
+
+<attribute-expr> ::= <name> |
+                    <name> ":" <value> |
+                    <name> ":" 
+
+<name> ::= <identifier> | <string> | <namespace-name>
+
+<namespace-name> ::= <name> "." <name>
+
+<identifier> ::= <letter> (<letter> | <digit> | "-" | "_")*
+
+<value> ::= <string> | <value-set>
+
+<string> ::= <quoted-string> | <numeric-string>
+
+<quoted-string> ::= <single-quoted-string> | <double-quoted-string>
+
+<single-quoted-string> ::= "'" <single-quote-chars> "'"
+
+<double-quoted-string> ::= '"' <double-quote-chars> '"'
+
+<single-quote-chars> ::= (<any-char-except-single-quote-or-backslash> | <escaped-char>)*
+
+<double-quote-chars> ::= (<any-char-except-double-quote-or-backslash> | <escaped-char>)*
+
+<escaped-char> ::= "\'" | '\"' | "\\"
+
+<numeric-string> ::= <integer> | <float>
+
+<integer> ::= <digit>+
+
+<float> ::= <digit>+ "." <digit>+
+
+<value-set> ::= "{" <value> ("," <value>)* "}"
+
+
+<letter> ::= "a".."z" | "A".."Z"
+
+<digit> ::= "0".."9"
+
+<comment> ::= "#" <any-chars-to-eol> | "//" <any-chars-to-eol>
+
