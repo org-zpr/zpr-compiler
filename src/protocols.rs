@@ -282,7 +282,7 @@ impl Protocol {
                         s.push_str(&format!("{}/{}", protname, req));
                         s.push_str(&format!(",{}/{}", protname, resp));
                     }
-                    IcmpFlowType::OneShot(ref codes) => {
+                    IcmpFlowType::OneShot(codes) => {
                         for c in codes {
                             s.push_str(&format!("{}/{}", protname, c));
                         }

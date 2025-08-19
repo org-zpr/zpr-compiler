@@ -23,10 +23,10 @@ use crate::zpl;
 // TODO: Figure out how to put this in errors.rs
 #[macro_export]
 macro_rules! err_config {
-    ($s:expr) => {
+    ($s:expr_2021) => {
         CompilationError::ConfigError($s.to_string())
     };
-    ($s:expr, $($arg:tt)*) => {
+    ($s:expr_2021, $($arg:tt)*) => {
         CompilationError::ConfigError(format!($s, $($arg)*))
     };
 }
