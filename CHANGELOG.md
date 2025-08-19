@@ -2,7 +2,7 @@
 
 ## In Progress
 
-(n/a)
+- `device` is now `endpoint`.
 
 
 ## [0.4.0] - 2025-06-16

@@ -12,7 +12,7 @@ use crate::zpl;
 #[derive(Debug, Default)]
 struct ParseAllowState {
     root_tok: Token,
-    device_clause: Option<Clause>,
+    endpoint_clause: Option<Clause>,
     user_clause: Option<Clause>,
     service_clause: Option<Clause>,
 }
@@ -29,7 +29,10 @@ impl ParseAllowState {
     fn to_allow_clause(&mut self, id: usize) -> AllowClause {
         AllowClause {
             id,
-            device: self.device_clause.take().expect("device clause not set"),
+            endpoint: self
+                .endpoint_clause
+                .take()
+                .expect("endpoint clause not set"),
             user: self.user_clause.take().expect("user clause not set"),
             service: self.service_clause.take().expect("service clause not set"),
         }
@@ -73,7 +76,7 @@ pub fn parse_allow(
         &mut tokens,
         classes_idx,
         &ParseOpts::stop_at_any(&[TokenType::To, TokenType::With]),
-        "device or user clause",
+        "endpoint or user clause",
     )?;
 
     match tokens.peek() {
@@ -87,25 +90,25 @@ pub fn parse_allow(
                     match classes_map.get(cn).unwrap().flavor {
                         ClassFlavor::User => {
                             // Device clause is skipped, so use default.
-                            parse_state.device_clause = Some(Clause::new(
-                                zpl::DEF_CLASS_DEVICE_NAME,
+                            parse_state.endpoint_clause = Some(Clause::new(
+                                zpl::DEF_CLASS_ENDPOINT_NAME,
                                 parse_state.root_tok.clone(),
                             ));
                             let uc = ps.to_clause("user")?;
                             parse_state.user_clause = Some(uc);
                         }
-                        ClassFlavor::Device => {
+                        ClassFlavor::Endpoint => {
                             // User clause is skipped, so use default.
                             parse_state.user_clause = Some(Clause::new(
                                 zpl::DEF_CLASS_USER_NAME,
                                 parse_state.root_tok.clone(),
                             ));
-                            let dc = ps.to_clause("device")?;
-                            parse_state.device_clause = Some(dc);
+                            let dc = ps.to_clause("endpoint")?;
+                            parse_state.endpoint_clause = Some(dc);
                         }
                         _ => {
                             return Err(CompilationError::AllowStmtParseError(
-                                format!("not a user or device clause: '{}'", cn),
+                                format!("not a user or endpoint clause: '{}'", cn),
                                 parse_state.root_tok.line,
                                 parse_state.root_tok.col,
                             ));
@@ -116,12 +119,12 @@ pub fn parse_allow(
                 // If we hit a WITH then we expect a DEVICE clause.
                 TokenType::With => {
                     // Hit WITH which means we must have parsed a device clause, and we expect a user clause to follow.
-                    if classes_map.get(cn).unwrap().flavor == ClassFlavor::Device {
-                        let dc = ps.to_clause("device")?;
-                        parse_state.device_clause = Some(dc);
+                    if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
+                        let dc = ps.to_clause("endpoint")?;
+                        parse_state.endpoint_clause = Some(dc);
                     } else {
                         return Err(CompilationError::AllowStmtParseError(
-                            format!("not a device clause: '{}'", cn),
+                            format!("not an endpoint clause: '{}'", cn),
                             parse_state.root_tok.line,
                             parse_state.root_tok.col,
                         ));
@@ -154,8 +157,8 @@ pub fn parse_allow(
     let tok = tokens.next().unwrap();
     match tok.tt {
         TokenType::With => {
-            if parse_state.device_clause.is_none() {
-                panic!("assertion fails - no device clause");
+            if parse_state.endpoint_clause.is_none() {
+                panic!("assertion fails - no endpoint clause");
             }
             // Ok, now parse a USER clause, returns having found but not parsed 'TO'.
             if !try_parse_allow_user_clause(
@@ -196,8 +199,8 @@ pub fn parse_allow(
 
     let mut ac = parse_state.to_allow_clause(statement_id);
 
-    for attr in &mut ac.device.with {
-        attr.set_domain(AttrDomain::Device);
+    for attr in &mut ac.endpoint.with {
+        attr.set_domain(AttrDomain::Endpoint);
     }
     for attr in &mut ac.user.with {
         attr.set_domain(AttrDomain::User);
@@ -215,9 +218,9 @@ fn validate_clause(
     ac: &AllowClause,
     classes_map: &HashMap<String, Class>,
 ) -> Result<(), CompilationError> {
-    if ac.user.with_attr_count(classes_map) + ac.device.with_attr_count(classes_map) == 0 {
+    if ac.user.with_attr_count(classes_map) + ac.endpoint.with_attr_count(classes_map) == 0 {
         return Err(CompilationError::AllowStmtParseError(
-            "user and/or device must specify at least one discriminating attribute".to_string(),
+            "user and/or endpoint must specify at least one discriminating attribute".to_string(),
             ac.user.class_tok.line,
             ac.user.class_tok.col,
         ));

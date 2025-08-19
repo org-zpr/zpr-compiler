@@ -45,7 +45,7 @@ impl From<&Token> for FPos {
 #[derive(Clone, Debug)]
 pub struct AllowClause {
     pub id: usize, // Within a given zpl policy, each allow clause gets a unique id.
-    pub device: Clause,
+    pub endpoint: Clause,
     pub user: Clause,
     pub service: Clause,
 }
@@ -55,7 +55,7 @@ impl fmt::Display for AllowClause {
         write!(
             f,
             "[{}] ALLOW {}\n   WITH {}\n      TO ACCESS {}",
-            self.id, self.device, self.user, self.service
+            self.id, self.endpoint, self.user, self.service
         )
     }
 }
@@ -118,7 +118,7 @@ impl fmt::Display for Clause {
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum ClassFlavor {
     Undefined, // they all start here
-    Device,
+    Endpoint,
     User,
     Service,
 }
@@ -143,7 +143,7 @@ impl Class {
         vec![
             Class::default_user(),
             Class::default_service(),
-            Class::default_device(),
+            Class::default_endpoint(),
             Class::default_visa_service(),
         ]
     }
@@ -180,12 +180,12 @@ impl Class {
             extensible: false,
         }
     }
-    pub fn default_device() -> Class {
+    pub fn default_endpoint() -> Class {
         Class {
-            flavor: ClassFlavor::Device,
-            parent: zpl::DEF_CLASS_DEVICE_NAME.to_string(),
-            name: zpl::DEF_CLASS_DEVICE_NAME.to_string(),
-            aka: zpl::DEF_CLASS_DEVICE_AKA.to_string(),
+            flavor: ClassFlavor::Endpoint,
+            parent: zpl::DEF_CLASS_ENDPOINT_NAME.to_string(),
+            name: zpl::DEF_CLASS_ENDPOINT_NAME.to_string(),
+            aka: zpl::DEF_CLASS_ENDPOINT_AKA.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
             extensible: true,
@@ -194,7 +194,7 @@ impl Class {
     pub fn is_builtin(&self) -> bool {
         self.name == zpl::DEF_CLASS_USER_NAME
             || self.name == zpl::DEF_CLASS_SERVICE_NAME
-            || self.name == zpl::DEF_CLASS_DEVICE_NAME
+            || self.name == zpl::DEF_CLASS_ENDPOINT_NAME
             || self.name == zpl::DEF_CLASS_VISA_SERVICE_NAME
     }
 }
@@ -206,7 +206,7 @@ impl Class {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttrDomain {
     Unspecified,
-    Device,
+    Endpoint,
     User,
     Service,
     ZprInternal, // For compiler/visa-service use only
@@ -215,7 +215,7 @@ pub enum AttrDomain {
 impl fmt::Display for AttrDomain {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            AttrDomain::Device => write!(f, "{}", zpl::ATTR_DOMAIN_DEVICE),
+            AttrDomain::Endpoint => write!(f, "{}", zpl::ATTR_DOMAIN_ENDPOINT),
             AttrDomain::User => write!(f, "{}", zpl::ATTR_DOMAIN_USER),
             AttrDomain::Service => write!(f, "{}", zpl::ATTR_DOMAIN_SERVICE),
             AttrDomain::ZprInternal => write!(f, "{}", zpl::ATTR_DOMAIN_ZPR_INTERNAL),
@@ -227,7 +227,7 @@ impl fmt::Display for AttrDomain {
 impl AttrDomain {
     pub fn from_flavor(class: ClassFlavor) -> Self {
         match class {
-            ClassFlavor::Device => AttrDomain::Device,
+            ClassFlavor::Endpoint => AttrDomain::Endpoint,
             ClassFlavor::User => AttrDomain::User,
             ClassFlavor::Service => AttrDomain::Service,
             ClassFlavor::Undefined => AttrDomain::Unspecified,
@@ -296,8 +296,8 @@ impl Attribute {
     /// Parse off one the ZPR domains from the key.  Does not work with ZPR internal domain.
     /// Returns `(<domain>, <rest>)` from given key.
     pub fn parse_domain(key: &str) -> Result<(AttrDomain, String), AttributeError> {
-        if let Some(renamed) = key.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_DEVICE)) {
-            Ok((AttrDomain::Device, renamed.to_string()))
+        if let Some(renamed) = key.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_ENDPOINT)) {
+            Ok((AttrDomain::Endpoint, renamed.to_string()))
         } else if let Some(renamed) = key.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_USER)) {
             Ok((AttrDomain::User, renamed.to_string()))
         } else if let Some(renamed) = key.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_SERVICE)) {
@@ -462,16 +462,16 @@ mod test {
 
     #[test]
     fn test_attributes_tag() {
-        let a = Attribute::tag("device.hardened").unwrap();
-        assert_eq!(a.domain, AttrDomain::Device);
+        let a = Attribute::tag("endpoint.hardened").unwrap();
+        assert_eq!(a.domain, AttrDomain::Endpoint);
         assert_eq!(a.name, "hardened");
         assert_eq!(a.value, None);
         assert_eq!(a.multi_valued, false);
         assert_eq!(a.tag, true);
         assert_eq!(a.optional, false);
-        assert_eq!("#device.hardened", a.to_string());
-        assert_eq!("device.zpr.tag", a.zpl_key());
-        assert_eq!("device.hardened", a.zpl_value());
+        assert_eq!("#endpoint.hardened", a.to_string());
+        assert_eq!("endpoint.zpr.tag", a.zpl_key());
+        assert_eq!("endpoint.hardened", a.zpl_value());
     }
 
     #[test]

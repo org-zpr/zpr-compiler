@@ -152,7 +152,7 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::lex::{tokenize_str, Tokenization};
+    use crate::lex::{Tokenization, tokenize_str};
     use crate::ptypes::ClassFlavor;
 
     #[test]
@@ -164,7 +164,7 @@ mod test {
             "define employee as a user with an `ID number`, multiple roles and optional tags full-time, part-time, and intern and with color:purple, size:`extra:large`",
             "define gateway as a service with an external-network-connection",
             "define gateway as a service with an external-network-connection \n define internet-gateway as a gateway with external-network-connection:public-internet",
-            "define peripheral as a user with function \n define mouse AKA mice as a peripheral with function:pointing"
+            "define peripheral as a user with function \n define mouse AKA mice as a peripheral with function:pointing",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -189,7 +189,7 @@ optional tags full-time, part-time, and intern
 
 define marketing-emp as an employee with rule:marketing and tag full-time
 
-allow devices with marketing-emps to access role:marketing services
+allow endpoints with marketing-emps to access role:marketing services
 "#;
         let ctx = CompilationCtx::default();
         let tz: Result<Tokenization, CompilationError> = tokenize_str(pp, &ctx).or_else(|e| {
@@ -249,7 +249,7 @@ allow devices with marketing-emps to access role:marketing services
 
     #[test]
     fn test_base_allow() {
-        let valids = vec!["allow devices with color:green users to access services"];
+        let valids = vec!["allow endpoints with color:green users to access services"];
         let ctx = CompilationCtx::default();
         for valid in valids {
             let tokens: Result<Tokenization, CompilationError> =
@@ -270,8 +270,8 @@ allow devices with marketing-emps to access role:marketing services
     #[test]
     fn test_postifx_attr_prohibited() {
         let valids = vec![
-            "allow devices with users with loc:italy to access services",
-            "allow devices with users to access services with color:green",
+            "allow endpoints with users with loc:italy to access services",
+            "allow endpoints with users to access services with color:green",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -319,9 +319,9 @@ allow devices with marketing-emps to access role:marketing services
     #[test]
     fn test_omit_user() {
         let valids = vec![
-            "allow managed devices to access services",
-            "allow color:red devices to access services",
-            "allow managed, color:red devices to access services",
+            "allow managed endpoints to access services",
+            "allow color:red endpoints to access services",
+            "allow managed, color:red endpoints to access services",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -341,8 +341,8 @@ allow devices with marketing-emps to access role:marketing services
     #[test]
     fn test_verbose_device() {
         let valids = vec![
-            "allow color:green devices with managed, color:red users to access green services",
-            "allow color:green devices with color:red, managed users to access color:blue services",
+            "allow color:green endpoints with managed, color:red users to access green services",
+            "allow color:green endpoints with color:red, managed users to access color:blue services",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -406,7 +406,7 @@ allow devices with marketing-emps to access role:marketing services
 
     #[test]
     fn test_cannot_subclass_visa_service() {
-        let invalids = vec!["Define MyVs as a VisaService with device.color:green"];
+        let invalids = vec!["Define MyVs as a VisaService with endpoint.color:green"];
         let ctx = CompilationCtx::default();
         for valid in invalids {
             let tokens: Result<Tokenization, CompilationError> =

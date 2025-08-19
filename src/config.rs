@@ -707,7 +707,7 @@ fn parse_string_array(ts: &Table, key: &str, ctx: &str) -> Result<Vec<String>, C
 /// When we talk to trusted services we only get back the key parts without any domain.
 /// So in order to map the returned keys to the correct domain we require that all the keys
 /// are unique.  So you cannot have attributes in different domains with the same key.
-/// For exmaple this is not allowed: ["device.id", "user.id"].
+/// For exmaple this is not allowed: ["endpoint.id", "user.id"].
 fn check_attr_keys_domain_and_uniqueness(
     ts_id: &str,
     returns_attrs: &[String],
@@ -1057,9 +1057,10 @@ mod test {
             }
         }
         assert_eq!(n0.provider.len(), 2);
-        assert!(n0
-            .provider
-            .contains(&("zpr.foo".to_string(), "bar".to_string())));
+        assert!(
+            n0.provider
+                .contains(&("zpr.foo".to_string(), "bar".to_string()))
+        );
         assert!(n0.provider.contains(&("baz".to_string(), "99".to_string())));
     }
 
@@ -1098,9 +1099,9 @@ mod test {
         assert_eq!(ts.api, zpl::DEFAULT_TRUSTED_SERVICE_API);
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
         assert_eq!(ts.returns_attrs.len(), 1);
-        assert_eq!(ts.returns_attrs[0].zpl_key(), "device.zpr.adapter.cn");
+        assert_eq!(ts.returns_attrs[0].zpl_key(), "endpoint.zpr.adapter.cn");
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert_eq!(ts.identity_attrs[0].zpl_key(), "device.zpr.adapter.cn");
+        assert_eq!(ts.identity_attrs[0].zpl_key(), "endpoint.zpr.adapter.cn");
     }
 
     #[test]
@@ -1169,7 +1170,7 @@ mod test {
         api = "validation/2"
         cert_path = "foo.pem"
         prefix = "bar.hop"
-        returns_attributes = ["user.foo", "user.fee", "#device.foo"]
+        returns_attributes = ["user.foo", "user.fee", "#endpoint.foo"]
         identity_attributes = ["user.foo"]
         provider = [["foo", "bar"]]
         "##;
