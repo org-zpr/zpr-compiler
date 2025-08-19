@@ -326,7 +326,7 @@ impl Fabric {
                 return Err(CompilationError::ConfigError(format!(
                     "missing provider attributes for node {}",
                     node_id
-                )))
+                )));
             }
         };
 
@@ -336,7 +336,7 @@ impl Fabric {
                 return Err(CompilationError::ConfigError(format!(
                     "missing zpr address for node {}",
                     node_id
-                )))
+                )));
             }
         };
 
@@ -349,7 +349,7 @@ impl Fabric {
                 return Err(CompilationError::ConfigError(format!(
                     "invalid zpr IPv6 address for node: {}: {}",
                     zpr_addr, e
-                )))
+                )));
             }
         };
         node_attrs.push(Attribute::zpr_internal_attr(
