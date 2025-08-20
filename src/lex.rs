@@ -223,6 +223,52 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 }
                 col += 1;
             }
+            '#' | '/' => {
+                if quoting {
+                    current_word.push(c, quoting, line, col)?;
+                } else {
+                    let comment = match c {
+                        '#' => true,
+                        '/' => {
+                            if let Some(&next) = chars.peek() {
+                                if next == '/' {
+                                    // Detected '//' which is start of comment.
+                                    true
+                                } else {
+                                    // Not a comment start, must be something else.
+                                    false
+                                }
+                            } else {
+                                // no more chars?
+                                false
+                            }
+                        }
+                        _ => panic!("character at this point must be '#' or '/'"),
+                    };
+                    if !comment {
+                        current_word.push(c, quoting, line, col)?;
+                        col += 1;
+                    } else {
+                        // This is a comment, consume the rest of the line.
+                        for c in chars.by_ref() {
+                            if c == '\n' {
+                                break;
+                            }
+                        }
+                        // We may have parsed a word prior to the comment.
+                        if current_word.len() > 0 {
+                            tokens.push(Token::new_from_str(
+                                &current_word.build(),
+                                current_start.0,
+                                current_start.1,
+                            ));
+                            current_word.clear();
+                        }
+                        line += 1;
+                        col = 1;
+                    }
+                }
+            }
             ':' => {
                 // If we are quoting, then this is just a normal colon.
                 // If proceeded by "note" or "comment" this indicates rest of line is a comment.
@@ -232,16 +278,6 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 }
                 if quoting {
                     current_word.push(c, quoting, line, col)?;
-                } else if current_word.is_comment_start() {
-                    // consume the rest of the line
-                    for c in chars.by_ref() {
-                        if c == '\n' {
-                            break;
-                        }
-                    }
-                    current_word.clear();
-                    line += 1;
-                    col = 1;
                 } else if !current_word.accept_value() {
                     return Err(CompilationError::IllegalColon(line, col));
                 }
@@ -388,6 +424,32 @@ mod test {
     #[test]
     fn test_quoted_period_in_attr_value() {
         let zpl = "Define alien as user with color:'green.'.";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens.len(), 7);
+        assert_eq!(tokens[6].tt, super::TokenType::Period);
+        assert_eq!(
+            tokens[5].tt,
+            super::TokenType::Tuple(("color".to_string(), "green.".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_comment_hash() {
+        let zpl = "Define alien as user with color:'green.'. # comment here";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens.len(), 7);
+        assert_eq!(tokens[6].tt, super::TokenType::Period);
+        assert_eq!(
+            tokens[5].tt,
+            super::TokenType::Tuple(("color".to_string(), "green.".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_comment_slash() {
+        let zpl = "Define alien as user with color:'green.'. // comment here";
         let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
         let tokens = tz.tokens;
         assert_eq!(tokens.len(), 7);

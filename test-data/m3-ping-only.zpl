@@ -1,5 +1,5 @@
-Note: Allow a specific agent to ping another specific agent.
-Note: Since we don't yet authenticate users, this policy is expressed using endpoints.
+# Allow a specific agent to ping another specific agent.
+# Since we don't yet authenticate users, this policy is expressed using endpoints.
 
 
 define adapter as a device with zpr.adapter.cn

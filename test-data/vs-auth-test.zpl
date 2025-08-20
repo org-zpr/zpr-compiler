@@ -1,6 +1,6 @@
-Note: Allow a specific adapter to host a service and allow
-Note: another adapter to access it.
-Note: Since we don't yet authenticate users, this policy is expressed using endpoints.
+# Allow a specific adapter to host a service and allow
+# another adapter to access it.
+# Since we don't yet authenticate users, this policy is expressed using endpoints.
 
 
 define adapter as a device with cn
