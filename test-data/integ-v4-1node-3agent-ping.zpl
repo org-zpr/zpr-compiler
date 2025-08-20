@@ -1,5 +1,5 @@
-Note: three adapters: they can ping each other
-Note: One node, one visa service: they can ping each other
+# three adapters: they can ping each other
+# One node, one visa service: they can ping each other
 
 define adapter as a endpoint with zpr.adapter.cn
 
