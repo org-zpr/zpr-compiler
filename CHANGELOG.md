@@ -2,8 +2,8 @@
 
 ## In Progress
 
-(n/a)
-
+- New comment syntax: '#' or '//' which consumes to EOL. The old 'note:'
+  and 'comment:' syntax is removed.
 
 ## [0.4.0] - 2025-06-16
 
