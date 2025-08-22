@@ -1,6 +1,6 @@
 # ZPL Compiler
 
-Can compile simple (new) ZPL into binary policies that the prototype visa
+Can translate simple ZPL into binary policies that the prototype visa
 service can process.  This comes bundled with a tool to examine the
 contents of a "compiled" binary policy, `zpdump`.
 
@@ -18,5 +18,22 @@ contents of a "compiled" binary policy, `zpdump`.
   `-c path/to/config.zplc` argument.
 - Help is available via `zplc -h`
 
+
+## TODO
+
+Work is ongoing to accept the full ZPL syntax. Note that it is one
+thing for the compiler to accept the syntax and process it into a policy
+and another for the Visa Service to be able to implement the policy.
+
+Here are syntax bits that are not yet supported by the compiler:
+
+- Keyword `on` for referencing endpoint class. (Issue: #30 )
+- Quoting in AKA names or defined class names. (Issue: #31 )
+- Set values for attributes.  Eg, `allow color:{red, blue} users to access ...` (Issue: #32)
+- Deny statements: `never allow...` (Issue: #33 )
+- Signal clause: `... and signal ...` (Issue: #34)
+- Limits.
+- Conditions.
+- Through clause.
 
 
