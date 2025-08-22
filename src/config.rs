@@ -271,6 +271,11 @@ impl ConfigParse {
         // Within "nodes" each KEY is a node ID that is a table.
         let mut node_map = HashMap::new();
         for (node_id, v) in nodes {
+            for reserved in zpl::RESERVED_NODE_IDS {
+                if node_id == reserved {
+                    return Err(err_config!("node ID '{}' is reserved", node_id));
+                }
+            }
             let n = parse_node(
                 node_id,
                 v.as_table()
@@ -1061,6 +1066,25 @@ mod test {
             .provider
             .contains(&("zpr.foo".to_string(), "bar".to_string())));
         assert!(n0.provider.contains(&("baz".to_string(), "99".to_string())));
+    }
+
+    #[test]
+    fn test_parse_node_reserved_id() {
+        let tstr = r#"
+        [nodes]
+        [nodes.visaservice]
+        key = "somekey"
+        zpr_address = "foo.zpr"
+        provider = [["zpr.foo", "bar"], ["baz", 99]]
+        interfaces = ["eth0", "eth1"]
+        eth0.netaddr = "1.2.3.4:2000"
+        eth1.netaddr = "foo.addr:9000"
+        "#;
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let nodes = cparser.parse_nodes();
+        assert!(nodes.is_err());
+        let err = nodes.unwrap_err();
+        assert!(err.to_string().contains("is reserved"));
     }
 
     #[test]
