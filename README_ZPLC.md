@@ -22,7 +22,7 @@ Syntax:
 ```
 
 The **TSNAME** of `default` is special and is used to check the adapter CN values.
-It is responsible for the property: `device.zpr.adapter.cn`.  The default
+It is responsible for the property: `endpoint.zpr.adapter.cn`.  The default
 service requires a `cert_path` which should be set to the certificate of the
 authority which has signed the NOISE certs given to the adapters.
 
@@ -84,11 +84,11 @@ port = 1234
 An attribute is of the form: `<NAMESPACE>.<ATTR_KEY>`.  There may be additional periods
 in the `<ATTR_KEY>` value.
 
-Every attribute must be in one of the ZPR namespaces: "device", "user", or "service".
+Every attribute must be in one of the ZPR namespaces: "endpoint", "user", or "service".
 
 Valid attribute examples:
 * `user.id`
-* `device.tmp.key_hash`
+* `endpoint.tmp.key_hash`
 * `service.type`
 
 Attributes from services may be single value, multi value, or tags.  An attribute list
@@ -97,7 +97,7 @@ the attribute is set as:
 
 * **Single Value** - Just a plain string, eg `"user.clearance"`.
 * **Multi Value** - *TODO*
-* **Tag** - Prefixed with a hash mark (`#`), eg `"#device.secure`.
+* **Tag** - Prefixed with a hash mark (`#`), eg `"#endpoint.secure`.
 
 
 

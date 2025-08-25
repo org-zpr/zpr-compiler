@@ -10,7 +10,7 @@ order = ["hosts", "dns"]
 
 [nodes."node.zpr.org"]
 key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
-provider = [ ["device.zpr.adapter.cn", "node.zpr.org"]]
+provider = [ ["endpoint.zpr.adapter.cn", "node.zpr.org"]]
 zpr_address = "node0.zpr"
 interfaces = ["in1"]
 in1.netaddr = "node0.overlay:5000"

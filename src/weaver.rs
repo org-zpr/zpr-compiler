@@ -48,7 +48,7 @@ pub fn weave(
         _ => {
             return Err(CompilationError::ConfigError(
                 "no version in configuration".to_string(),
-            ))
+            ));
         }
     };
 
@@ -173,16 +173,16 @@ impl Weaver {
 
             // TODO: User may be able to shoot themselves in the foot here if they add
             // too many attributes to VisaService. May want to consider disallowing
-            // any attributes on the service (but allow on user and device).
+            // any attributes on the service (but allow on user and endpoint).
             let mut admin_access_attrs = ac.user.with.clone();
-            admin_access_attrs.extend_from_slice(&ac.device.with);
+            admin_access_attrs.extend_from_slice(&ac.endpoint.with);
             admin_access_attrs.extend_from_slice(&ac.service.with);
 
             admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.user.class));
-            admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.device.class));
+            admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.endpoint.class));
             admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.service.class));
 
-            let fp = FPos::from(&ac.device.class_tok);
+            let fp = FPos::from(&ac.endpoint.class_tok);
             let attr_map = squash_attributes(&admin_access_attrs, &fp)?;
             let resolved_attrs = self.resolve_attributes(
                 attr_map
@@ -289,7 +289,7 @@ impl Weaver {
                 return Err(CompilationError::ConfigError(format!(
                     "protocol for {} not found in configuration",
                     matched_service_name,
-                )))
+                )));
             }
         };
 
@@ -437,7 +437,7 @@ impl Weaver {
             _ => {
                 return Err(CompilationError::ConfigError(
                     "no nodes defined in configuration".to_string(),
-                ))
+                ));
             }
         };
 
@@ -452,7 +452,7 @@ impl Weaver {
                 return Err(CompilationError::ConfigError(
                     "visa service docking node not defined for default VS in configuration"
                         .to_string(),
-                ))
+                ));
             }
         };
         if vs_dock_node != node_keys[0] {
@@ -500,11 +500,11 @@ impl Weaver {
             // Here we collect all attributes -- some will have no values.
             let mut attrs = Vec::new();
 
-            // Grab all the endpint attributes
-            let ep_class_attrs = attrs_for_class(class_idx, &ac.device.class);
+            // Grab all the endpoint attributes
+            let ep_class_attrs = attrs_for_class(class_idx, &ac.endpoint.class);
             attrs.extend_from_slice(&ep_class_attrs);
             attrs.extend_from_slice(
-                &ac.device
+                &ac.endpoint
                     .with
                     .iter()
                     .filter(|a| !a.optional)
@@ -525,7 +525,7 @@ impl Weaver {
             );
 
             // Now we consolidate the attributes into a map, preferring attributes that have a value.
-            let fp = FPos::from(&ac.device.class_tok);
+            let fp = FPos::from(&ac.endpoint.class_tok);
             let attr_map = squash_attributes(&attrs, &fp)?;
             let required_attrs = self
                 .resolve_attributes(&attr_map.into_values().collect::<Vec<Attribute>>(), config)?;
@@ -801,7 +801,7 @@ impl Weaver {
                     return Err(CompilationError::ConfigError(format!(
                         "protocol for service {} not found in configuration",
                         svc_name,
-                    )))
+                    )));
                 }
             };
             if svc_name == vs_svc {
@@ -986,7 +986,7 @@ mod test {
         zpr_address = "fd5a:5052:90de::1"
         interfaces = [ "in1" ]
         in1.netaddr = "127.0.0.1:5000"
-        provider = [["device.zpr.adapter.cn", "fee"]]
+        provider = [["endpoint.zpr.adapter.cn", "fee"]]
 
         [visa_service]
         dock_node = "n0"
@@ -997,7 +997,7 @@ mod test {
 
         [services.foo]
         protocol = "fee"
-        provider = [["device.zpr.adapter.cn", "fee"]]
+        provider = [["endpoint.zpr.adapter.cn", "fee"]]
 
         [services.bar]
         protocol = "fee"
@@ -1037,7 +1037,7 @@ mod test {
         // Will only notice that the 'foo' service is referenced.
         let a_foo = AllowClause {
             id: 1,
-            device: Clause::new("device", Token::default()),
+            endpoint: Clause::new("endpoint", Token::default()),
             user: Clause::new("user", Token::default()),
             service: Clause::new("foo", Token::default()),
         };
@@ -1078,14 +1078,14 @@ mod test {
         zpr_address = "fd5a:5052:90de::1"
         interfaces = [ "in1" ]
         in1.netaddr = "127.0.0.1:5000"
-        provider = [["device.zpr.adapter.cn", "fee"]]
+        provider = [["endpoint.zpr.adapter.cn", "fee"]]
 
         [visa_service]
         dock_node = "n0"
 
         [trusted_services.bas]
         api = "validation/2"
-        provider = [["device.zpr.adapter.cn", "fee"]]
+        provider = [["endpoint.zpr.adapter.cn", "fee"]]
         returns_attributes = ["user.id", "user.email"]
         identity_attributes = ["user.id"]
 
