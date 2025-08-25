@@ -25,8 +25,11 @@ pub const DEFAULT_TS_PREFIX: &str = "endpoint.zpr.adapter";
 
 pub const DEFAULT_ATTR: &str = "cn";
 
-// TODO: What is up with this odd name? Why not '/zpr/visaservice'?
-pub const VS_SERVICE_NAME: &str = "/zpr/$$zpr/visaservice";
+/// Values that cannot be used as node IDs becuase node IDs are
+/// mapped to service names of the form '/zpr/{NODE_ID}/...'.
+pub const RESERVED_NODE_IDS: [&'static str; 1] = ["visaservice"];
+
+pub const VS_SERVICE_NAME: &str = "/zpr/visaservice";
 
 pub const KATTR_ROLE: &str = "zpr.role";
 pub const KATTR_CN: &str = "endpoint.zpr.adapter.cn";
