@@ -6,19 +6,17 @@
 <statement> ::= <permission-statement> | <denial-statement> | <define-statement>
 
 <permission-statement> ::= "allow" <subject-clause> "to" "access" <object-clause> 
-                          <through-clause>? <limit-clause>? <signal-clause>? "." <eol>
+                           <through-clause>? <signal-clause>? "." <eol>
 
-<denial-statement> ::= "never" "allow" <subject-clause> "to" "access" <object-clause>
+<denial-statement> ::= "never" "allow" <subject-clause> "to" "access" <service-spec>
                        <signal-clause>? "." <eol>
 
 <define-statement> ::= "define" <name> <aka-clause>? "as" <article> <class-name> 
                       <with-attributes-clause>? "." <eol>
 
-<subject-clause> ::= <entity-spec> <with-device-clause>?
+<subject-clause> ::= <user-spec> <with-device-clause>?
 
-<with-device-clause> ::= ("with" | "on") <entity-spec>
-
-<object-clause> ::= <entity-spec> | <service-spec>
+<with-device-clause> ::= ("with" | "on") <endpoint-spec>
 
 <through-clause> ::= "through" <name>
 
@@ -35,17 +33,36 @@
 <attribute-spec> ::= <name> | 
                     "optional" "tags" <name> ("," <name>)* ("and" <name>)?
 
-<entity-spec> ::= <attribute-expr>* <class-name>
+# A <user-spec> must either be or be descended from the built-in "user" class.
+<user-spec> ::= <attribute-expr>* <class-name> | <name>
 
+# An <endpoint-spec> must either be or be descended from the built-in "endpoint" class.
+<endpoint-spec> ::= <attribute-expr>* <class-name> | <name>
+
+# A <service-spec> must either be or be descended from the built-in "service" class
 <service-spec> ::= <attribute-expr>* <class-name> | <name>
 
-<attribute-expr> ::= <name> |
-                    <name> ":" <value> |
-                    <name> ":" 
+<attribute-expr> ::= <attr-tag> | <attr-kv-pair> | <attr-key-presence>
+
+<attr-tag> ::= <name>
+
+# No spaces around ':' in <attr-kv-pair> 
+<attr-kv-pair> ::= <key-name> ":" <key-value>
+
+# No space may preceed the ':' in <attr-key>
+<attr-key-presence> ::= <key-name> ":"
+
+<key-name> ::= <name>
+
+<key-value> ::= <value>
 
 <name> ::= <identifier> | <string> | <namespace-name>
 
 <namespace-name> ::= <name> "." <name>
+
+<class-name> ::= <built-in-class-name> | <name>
+
+<built-in-class-name> ::= "endpoint" | "user" | "service"
 
 <identifier> ::= <letter> (<letter> | <digit> | "-" | "_")*
 
@@ -72,7 +89,6 @@
 <float> ::= <digit>+ "." <digit>+
 
 <value-set> ::= "{" <value> ("," <value>)* "}"
-
 
 <letter> ::= "a".."z" | "A".."Z"
 
