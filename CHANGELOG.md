@@ -2,6 +2,10 @@
 
 ## In Progress
 
+- (nothing yet)
+
+## [0.5.0] - 2025-08-25
+
 - `device` is now `endpoint`.
 - New comment syntax: '#' or '//' which consumes to EOL. The old 'note:'
   and 'comment:' syntax is removed.
