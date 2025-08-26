@@ -54,9 +54,22 @@ impl Compilation {
         CompilationBuilder::new(source)
     }
 
-    /// Create a policy from the ZPL source and configuration.
+    /// Create/write a policy from the ZPL source and configuration.
     pub fn compile(&self) -> Result<(), CompilationError> {
         let cctx = CompilationCtx::new(self.verbose, self.werror);
+        let pol = self.compile_to_policy(&cctx)?;
+        cctx.info("build successful");
+        if let Some(pol) = pol {
+            let pcontainer = self.contain_policy(&pol, &cctx)?;
+            self.write_container(&pcontainer, &self.output_file, &cctx)?;
+        }
+        Ok(())
+    }
+
+    pub fn compile_to_policy(
+        &self,
+        cctx: &CompilationCtx,
+    ) -> Result<Option<polio::Policy>, CompilationError> {
         if self.verbose {
             println!(
                 "compiling {:?} with config {:?}",
@@ -92,7 +105,7 @@ impl Compilation {
 
         cctx.info("parse successful");
         if self.parse_only {
-            return Ok(());
+            return Ok(None);
         }
 
         let mut builder = PolicyBuilder::new(self.verbose);
@@ -102,10 +115,7 @@ impl Compilation {
 
         let pol = builder.build()?;
         cctx.info("build successful");
-
-        let pcontainer = self.contain_policy(&pol, &cctx)?;
-        self.write_container(&pcontainer, &self.output_file, &cctx)?;
-        Ok(())
+        Ok(Some(pol))
     }
 
     /// Write the policy container to the output file, serializing with protocol buffers.
@@ -335,6 +345,44 @@ mod test {
     protocol = "http"
     "#;
 
+    // Includes a trusted service
+    const BAS_CONFIG: &str = r#"
+    [nodes.n0]
+    key = "none"
+    zpr_address = "fd5a:5052:90de::1"
+    interfaces = [ "in1" ]
+    in1.netaddr = "127.0.0.1:5000"
+    provider = [["endpoint.zpr.adapter.cn", "fee"]]
+
+    [visa_service]
+    dock_node = "n0"
+
+    [trusted_services.default]
+    cert_path = ""
+
+    [trusted_services.bas]
+    api = "validation/2"
+    client = "AuthService"
+    cert_path = ""
+    returns_attributes = [ "user.color", "service.content", "user.bas_id" ]
+    identity_attributes = [ "user.bas_id" ]
+    provider = [[ "endpoint.zpr.adapter.cn", "bas.zpr.org" ]]
+
+
+    [protocols.http]
+    l4protocol = "iana.TCP"
+    port = 80
+
+    [services.Webby]
+    protocol = "http"
+
+    [services.bas-vs]
+    protocol = "zpr-validation2"
+
+    [services.AuthService]
+    protocol = "zpr-oauthrsa"
+    "#;
+
     #[test]
     fn simple_compile() {
         let zpl = r#"
@@ -524,9 +572,125 @@ mod test {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("unknown_attr not found"),
+            err_msg.contains("endpoint.unknown_attr: not found"),
             "unexpected error message: {}",
             err_msg
         );
+    }
+
+    #[test]
+    fn test_service_attributes() {
+        let zpl = r#"
+        define Webby as a service with user.bas_id:100.
+        allow color:green users to access content:green services.
+        allow color:brown users to access content:brown services.
+        allow color:red users to access Webby.
+        "#;
+
+        let tempdir = TempDir::new("test_service_attributes");
+        let zpl_file = tempdir.path.join("test.zpl");
+        std::fs::write(&zpl_file, zpl).expect("failed to write zpl file");
+
+        let cfg_file = tempdir.path.join("test.zplc");
+        std::fs::write(&cfg_file, BAS_CONFIG).expect("failed to write config file");
+
+        let compilation = Compilation::builder(zpl_file)
+            .config(&cfg_file)
+            .verbose(true)
+            .build();
+
+        let ctx = CompilationCtx::new(true, false);
+        let result = compilation.compile_to_policy(&ctx);
+        match result {
+            Ok(pol) => {
+                let pol = pol.unwrap();
+
+                let mut pcount = 0;
+
+                // We are looking for three things in the policy encoded in `matched` as follows:
+                // 00000001 = found the color:red condition
+                // 00000010 = found the color:brown condition
+                // 00000100 = found the color:green condition
+                let mut matched: u8 = 0;
+
+                for plcy in &pol.policies {
+                    if plcy.service_id != "Webby" {
+                        continue;
+                    }
+                    pcount += 1;
+                    if plcy.svc_conditions.is_empty() {
+                        // Then there should be a cli condition on color:red
+                        if plcy.cli_conditions.len() != 1 {
+                            assert!(
+                                false,
+                                "expected 1 cli condition for color:red, got {}",
+                                plcy.cli_conditions.len()
+                            );
+                        }
+                        let cond = &plcy.cli_conditions[0];
+                        let expr = &cond.attr_exprs[0];
+                        let kval = pol.attr_key_index[expr.key as usize].clone();
+                        let vval = pol.attr_val_index[expr.val as usize].clone();
+                        assert!(
+                            kval == "user.color" && vval == "red",
+                            "expected user.color:purple, got {}:{}",
+                            kval,
+                            vval
+                        );
+                        matched |= 0b00000001;
+                    } else {
+                        // The other two policies should each have one cli_conditiona and one svc_condition.
+                        // The expected values are:
+                        //    - user.color EQ green WITH service.content EQ green
+                        //    - user.color EQ brown WITH service.content EQ brown
+                        let svc_cond = &plcy.svc_conditions[0];
+                        let svc_expr = &svc_cond.attr_exprs[0];
+                        let svc_kval = pol.attr_key_index[svc_expr.key as usize].clone();
+                        let svc_vval = pol.attr_val_index[svc_expr.val as usize].clone();
+                        assert!(
+                            svc_kval == "service.content",
+                            "expected service.content, got {}",
+                            svc_kval
+                        );
+                        if svc_vval == "brown" {
+                            // Then there should be a cli condition on color:brown
+                            let cond = &plcy.cli_conditions[0];
+                            let expr = &cond.attr_exprs[0];
+                            let kval = pol.attr_key_index[expr.key as usize].clone();
+                            let vval = pol.attr_val_index[expr.val as usize].clone();
+                            assert!(
+                                kval == "user.color" && vval == "brown",
+                                "expected user.color:brown, got {}:{}",
+                                kval,
+                                vval
+                            );
+                            matched |= 0b00000010;
+                        } else {
+                            // Then there should be a cli condition on color:green
+                            let cond = &plcy.cli_conditions[0];
+                            let expr = &cond.attr_exprs[0];
+                            let kval = pol.attr_key_index[expr.key as usize].clone();
+                            let vval = pol.attr_val_index[expr.val as usize].clone();
+                            assert!(
+                                kval == "user.color" && vval == "green",
+                                "expected user.color:green, got {}:{}",
+                                kval,
+                                vval
+                            );
+                            matched |= 0b00000100;
+                        }
+                    }
+                }
+                assert!(pcount == 3, "expected 3 policies for Webby, got {}", pcount);
+                assert!(
+                    matched == 0b00000111,
+                    "did not match all expected policies, got {:03b}",
+                    matched
+                );
+            }
+            Err(err) => {
+                assert!(false, "compilation failed: {}", err);
+            }
+        }
     }
 }

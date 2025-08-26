@@ -147,8 +147,26 @@ fn main() {
             println!("     service_id: {}", cp.service_id.yellow());
             println!("             id: {}", cp.id.yellow());
             println!("          scope: {}", scopes_to_string(&cp.scope).yellow());
-            for cond in &cp.conditions {
-                println!("     cond {}:", format!("{}", cond.id).yellow());
+            for cond in &cp.cli_conditions {
+                println!(
+                    "     cond {} {}:",
+                    "cli".bold().italic(),
+                    format!("{}", cond.id).yellow()
+                );
+                for aexp in &cond.attr_exprs {
+                    println!(
+                        "         {} {}",
+                        format!("{}", "󰞘").dimmed(),
+                        attr_exp_to_string(aexp, &pol.attr_key_index, &pol.attr_val_index).yellow()
+                    );
+                }
+            }
+            for cond in &cp.svc_conditions {
+                println!(
+                    "     cond {} {}:",
+                    "svc".bold().italic(),
+                    format!("{}", cond.id).yellow()
+                );
                 for aexp in &cond.attr_exprs {
                     println!(
                         "         {} {}",

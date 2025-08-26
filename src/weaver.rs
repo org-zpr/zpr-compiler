@@ -400,7 +400,11 @@ impl Weaver {
                 // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
                 let mut matched = false;
                 for ts_name in &trusted_service_names {
-                    let search_name = attr_name.clone();
+                    let search_name = if a.tag {
+                        a.zpl_value().clone()
+                    } else {
+                        attr_name.clone()
+                    };
                     let ts_attrs = if a.tag {
                         config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name))
                     } else {
@@ -409,8 +413,7 @@ impl Weaver {
                     if ts_attrs.contains(&search_name) {
                         if matched {
                             return Err(CompilationError::ConfigError(format!(
-                                "attribute {} found in multiple trusted services",
-                                attr_name
+                                "attribute {a} found in multiple trusted services"
                             )));
                         }
                         let new_attr = a.clone();
@@ -421,8 +424,7 @@ impl Weaver {
                 }
                 if !matched {
                     return Err(CompilationError::ConfigError(format!(
-                        "attribute {} not found in any trusted service",
-                        attr_name
+                        "attribute {a} not found in any trusted service"
                     )));
                 }
             }
@@ -530,6 +532,23 @@ impl Weaver {
             let required_attrs = self
                 .resolve_attributes(&attr_map.into_values().collect::<Vec<Attribute>>(), config)?;
 
+            let svc_required_attrs = {
+                let mut service_class_attrs = attrs_for_class(class_idx, &ac.service.class);
+                service_class_attrs.extend_from_slice(
+                    &ac.service
+                        .with
+                        .iter()
+                        .filter(|a| !a.optional)
+                        .cloned()
+                        .collect::<Vec<Attribute>>(),
+                );
+                let attr_map = squash_attributes(&service_class_attrs, &fp)?;
+                self.resolve_attributes(
+                    &attr_map.into_values().collect::<Vec<Attribute>>(),
+                    config,
+                )?
+            };
+
             // Now figure out what service we are talking about.
             // The service may be:
             // a) a service that is defined in configuration, eg "SomeDatabase"
@@ -539,7 +558,8 @@ impl Weaver {
 
             if ac.service.class == zpl::DEF_CLASS_SERVICE_NAME {
                 // Add to all services (not nodes or trusted services or visa service)
-                self.fabric.add_condition_to_all_services(&required_attrs)?;
+                self.fabric
+                    .add_condition_to_all_services(&required_attrs, &svc_required_attrs)?;
             } else {
                 let svc_id = match self.allowid_to_fab_svc.get(&ac.id) {
                     Some(s) => s,
@@ -551,6 +571,8 @@ impl Weaver {
                         );
                     }
                 };
+                // Note we ignore any service attributes here. I think those are already handled in the
+                // service class definition.
                 self.fabric
                     .add_condition_to_service(svc_id, &required_attrs, false)?;
             }

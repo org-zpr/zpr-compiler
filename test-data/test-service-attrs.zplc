@@ -24,7 +24,7 @@ cert_path = ""
 api = "validation/2"
 client = "AuthService"
 cert_path = "bas-tls.crt"
-returns_attributes = [ "#user.government", "user.clearance", "#user.classified", "user.bas_id" ]
+returns_attributes = [ "user.color", "service.content", "user.bas_id" ]
 identity_attributes = [ "user.bas_id" ]
 provider = [[ "endpoint.zpr.adapter.cn", "bas.zpr.org" ]]
 # Will expect to find two service definitions later:
@@ -46,10 +46,10 @@ port = 80
 [services.server]
 protocol = "http"
 
-[services.Image-database]
+[services.WebService]
 protocol = "http"
 
-[services.gateway]
+[services.FooService]
 protocol = "http"
 
 [services.bas-vs]
