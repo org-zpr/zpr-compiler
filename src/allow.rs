@@ -199,14 +199,21 @@ pub fn parse_allow(
 
     let mut ac = parse_state.to_allow_clause(statement_id);
 
+    // Set any UNSPECIFIED (lacking domain) attributes to the domain of the clause they are in.
     for attr in &mut ac.endpoint.with {
-        attr.set_domain(AttrDomain::Endpoint);
+        if attr.is_unspecified_domain() {
+            attr.set_domain(AttrDomain::Endpoint);
+        }
     }
     for attr in &mut ac.user.with {
-        attr.set_domain(AttrDomain::User);
+        if attr.is_unspecified_domain() {
+            attr.set_domain(AttrDomain::User);
+        }
     }
     for attr in &mut ac.service.with {
-        attr.set_domain(AttrDomain::Service);
+        if attr.is_unspecified_domain() {
+            attr.set_domain(AttrDomain::Service);
+        }
     }
 
     validate_clause(&ac, classes_map)?;
@@ -299,7 +306,6 @@ where
     // If we read an ON then we need to parse an endpoint clause.
     if let Some(tok) = tokens.next() {
         if tok.tt == TokenType::On {
-            println!("XXX: parse_allow_service_clause - found a trailing ON clause for service");
             let mut nested_ps = PState::new(&pa_state.root_tok);
 
             nested_ps.parse_tags_attrs_and_classname(
@@ -317,11 +323,10 @@ where
                 // TODO: Not sure this is quite right.  The CLASS in here might be a defined class with
                 //       attributes of its own.  What I try to do here is put the attributes here into
                 //       the service under the 'endpoint' domain.
+                //
+                // So check what happens if the endpoint classname in here is a define.
 
                 for ec_attr in &service_ec.with {
-                    println!(
-                        "XXX: -- adding endpoint attribute to service as a service.endpoint attribute: {ec_attr}"
-                    );
                     let mut domained_attr = ec_attr.clone();
                     domained_attr.set_domain(AttrDomain::Endpoint);
                     service_clause.with.push(domained_attr); // TODO: Are these already in endpoint domain?
