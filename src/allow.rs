@@ -43,13 +43,13 @@ impl ParseAllowState {
 ///
 /// Format of the allow statement is:
 ///
-/// allow <device-clause> with <user-clause> to access <service-clause>
+/// allow <user-clause> on <endpoint-clause> to access <service-clause>
 ///
-/// If there are both device and user clauses they are separated by 'with'.
-/// You can omit either user or device clauses:
+/// If there are both endpoint and user clauses they are separated by 'on'.
+/// You can omit either user or endpoint clauses:
 ///
 /// allow <user-clause> to access <service-clause>
-/// allow <device-clause> to access <service-clause>
+/// allow <endpoint-clause> to access <service-clause>
 ///
 /// `classes_idx` maps class names and AKA names to their canonical names (eg, "services" -> "service").
 /// `classs_map` maps class canonical name to [Class] struct.
@@ -71,11 +71,11 @@ pub fn parse_allow(
     let mut tokens = allow_statement[1..].iter().peekable();
     let mut ps = PState::new(&parse_state.root_tok);
 
-    // To parse this we start parsing and break if we hit a WITH or a TO.
+    // To parse this we start parsing and break if we hit a ON or a TO.
     ps.parse_tags_attrs_and_classname(
         &mut tokens,
         classes_idx,
-        &ParseOpts::stop_at_any(&[TokenType::To, TokenType::With]),
+        &ParseOpts::stop_at_any(&[TokenType::To, TokenType::On]),
         "endpoint or user clause",
     )?;
 
@@ -116,15 +116,15 @@ pub fn parse_allow(
                     }
                 }
 
-                // If we hit a WITH then we expect a DEVICE clause.
-                TokenType::With => {
-                    // Hit WITH which means we must have parsed a device clause, and we expect a user clause to follow.
-                    if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
-                        let dc = ps.to_clause("endpoint")?;
-                        parse_state.endpoint_clause = Some(dc);
+                // If we hit an ON then we expect a USER clause.
+                TokenType::On => {
+                    // Hit ON which means we must have parsed a user clause, and we expect a device clause to follow.
+                    if classes_map.get(cn).unwrap().flavor == ClassFlavor::User {
+                        let dc = ps.to_clause("user")?;
+                        parse_state.user_clause = Some(dc);
                     } else {
                         return Err(CompilationError::AllowStmtParseError(
-                            format!("not an endpoint clause: '{}'", cn),
+                            format!("not a user clause: '{}'", cn),
                             parse_state.root_tok.line,
                             parse_state.root_tok.col,
                         ));
@@ -134,7 +134,7 @@ pub fn parse_allow(
                 // Hmm what's this?
                 _ => {
                     return Err(CompilationError::AllowStmtParseError(
-                        format!("expected a TO or WITH, found '{:?}'", tok.tt),
+                        format!("expected a TO or ON, found '{:?}'", tok.tt),
                         parse_state.root_tok.line,
                         parse_state.root_tok.col,
                     ));
@@ -151,17 +151,17 @@ pub fn parse_allow(
         }
     }
 
-    // If we get this far, we have parsed up to a WITH or a TO.
-    // If it's a WITH then we expect a user clause next.
+    // If we get this far, we have parsed up to a ON or a TO.
+    // If it's a ON then we expect an endpoint clause next.
     // If it's a TO then we expect a service clause next.
     let tok = tokens.next().unwrap();
     match tok.tt {
-        TokenType::With => {
-            if parse_state.endpoint_clause.is_none() {
-                panic!("assertion fails - no endpoint clause");
+        TokenType::On => {
+            if parse_state.user_clause.is_none() {
+                panic!("assertion fails - no user clause");
             }
-            // Ok, now parse a USER clause, returns having found but not parsed 'TO'.
-            if !try_parse_allow_user_clause(
+            // Ok, now parse an ENDPOINT clause, returns having found but not parsed 'TO'.
+            if !try_parse_allow_endpoint_clause(
                 &mut parse_state,
                 &mut tokens,
                 classes_idx,
@@ -169,7 +169,7 @@ pub fn parse_allow(
             )? {
                 // Hmm, a non error failure?
                 return Err(CompilationError::AllowStmtParseError(
-                    "expected a user clause to follow WITH".to_string(),
+                    "expected an endpoint clause to follow ON".to_string(),
                     tok.line,
                     tok.col,
                 ));
@@ -190,8 +190,8 @@ pub fn parse_allow(
         }
     }
 
-    if parse_state.user_clause.is_none() {
-        panic!("assertion fails - no user clause");
+    if parse_state.endpoint_clause.is_none() {
+        panic!("assertion fails - no endpoint clause");
     }
 
     // The remaining tokens should start with "access ..." which we pass to the service class parser.
@@ -228,9 +228,9 @@ fn validate_clause(
     Ok(())
 }
 
-/// Parse from <user-clause> up to the 'TO' (of 'TO ACCESS')
-/// If this succeeds, it sets the user clause in the [ParseAllowState].
-fn try_parse_allow_user_clause<'a, I>(
+/// Parse from <endpoint-clause> up to the 'TO' (of 'TO ACCESS')
+/// If this succeeds, it sets the endpoint clause in the [ParseAllowState].
+fn try_parse_allow_endpoint_clause<'a, I>(
     pa_state: &mut ParseAllowState,
     tokens: &mut Peekable<I>,
     classes_idx: &HashMap<String, String>,
@@ -245,22 +245,24 @@ where
         tokens,
         classes_idx,
         &ParseOpts::stop_at(TokenType::To),
-        "user clause",
+        "endpoint clause",
     )?;
 
-    // This is a good parse if we actually got a user flavor class.
+    // This is a good parse if we actually got a endpoint flavor class.
     let cn = ps.class_name.as_ref().unwrap();
-    if classes_map.get(cn).unwrap().flavor == ClassFlavor::User {
-        let uc = ps.to_clause("user")?;
-        pa_state.user_clause = Some(uc);
+    if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
+        let ec = ps.to_clause("endpoint")?;
+        pa_state.endpoint_clause = Some(ec);
         Ok(true)
     } else {
-        Ok(false) // not a user clause
+        Ok(false) // not an endpoint clause
     }
 }
 
 /// Parse the final bit of the allow statement which is the service clause.
 /// The passed tokens MUST start with "ACCESS".
+///
+/// The service clause may have a trailing ON <endpoint-clause>.
 fn parse_allow_service_clause<'a, I>(
     pa_state: &mut ParseAllowState,
     tokens: &mut Peekable<I>,
@@ -281,12 +283,8 @@ where
 
     // Need a service clause now -- parse to end of statement.
     let mut ps = PState::new(&pa_state.root_tok);
-    ps.parse_tags_attrs_and_classname(
-        tokens,
-        classes_idx,
-        &ParseOpts::default(),
-        "service clause",
-    )?;
+    let popts = ParseOpts::stop_at_any(&[TokenType::On, TokenType::Eos]);
+    ps.parse_tags_attrs_and_classname(tokens, classes_idx, &popts, "service clause")?;
 
     let cn = ps.class_name.as_ref().unwrap();
     if classes_map.get(cn).unwrap().flavor != ClassFlavor::Service {
@@ -296,9 +294,52 @@ where
             pa_state.root_tok.col,
         ));
     }
-    let service_clause = ps.to_clause("service")?;
-    pa_state.service_clause = Some(service_clause);
+    let mut service_clause = ps.to_clause("service")?;
 
+    // If we read an ON then we need to parse an endpoint clause.
+    if let Some(tok) = tokens.next() {
+        if tok.tt == TokenType::On {
+            println!("XXX: parse_allow_service_clause - found a trailing ON clause for service");
+            let mut nested_ps = PState::new(&pa_state.root_tok);
+
+            nested_ps.parse_tags_attrs_and_classname(
+                tokens,
+                classes_idx,
+                &ParseOpts::default(),
+                "service endpoint clause",
+            )?;
+
+            // This is a good parse if we actually got a endpoint flavor class.
+            let cn = nested_ps.class_name.as_ref().unwrap();
+            if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
+                let service_ec = nested_ps.to_clause("endpoint")?;
+
+                // TODO: Not sure this is quite right.  The CLASS in here might be a defined class with
+                //       attributes of its own.  What I try to do here is put the attributes here into
+                //       the service under the 'endpoint' domain.
+
+                for ec_attr in &service_ec.with {
+                    println!(
+                        "XXX: -- adding endpoint attribute to service as a service.endpoint attribute: {ec_attr}"
+                    );
+                    let mut domained_attr = ec_attr.clone();
+                    domained_attr.set_domain(AttrDomain::Endpoint);
+                    service_clause.with.push(domained_attr); // TODO: Are these already in endpoint domain?
+                }
+            } else {
+                return Err(CompilationError::AllowStmtParseError(
+                    format!(
+                        "expected an endpoint class in service ON clause, got: '{}'",
+                        cn
+                    ),
+                    pa_state.root_tok.line,
+                    pa_state.root_tok.col,
+                ));
+            }
+        }
+    }
+
+    pa_state.service_clause = Some(service_clause);
     Ok(())
 }
 
