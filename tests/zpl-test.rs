@@ -55,14 +55,6 @@ fn can_parse_rfc_examples() {
                 }
                 None => continue,
             }
-            // Must start with "rfc"
-            if let Some(fstem) = path.file_stem() {
-                if let Some(fstem_str) = fstem.to_str() {
-                    if !fstem_str.starts_with("rfc") {
-                        continue;
-                    }
-                }
-            }
             // And must start with "rfc"
             if let Some(fstem) = path.file_stem() {
                 if let Some(fstem_str) = fstem.to_str() {
@@ -157,6 +149,50 @@ fn can_compile_integtest_policies() {
             if let Some(fstem) = path.file_stem() {
                 if let Some(fstem_str) = fstem.to_str() {
                     if !fstem_str.starts_with("m3") {
+                        continue;
+                    }
+                }
+            }
+            let cb = CompilationBuilder::new(path)
+                .verbose(true)
+                .output_directory(&temp_dir.path);
+            let comp = cb.build();
+            match comp.compile() {
+                Ok(_warnings) => println!("{:?}: compiled ok", fent.path()),
+                Err(e) => {
+                    println!("error: {}", e);
+                    panic!("failed to compile {:?}", fent.path());
+                }
+            }
+        }
+    }
+}
+
+// Try other misc tests.
+#[test]
+fn can_compile_misc_test_policies() {
+    let zpl_dir = get_zpl_dir();
+    let temp_dir = TempDir::new("misctest");
+
+    for fent in zpl_dir
+        .read_dir()
+        .expect("failed to list integration-test policy directory")
+    {
+        if let Ok(fent) = fent {
+            let path = fent.path();
+            // Must end with ".zpl"
+            match path.extension() {
+                Some(ext) => {
+                    if ext != "zpl" {
+                        continue;
+                    }
+                }
+                None => continue,
+            }
+            // Must start with "test-"
+            if let Some(fstem) = path.file_stem() {
+                if let Some(fstem_str) = fstem.to_str() {
+                    if !fstem_str.starts_with("test-") {
                         continue;
                     }
                 }

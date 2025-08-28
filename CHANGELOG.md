@@ -2,7 +2,11 @@
 
 ## In Progress
 
-- (nothing yet)
+- (empty)
+
+## [0.6.0] - 2025-08-26
+
+- Uses zpr-policy version 0.6.0.
 
 ## [0.5.0] - 2025-08-25
 
@@ -45,6 +49,8 @@ repository.
 
 
 
+[0.6.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.6.0
+[0.5.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.5.0
 [0.4.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.4.0
 [0.3.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.3.0
 [0.2.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.2.0

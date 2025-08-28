@@ -520,7 +520,7 @@ impl ConfigApi {
                 svc.returns_attrs
                     .iter()
                     .filter(|a| a.tag)
-                    .map(|a| a.zpl_key())
+                    .map(|a| a.zpl_value())
                     .collect(),
             )),
             "id_attributes" => Some(ConfigItem::KeySet(

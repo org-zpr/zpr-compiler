@@ -268,6 +268,11 @@ impl PolicyBuilder {
     // of attributes.  For a policy to be satisfied at the visa service ALL
     // the condititions must be met by the CLIENT.
     //
+    // Conditions that must be met by the service are stored in the `svc_conditions`
+    // field. Note that some service conditions are applied in a connect policy.
+    // Eg, an actor is not permitted to advertise a service unless it has some specific
+    // conditions.
+    //
     // As an aside, i'm not exactly sure why the protobuf format has a list of
     // lists of conditions rather than just a list.
     fn set_policies(&mut self, fabric: &Fabric) -> Result<(), CompilationError> {
@@ -285,16 +290,28 @@ impl PolicyBuilder {
                     service_id: svc.fabric_id.clone(),
                     id: svc.fabric_id.clone(), // TODO: Not sure why we have both id and service_id.
                     scope: pscope.clone(),
-                    conditions: Vec::new(),
+                    cli_conditions: Vec::new(),
+                    svc_conditions: Vec::new(),
                     constraints: Vec::new(), // TODO
                 };
-                let exprs = self.attr_list_to_attrexpr(&policy.condition);
-                let cond = polio::Condition {
-                    // TODO: In old ZPL we copied down the docstring from the ZPL into this ID.
-                    id: format!("{}-{}", svc.fabric_id, pcount),
-                    attr_exprs: exprs,
-                };
-                cpol.conditions.push(cond);
+                if !policy.cli_condition.is_empty() {
+                    let exprs = self.attr_list_to_attrexpr(&policy.cli_condition);
+                    let cond = polio::Condition {
+                        // TODO: In old ZPL we copied down the docstring from the ZPL into this ID.
+                        id: format!("{}-{}c", svc.fabric_id, pcount),
+                        attr_exprs: exprs,
+                    };
+                    cpol.cli_conditions.push(cond);
+                }
+                if !policy.svc_condition.is_empty() {
+                    let exprs = self.attr_list_to_attrexpr(&policy.svc_condition);
+                    let cond = polio::Condition {
+                        // TODO: In old ZPL we copied down the docstring from the ZPL into this ID.
+                        id: format!("{}-{}s", svc.fabric_id, pcount),
+                        attr_exprs: exprs,
+                    };
+                    cpol.svc_conditions.push(cond);
+                }
                 self.policy.policies.push(cpol);
             }
         }
@@ -389,7 +406,7 @@ impl PolicyBuilder {
             for clipol in &svc.client_policies {
                 if !clipol.access_only {
                     let pconnect = polio::Connect {
-                        attr_exprs: self.attr_list_to_attrexpr(&clipol.condition),
+                        attr_exprs: self.attr_list_to_attrexpr(&clipol.cli_condition),
                         proc: NO_PROC,
                     };
                     self.add_connect(pconnect);
@@ -609,10 +626,12 @@ impl PolicyBuilder {
                 }
             }
             for policy in &s.client_policies {
-                for a in &policy.condition {
-                    let key = extraction_f(a);
-                    if !table.contains_key(&key) {
-                        table.insert(key, table.len());
+                for attr_vec in [&policy.cli_condition, &policy.svc_condition] {
+                    for a in attr_vec {
+                        let key = extraction_f(a);
+                        if !table.contains_key(&key) {
+                            table.insert(key, table.len());
+                        }
                     }
                 }
             }

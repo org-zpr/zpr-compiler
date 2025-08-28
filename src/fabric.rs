@@ -61,8 +61,11 @@ pub struct ClientPolicy {
     /// If true, this policy is only for access, not for setting up a connection
     pub access_only: bool,
 
-    /// List of attributes that must be met for the policy to apply
-    pub condition: Vec<Attribute>,
+    /// List of attributes that must be met by a clien for the policy to apply
+    pub cli_condition: Vec<Attribute>,
+
+    /// List of attributes that must be met by a service for the policy to apply
+    pub svc_condition: Vec<Attribute>,
     // TODO: withouts, constraints, etc.
     //       Actually, withouts are just attributes, eg (role, ne, marketing)
 }
@@ -118,16 +121,26 @@ impl fmt::Display for Fabric {
             for a in &s.provider_attrs {
                 writeln!(f, "      {}", a)?;
             }
-            writeln!(f, "    client policies:")?;
+            writeln!(f, "    policies:")?;
             if s.client_policies.is_empty() {
                 writeln!(f, "      (none)")?;
             }
             for (i, cp) in s.client_policies.iter().enumerate() {
                 writeln!(
                     f,
-                    "      {})  {}",
+                    "      {}.client)  {}",
                     i + 1,
-                    cp.condition
+                    cp.cli_condition
+                        .iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                )?;
+                writeln!(
+                    f,
+                    "      {}.service)  {}",
+                    i + 1,
+                    cp.svc_condition
                         .iter()
                         .map(|a| a.to_string())
                         .collect::<Vec<String>>()
@@ -409,7 +422,8 @@ impl Fabric {
         }
         let svc = svc.unwrap();
         svc.client_policies.push(ClientPolicy {
-            condition: attrs.to_vec(),
+            cli_condition: attrs.to_vec(),
+            svc_condition: Vec::new(),
             access_only,
         });
         Ok(())
@@ -418,13 +432,22 @@ impl Fabric {
     /// Add a condition (aka plicy aka rule) to all services -- EXCEPT nodes, trusted services, and visa services.
     pub fn add_condition_to_all_services(
         &mut self,
-        attrs: &[Attribute],
+        cli_attrs: &[Attribute],
+        svc_attrs: &[Attribute],
     ) -> Result<(), CompilationError> {
         for svc in &mut self.services {
             if svc.service_type == ServiceType::Regular {
+                // For the service attributes, only add a policy if the attributes are not
+                // already present in the provider attributes.
+                let unique_svc_attrs: Vec<Attribute> = svc_attrs
+                    .iter()
+                    .filter(|a| !svc.provider_attrs.contains(a))
+                    .cloned()
+                    .collect();
                 svc.client_policies.push(ClientPolicy {
                     access_only: false, // TODO: this is a guess
-                    condition: attrs.to_vec(),
+                    cli_condition: cli_attrs.to_vec(),
+                    svc_condition: unique_svc_attrs.to_vec(),
                 });
             }
         }

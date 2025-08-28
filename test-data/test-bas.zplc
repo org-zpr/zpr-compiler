@@ -1,0 +1,69 @@
+# minimal config so that we can test parsing the RFC zpl
+
+[nodes.n0]
+key = "none"
+provider = [["endpoint.zpr.adapter.cn", "node.zpr.org"]]
+zpr_address = "fd5a:5052:90de::1"
+interfaces = [ "in1" ]
+in1.netaddr = "1.2.3.4:5000"
+
+
+# Some special properties of visa_service
+# - Required address of fd5a:5052::1
+# - Required endpoint.zpr.adapter.cn value of "vs.zpr"
+# - The admin service for the visa service can be referened in
+#   ZPL as "VisaService".  Access to the admin interface 
+#   is done in ZPL not here.
+[visa_service]
+dock_node = "n0"
+
+[trusted_services.default]
+cert_path = ""
+
+[trusted_services.bas]
+api = "validation/2"
+client = "AuthService"
+cert_path = "bas-tls.crt"
+returns_attributes = [ "#user.government", "user.clearance", "#service.classified", "user.bas_id" ]
+identity_attributes = [ "user.bas_id" ]
+provider = [[ "endpoint.zpr.adapter.cn", "bas.zpr.org" ]]
+# Will expect to find two service definitions later:
+#    bas-vs and bas-client
+
+[bootstrap]
+"bas.zpr.org" = "rsa-pub-key.pem"
+
+
+# There are pre-defiend "protocols":
+# zpr-validation2
+# zpr-authrsa
+
+[protocols.http]
+l4protocol = "iana.TCP"
+l7protocol = "http"
+port = 80
+
+[services.server]
+protocol = "http"
+
+[services.Image-database]
+protocol = "http"
+
+[services.gateway]
+protocol = "http"
+
+[services.bas-vs]
+protocol = "zpr-validation2"
+port = 3999
+
+[services.AuthService]
+protocol = "zpr-oauthrsa"
+port = 4444
+
+
+# BAS has two access points:
+# - one for adapters
+# - one for visa services
+#
+# Policy needs to allow adapters to access the adapter port
+# and must allow visa service to access the vs port

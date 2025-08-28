@@ -17,8 +17,8 @@ pub fn vec_to_attributes(v: &[(String, String)]) -> Result<Vec<Attribute>, Compi
     Ok(attrs)
 }
 
-// Given a list of attributes that apply, return just the set of unique
-// attributes and the ones with values should take precedence over ones without.
+/// Given a list of attributes that apply, return just the set of unique
+/// attributes and the ones with values should take precedence over ones without.
 pub fn squash_attributes(
     attrs: &[Attribute],
     tok: &FPos,
