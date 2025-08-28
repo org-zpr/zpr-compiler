@@ -542,3 +542,199 @@ impl PState {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+    use crate::{context::CompilationCtx, lex::tokenize_str};
+
+    #[test]
+    fn test_parses_valid_on_clause() {
+        let valids = vec![
+            "allow blue users to access services on level:seven endpoints",
+            "allow blue users to access services on orange endpoints",
+            "allow blue users to access services on orange, level:seven endpoints",
+            "allow blue users on green endpoints to access services",
+        ];
+
+        let mut classes: HashMap<String, Class> = HashMap::new();
+        for defclass in Class::defaults() {
+            classes.insert(defclass.name.clone(), defclass);
+        }
+        let mut class_index: HashMap<String, String> = HashMap::new();
+        for (name, class) in classes.iter() {
+            class_index.insert(name.clone(), name.clone());
+            class_index.insert(class.aka.clone(), name.clone());
+        }
+
+        let cctx = CompilationCtx::default();
+
+        for statement in &valids {
+            let tz = tokenize_str(statement, &cctx).unwrap();
+            let tokens = tz.tokens;
+            match parse_allow(&tokens, 1, &class_index, &classes) {
+                Ok(_clause) => {
+                    // great!
+                }
+                Err(err) => {
+                    panic!(
+                        "valid statement failed to parse: '{}', err: {:?}",
+                        statement, err
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_fails_on_invalid_on_clause() {
+        let invalids = vec![
+            "allow blue users to access services on",
+            "allow blue users to access services on level:seven on endpoints",
+            "allow on blue users to access services",
+            "allow blue users to access services on orange",
+        ];
+
+        let mut classes: HashMap<String, Class> = HashMap::new();
+        for defclass in Class::defaults() {
+            classes.insert(defclass.name.clone(), defclass);
+        }
+        let mut class_index: HashMap<String, String> = HashMap::new();
+        for (name, class) in classes.iter() {
+            class_index.insert(name.clone(), name.clone());
+            class_index.insert(class.aka.clone(), name.clone());
+        }
+
+        let cctx = CompilationCtx::default();
+
+        for statement in &invalids {
+            let tz = tokenize_str(statement, &cctx).unwrap();
+            let tokens = tz.tokens;
+            match parse_allow(&tokens, 1, &class_index, &classes) {
+                Ok(clause) => {
+                    panic!(
+                        "invalid statement failed to generate error: '{}', clause: {:?}",
+                        statement, clause
+                    );
+                }
+                Err(_err) => {
+                    // ok
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_sets_attrs_correctly_trailing_on() {
+        let statement = "allow blue users to access services on level:seven endpoints";
+
+        let mut classes: HashMap<String, Class> = HashMap::new();
+        for defclass in Class::defaults() {
+            classes.insert(defclass.name.clone(), defclass);
+        }
+        let mut class_index: HashMap<String, String> = HashMap::new();
+        for (name, class) in classes.iter() {
+            class_index.insert(name.clone(), name.clone());
+            class_index.insert(class.aka.clone(), name.clone());
+        }
+
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        let tokens = tz.tokens;
+        let clause = parse_allow(&tokens, 1, &class_index, &classes).unwrap();
+
+        // Blue tag goes on user.
+        clause
+            .user
+            .with
+            .iter()
+            .find(|a| a.to_string() == "#user.blue")
+            .expect("blue tag missing from user clause");
+        // level:seven attr goes in as an endpoint domain attribute on the service.
+        clause
+            .service
+            .with
+            .iter()
+            .find(|a| a.to_string() == "endpoint.level:seven")
+            .expect("level:seven tag missing from service clause");
+    }
+
+    #[test]
+    fn test_sets_attrs_correctly_user_on() {
+        let statement = "allow blue users on level:seven endpoints to access services";
+
+        let mut classes: HashMap<String, Class> = HashMap::new();
+        for defclass in Class::defaults() {
+            classes.insert(defclass.name.clone(), defclass);
+        }
+        let mut class_index: HashMap<String, String> = HashMap::new();
+        for (name, class) in classes.iter() {
+            class_index.insert(name.clone(), name.clone());
+            class_index.insert(class.aka.clone(), name.clone());
+        }
+
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        let tokens = tz.tokens;
+        let clause = parse_allow(&tokens, 1, &class_index, &classes).unwrap();
+
+        // Blue tag goes on user.
+        clause
+            .user
+            .with
+            .iter()
+            .find(|a| a.to_string() == "#user.blue")
+            .expect("blue tag missing from user clause");
+        // level:seven attr goes in as an endpoint attribute
+        clause
+            .endpoint
+            .with
+            .iter()
+            .find(|a| a.to_string() == "endpoint.level:seven")
+            .expect("level:seven tag missing from endpoint clause");
+    }
+
+    #[test]
+    fn test_sets_attrs_correctly_two_on() {
+        let statement =
+            "allow blue users on level:seven endpoints to access services on level:eight endpoints";
+
+        let mut classes: HashMap<String, Class> = HashMap::new();
+        for defclass in Class::defaults() {
+            classes.insert(defclass.name.clone(), defclass);
+        }
+        let mut class_index: HashMap<String, String> = HashMap::new();
+        for (name, class) in classes.iter() {
+            class_index.insert(name.clone(), name.clone());
+            class_index.insert(class.aka.clone(), name.clone());
+        }
+
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        let tokens = tz.tokens;
+        let clause = parse_allow(&tokens, 1, &class_index, &classes).unwrap();
+
+        // Blue tag goes on user.
+        clause
+            .user
+            .with
+            .iter()
+            .find(|a| a.to_string() == "#user.blue")
+            .expect("blue tag missing from user clause");
+        // level:seven attr goes in as an endpoint attribute
+        clause
+            .endpoint
+            .with
+            .iter()
+            .find(|a| a.to_string() == "endpoint.level:seven")
+            .expect("level:seven tag missing from endpoint clause");
+        // level:eight attr goes in as an endpoint domain attribute on the service.
+        clause
+            .service
+            .with
+            .iter()
+            .find(|a| a.to_string() == "endpoint.level:eight")
+            .expect("level:eight tag missing from service clause");
+    }
+}

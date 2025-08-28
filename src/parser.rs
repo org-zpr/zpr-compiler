@@ -189,7 +189,7 @@ optional tags full-time, part-time, and intern
 
 define marketing-emp as an employee with rule:marketing and tag full-time
 
-allow endpoints with marketing-emps to access role:marketing services
+allow marketing-emps to access role:marketing services
 "#;
         let ctx = CompilationCtx::default();
         let tz: Result<Tokenization, CompilationError> = tokenize_str(pp, &ctx).or_else(|e| {
@@ -249,7 +249,7 @@ allow endpoints with marketing-emps to access role:marketing services
 
     #[test]
     fn test_base_allow() {
-        let valids = vec!["allow endpoints with color:green users to access services"];
+        let valids = vec!["allow color:green users to access services"];
         let ctx = CompilationCtx::default();
         for valid in valids {
             let tokens: Result<Tokenization, CompilationError> =
@@ -257,7 +257,7 @@ allow endpoints with marketing-emps to access role:marketing services
                     panic!("failed to tokenize '{}': {:?}", valid, e);
                 });
             let toks = tokens.unwrap().tokens;
-            assert_eq!(8, toks.len());
+            assert_eq!(6, toks.len());
             let _pol = match parse(toks, &ctx) {
                 Ok(policy) => policy,
                 Err(e) => {
@@ -341,8 +341,8 @@ allow endpoints with marketing-emps to access role:marketing services
     #[test]
     fn test_verbose_device() {
         let valids = vec![
-            "allow color:green endpoints with managed, color:red users to access green services",
-            "allow color:green endpoints with color:red, managed users to access color:blue services",
+            "allow managed, color:red users on color:green endpoints to access green services",
+            "allow color:red, managed users on color:green endpoints to access color:blue services",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
