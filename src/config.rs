@@ -592,6 +592,18 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
     } else {
         None
     };
+    match cert_path {
+        Some(ref path_buf) => {
+            if path_buf.to_str() != Some("") && !path_buf.exists() {
+                return Err(err_config!(
+                    "trusted_service {} cert_path {:?} does not exist",
+                    ts_id,
+                    path_buf
+                ));
+            }
+        }
+        None => (),
+    }
     let returns_attrs: Vec<String>;
     let identity_attrs: Vec<String>;
     let client_svc: Option<String>;
@@ -1108,6 +1120,9 @@ mod test {
         [trusted_services.default]
         cert_path = "foo.pem"
         "#;
+        // TODO this is a bad way of doing this, but can't think of a better way
+        let _file = std::fs::File::create("foo.pem");
+
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
         let services = cparser.parse_trusted_services(&ctx);
@@ -1265,6 +1280,8 @@ mod test {
         client = "bas-client-interface"
         service = "bas-vs-interface"
         "#;
+        let _file = std::fs::File::create("foo.crt");
+
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
         let services = cparser.parse_trusted_services(&ctx);
