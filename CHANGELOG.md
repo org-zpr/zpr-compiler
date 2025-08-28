@@ -1,6 +1,6 @@
 # The ZPR ZPL Compiler Changelog
 
-## In Progress
+## [0.6.1] - 2025-08-28
 
 - New "on" keyword which can be used after a user clause or service
   clause. Replaces the WITH construct for a leading endpoint clause.
