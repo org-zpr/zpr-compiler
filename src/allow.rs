@@ -320,15 +320,25 @@ where
             if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
                 let service_ec = nested_ps.to_clause("endpoint")?;
 
-                // TODO: Not sure this is quite right.  The CLASS in here might be a defined class with
-                //       attributes of its own.  What I try to do here is put the attributes here into
-                //       the service under the 'endpoint' domain.
-                //
-                // So check what happens if the endpoint classname in here is a define.
+                // Since ZPL could use a defined class in the on clause we need to walk the tree and
+                // gather any attributes.
+                let mut all_endpoint_attrs = collect_all_attributes(&service_ec.class, classes_map);
+                all_endpoint_attrs.extend(service_ec.with);
 
-                for ec_attr in &service_ec.with {
+                for ec_attr in &all_endpoint_attrs {
                     let mut domained_attr = ec_attr.clone();
-                    domained_attr.set_domain(AttrDomain::Endpoint);
+                    if domained_attr.is_unspecified_domain() {
+                        domained_attr.set_domain(AttrDomain::Endpoint);
+                    } else if !domained_attr.is_domain(AttrDomain::Endpoint) {
+                        // This is not permitted. You can only talk about endpoints in the ON clause.
+                        return Err(CompilationError::AllowStmtParseError(
+                            format!(
+                                "illegal non-endpoint attribute in service ON clause: '{domained_attr}'"
+                            ),
+                            pa_state.root_tok.line,
+                            pa_state.root_tok.col,
+                        ));
+                    }
                     service_clause.with.push(domained_attr); // TODO: Are these already in endpoint domain?
                 }
             } else {
@@ -346,6 +356,30 @@ where
 
     pa_state.service_clause = Some(service_clause);
     Ok(())
+}
+
+// Note that this does not check for duplicates.
+fn collect_all_attributes(
+    class_name: &str,
+    classes_map: &HashMap<String, Class>,
+) -> Vec<Attribute> {
+    let mut attrs = Vec::new();
+    let mut current_class = class_name;
+    loop {
+        if let Some(class_data) = classes_map.get(current_class) {
+            // Built-in has no with attrs
+            if class_data.is_builtin() {
+                break;
+            }
+            attrs.extend(class_data.with_attrs.clone());
+            let parent = &class_data.parent;
+            if parent == current_class {
+                break;
+            }
+            current_class = parent;
+        }
+    }
+    attrs
 }
 
 struct PState {
