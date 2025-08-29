@@ -1109,9 +1109,6 @@ mod test {
         [trusted_services.default]
         cert_path = "foo.pem"
         "#;
-        // TODO this is a bad way of doing this, but can't think of a better way
-        let _file = std::fs::File::create("foo.pem");
-
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
         let services = cparser.parse_trusted_services(&ctx);
@@ -1269,8 +1266,6 @@ mod test {
         client = "bas-client-interface"
         service = "bas-vs-interface"
         "#;
-        let _file = std::fs::File::create("foo.crt");
-
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
         let services = cparser.parse_trusted_services(&ctx);
