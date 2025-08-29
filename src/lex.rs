@@ -324,12 +324,6 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 //
                 // Within a quoted string a leading backslash can be used to escape
                 // a quote character or a backslash itself.
-                //
-
-                // The single forward or backward quote.
-                // within a literal, two of these is just a way to insert a quote.
-                // this could also be the start of a quoted literal
-                // or this is the end of a quoted literal
                 if current_word.len() == 0 {
                     if !quoting.is_quoting() {
                         quoting.set_quoting(c);
