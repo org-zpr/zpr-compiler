@@ -2,10 +2,10 @@
 //! in this "compiler", this may be a way to build out an api "service" which
 //! would be used by the compiler as well as the visa service.
 
+use base64::prelude::*;
+use colored::Colorize;
 use core::fmt;
 use std::path::{Path, PathBuf};
-
-use base64::prelude::*;
 
 use crate::config::{self, Config};
 use crate::context::CompilationCtx;
@@ -485,11 +485,14 @@ impl ConfigApi {
                 let cert_data = match load_asn1data_from_pem(&cert_path) {
                     Ok(data) => data,
                     Err(e) => {
-                        panic!(
-                            "failed to load certificate data from '{}': {}",
+                        println!(
+                            "{}{} failed to load certificate data from '{}': {}",
+                            "error".red().bold(),
+                            ":".bold(),
                             cert_path.display(),
                             e
                         );
+                        std::process::exit(1);
                     }
                 };
                 Some(ConfigItem::BytesB64(BASE64_STANDARD.encode(&cert_data)))

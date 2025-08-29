@@ -592,6 +592,7 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
     } else {
         None
     };
+
     let returns_attrs: Vec<String>;
     let identity_attrs: Vec<String>;
     let client_svc: Option<String>;
