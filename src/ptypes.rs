@@ -389,6 +389,10 @@ impl Attribute {
         self.domain == AttrDomain::Unspecified
     }
 
+    pub fn is_domain(&self, domain: AttrDomain) -> bool {
+        self.domain == domain
+    }
+
     /// Create required, tuple type attribute without specifying a value.
     pub fn attr_name_only(name: &str) -> Result<Self, AttributeError> {
         let (dom, rest) = Attribute::parse_domain(name)?;

@@ -1,2 +1,3 @@
-allow endpoints with cleared government users to access classified database 
+# Removed leading "endpints with"
+allow cleared government users to access classified database 
 services.
