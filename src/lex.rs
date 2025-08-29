@@ -522,6 +522,18 @@ mod test {
     }
 
     #[test]
+    fn test_quote_aka() {
+        let zpl = "Define alien aka 'green monsters' as user with color:green.";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens.len(), 9);
+        assert_eq!(
+            tokens[3].tt,
+            super::TokenType::Literal("green monsters".to_string())
+        );
+    }
+
+    #[test]
     fn test_quoting() {
         let zpls = vec![
             ("`foo`", "foo"),

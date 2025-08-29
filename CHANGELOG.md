@@ -6,6 +6,7 @@
   with either single quotes (any sort and they do not have to match) or
   with double quotes.  While quoting, you can insert a literal quote or
   backslash by using a backslash.
+- New ability to quote names of defines and class names in general.
 
 ## [0.6.0] - 2025-08-26
 
