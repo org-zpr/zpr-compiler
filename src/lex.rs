@@ -98,6 +98,38 @@ pub fn tokenize(zpl_in: &Path, ctx: &CompilationCtx) -> Result<Tokenization, Com
     tokenize_str(&zpl, ctx)
 }
 
+enum QuotingType {
+    None,
+    Single,
+    Double,
+}
+
+impl QuotingType {
+    fn is_quoting(&self) -> bool {
+        match self {
+            QuotingType::None => false,
+            _ => true,
+        }
+    }
+
+    /// Panics if not called with a valid quote character.
+    fn set_quoting(&mut self, c: char) {
+        match c {
+            '\'' | '`' => *self = QuotingType::Single,
+            '\"' => *self = QuotingType::Double,
+            _ => panic!("call to set_quoting with invalid char: '{c}'"),
+        }
+    }
+
+    fn is_match(&self, c: char) -> bool {
+        match self {
+            QuotingType::None => false,
+            QuotingType::Single => c == '\'' || c == '`',
+            QuotingType::Double => c == '\"',
+        }
+    }
+}
+
 pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, CompilationError> {
     let mut tokens = Vec::new();
     let mut line = 1;
@@ -106,12 +138,12 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
 
     let mut current_word = ZPLStrBuilder::new();
     let mut current_start = (line, col);
-    let mut quoting = false;
+    let mut quoting = QuotingType::None;
 
     while let Some(c) = chars.next() {
         match c {
             '\n' => {
-                if quoting {
+                if quoting.is_quoting() {
                     // quoted strings should not span lines.
                     return Err(CompilationError::UnterminatedQuote(
                         current_start.0,
@@ -149,8 +181,8 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
             ' ' => {
                 // if we are quoting the literal, keep space, otherwise this is a delimiter
                 if current_word.len() > 0 {
-                    if quoting {
-                        current_word.push(c, quoting, line, col)?;
+                    if quoting.is_quoting() {
+                        current_word.push(c, true, line, col)?;
                     } else {
                         if !current_word.is_sugar() {
                             tokens.push(Token::new_from_str(
@@ -167,8 +199,8 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
             ',' => {
                 // if we are quoting the literal, keep comma, otherwise this is new COMMA token (should this be AND?)
                 if current_word.len() > 0 {
-                    if quoting {
-                        current_word.push(c, quoting, line, col)?;
+                    if quoting.is_quoting() {
+                        current_word.push(c, true, line, col)?;
                     } else {
                         if !current_word.is_sugar() {
                             tokens.push(Token::new_from_str(
@@ -191,8 +223,8 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 } else {
                     true // none (end of input)
                 };
-                if current_word.len() > 0 && quoting {
-                    current_word.push(c, quoting, line, col)?;
+                if current_word.len() > 0 && quoting.is_quoting() {
+                    current_word.push(c, true, line, col)?;
                 } else if current_word.len() > 0 {
                     // We have a word going, we are not quoting. A period followed by whitespace ends the statement.
                     // Otherwise it is assumed to be part of the word.
@@ -207,7 +239,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                         current_word.clear();
                         tokens.push(Token::new(TokenType::Period, line, col));
                     } else {
-                        current_word.push(c, quoting, line, col)?;
+                        current_word.push(c, quoting.is_quoting(), line, col)?;
                         // Special case: if we see that there is another period following this one we warn the user.
                         if let Some(&next) = chars.peek() {
                             if next == '.' {
@@ -221,13 +253,13 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 } else if followed_by_whitespace {
                     tokens.push(Token::new(TokenType::Period, line, col));
                 } else {
-                    current_word.push(c, quoting, line, col)?; // I guess it is allowed to start a "word" with a period?
+                    current_word.push(c, quoting.is_quoting(), line, col)?; // I guess it is allowed to start a "word" with a period?
                 }
                 col += 1;
             }
             '#' | '/' => {
-                if quoting {
-                    current_word.push(c, quoting, line, col)?;
+                if quoting.is_quoting() {
+                    current_word.push(c, true, line, col)?;
                 } else {
                     let comment = match c {
                         '#' => true,
@@ -248,7 +280,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                         _ => panic!("character at this point must be '#' or '/'"),
                     };
                     if !comment {
-                        current_word.push(c, quoting, line, col)?;
+                        current_word.push(c, quoting.is_quoting(), line, col)?;
                         col += 1;
                     } else {
                         // This is a comment, consume the rest of the line.
@@ -278,64 +310,74 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 if current_word.len() == 0 {
                     return Err(CompilationError::IllegalColon(line, col));
                 }
-                if quoting {
-                    current_word.push(c, quoting, line, col)?;
+                if quoting.is_quoting() {
+                    current_word.push(c, true, line, col)?;
                 } else if !current_word.accept_value() {
                     return Err(CompilationError::IllegalColon(line, col));
                 }
 
                 col += 1;
             }
-            '\'' | '`' => {
-                // The single forward or backward quote.
-                // within a literal, two of these is just a way to insert a quote.
-                // this could also be the start of a quoted literal
-                // or this is the end of a quoted literal
+            '\'' | '`' | '\"' => {
+                // A single or double quote alone can start a quoted string.
+                // We do not differentiate between the types of single quotes. But
+                // if a single quote starts a quoted string a single quote must end it
+                // and same for double quotes.
+                //
+                // Within a quoted string a leading backslash can be used to escape
+                // a quote character or a backslash itself.
                 if current_word.len() == 0 {
-                    if !quoting {
-                        quoting = true;
+                    if !quoting.is_quoting() {
+                        quoting.set_quoting(c);
                         current_start = (line, col);
                     } else {
-                        // No word in buffer, and now a repeated quote char? Error.
-                        return Err(CompilationError::IllegalQuote(line, col));
-                    }
-                } else {
-                    // We have a word in buffer
-                    if quoting {
-                        // We are quoting, if next char is the same quote char, then we are escaping.
-                        // Set flag here which we detect next time.
-                        if let Some(&next) = chars.peek() {
-                            if next == c {
-                                current_word.push(c, quoting, line, col)?;
-                                chars.next();
-                                col += 2;
-                                continue;
-                            }
-                        }
-                        // Else we are at the end of the quoted literal.
-                        // If next char is a colon, then we continue to parse attr value.
-                        if let Some(&next) = chars.peek() {
-                            if next == ':' {
-                                quoting = false;
-                                col += 1;
-                                continue;
-                            }
-                        }
-                        // Otherwise consume the current word.
-                        if !current_word.is_sugar() {
+                        // No word in buffer is either empty string or invalud.
+                        if quoting.is_match(c) {
+                            // take empty string
                             tokens.push(Token::new_from_str(
-                                &current_word.build(),
+                                &ZPLStr::default(),
                                 current_start.0,
                                 current_start.1,
                             ));
+                            current_word.clear();
+                            quoting = QuotingType::None;
+                        } else {
+                            return Err(CompilationError::IllegalQuote(line, col));
                         }
-                        current_word.clear();
-                        quoting = false;
+                    }
+                } else {
+                    // We have a word in buffer
+                    if quoting.is_quoting() {
+                        if !quoting.is_match(c) {
+                            // We got a quote char, but it is not the one that started our quoting run,
+                            // so we keep it.
+                            current_word.push(c, true, line, col)?;
+                        } else {
+                            // We are at the end of the quoted literal.
+                            // If next char is a colon, then we continue to parse attr value.
+                            if let Some(&next) = chars.peek() {
+                                if next == ':' {
+                                    quoting = QuotingType::None;
+                                    col += 1;
+                                    continue;
+                                }
+                            }
+                            // Otherwise consume the current word.
+                            if !current_word.is_sugar() {
+                                tokens.push(Token::new_from_str(
+                                    &current_word.build(),
+                                    current_start.0,
+                                    current_start.1,
+                                ));
+                            }
+                            current_word.clear();
+                            quoting = QuotingType::None;
+                        }
                     } else {
                         // We have a word in buffer but are not quoting and we just read a quote char?
                         // Only allowed if this is starting to quote a tuple value.
                         if current_word.is_tuple() && current_word.value_len() == 0 {
-                            quoting = true; // turn on tuple value quoting
+                            quoting.set_quoting(c); // turn on tuple value quoting
                         } else {
                             return Err(CompilationError::IllegalQuote(line, col));
                         }
@@ -343,16 +385,35 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 }
                 col += 1;
             }
+            '\\' => {
+                // Backslash.  Within a quoted string, backslash is used to escape a the next
+                // caracter. Am considering it a valid char if not in quoted context.
+                if quoting.is_quoting() {
+                    // If we are quoting, we need to escape (ie, accept) the next character.
+                    if let Some(&next) = chars.peek() {
+                        col += 1;
+                        let _ = chars.next(); // consume the next char
+                        current_word.push(next, true, line, col)?;
+                    } else {
+                        // trailing backslash while quoting?
+                        // Don't care -- we will get an error due to EOL while quoting.
+                    }
+                } else {
+                    // If we are not quoting, we treat the backslash as a regular character.
+                    current_word.push(c, false, line, col)?;
+                }
+                col += 1;
+            }
             _ => {
-                if current_word.len() == 0 && !quoting {
+                if current_word.len() == 0 && !quoting.is_quoting() {
                     current_start = (line, col);
                 }
-                current_word.push(c, quoting, line, col)?;
+                current_word.push(c, quoting.is_quoting(), line, col)?;
                 col += 1;
             }
         }
     }
-    if quoting {
+    if quoting.is_quoting() {
         return Err(CompilationError::UnterminatedQuote(
             current_start.0,
             current_start.1,
@@ -460,6 +521,61 @@ mod test {
             tokens[5].tt,
             super::TokenType::Tuple(("color".to_string(), "green.".to_string()))
         );
+    }
+
+    #[test]
+    fn test_quote_aka() {
+        let zpl = "Define alien aka 'green monsters' as user with color:green.";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens.len(), 9);
+        assert_eq!(
+            tokens[3].tt,
+            super::TokenType::Literal("green monsters".to_string())
+        );
+    }
+
+    #[test]
+    fn test_quoting() {
+        let zpls = vec![
+            ("`foo`", "foo"),
+            ("`foo'", "foo"),
+            ("'foo`", "foo"),
+            ("\"foo\"", "foo"),
+            (r"`fo\`o`", "fo`o"),
+            (r#""foo\\bar""#, r"foo\bar"),
+            (r#""""#, ""),
+            (r"''", ""),
+            (r"'`", ""),
+        ];
+
+        for (zpl, expect) in zpls {
+            match super::tokenize_str(zpl, &CompilationCtx::default()) {
+                Ok(tz) => {
+                    let tokens = tz.tokens;
+                    assert_eq!(tokens.len(), 1);
+                    assert_eq!(tokens[0].tt, super::TokenType::Literal(expect.to_string()));
+                }
+                Err(err) => {
+                    panic!("failed to tokenize string: [{zpl}]   error={err}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_invalid_quoting() {
+        let zpls = vec!["`foo\"", "\"foo'", "foo'bar "];
+
+        for zpl in zpls {
+            match super::tokenize_str(zpl, &CompilationCtx::default()) {
+                Ok(tz) => {
+                    let tokens = tz.tokens;
+                    panic!("should have failed to tokenize string: [{zpl}]   produced={tokens:?}");
+                }
+                Err(_err) => {}
+            }
+        }
     }
 
     #[test]

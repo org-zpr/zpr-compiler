@@ -236,11 +236,7 @@ impl Fabric {
                 svc_instance += 1;
             }
         }
-        let fabric_id = if svc_instance > 0 {
-            format!("{}#{}", id, svc_instance)
-        } else {
-            id.to_string()
-        };
+        let fabric_id = self.fabric_id_from_config_id_and_count(id, svc_instance);
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: fabric_id.clone(),
@@ -255,6 +251,15 @@ impl Fabric {
         };
         self.services.push(fs);
         Ok(fabric_id)
+    }
+
+    /// Create a fabric_id from a config_id.
+    fn fabric_id_from_config_id_and_count(&self, config_id: &str, count: usize) -> String {
+        if count > 0 {
+            format!("{}#{}", config_id, count)
+        } else {
+            config_id.to_string()
+        }
     }
 
     pub fn add_builtin_service(
@@ -279,11 +284,7 @@ impl Fabric {
                 svc_instance += 1;
             }
         }
-        let fabric_id = if svc_instance > 0 {
-            format!("{}#{}", id, svc_instance)
-        } else {
-            id.to_string()
-        };
+        let fabric_id = self.fabric_id_from_config_id_and_count(id, svc_instance);
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: fabric_id.clone(),

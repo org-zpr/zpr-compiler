@@ -1,5 +1,13 @@
 # The ZPR ZPL Compiler Changelog
 
+## [0.6.2] - 2025-08-29
+
+- Quoting and escaping now in line with ZRFC-15. That is you can quote
+  with either single quotes (any sort and they do not have to match) or
+  with double quotes.  While quoting, you can insert a literal quote or
+  backslash by using a backslash.
+- New ability to quote names of defines and class names in general.
+
 ## [0.6.1] - 2025-08-28
 
 - New "on" keyword which can be used after a user clause or service
@@ -13,7 +21,6 @@
   but only if those services are also running on green endpoints, then:
 
   `allow green users to access services on green endpoints`
-
 
 ## [0.6.0] - 2025-08-26
 
@@ -39,7 +46,7 @@
 - Additions to `trusted_service` to support new authentication services.
 - In the `protocol` block, the `protocol` key has been renamed to `l4protocol`.
 - A `service` block can override protocol details like `port` or ICMP.
-- Non default trusted services must have cooresponding services blocks for 
+- Non default trusted services must have cooresponding services blocks for
   their client and visa service components.
 - All attributes must be in one of our domains: user, device or service.
 - All attributes must come from a declared service.
