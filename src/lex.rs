@@ -21,6 +21,7 @@ pub enum TokenType {
     From,
     Tag,
     Tags,
+    On, // starts an endpoint clause
     Optional,
     Multiple,
     Literal(String),
@@ -61,6 +62,7 @@ impl Token {
             "from" => TokenType::From,
             "tag" => TokenType::Tag,
             "tags" => TokenType::Tags,
+            "on" => TokenType::On,
             "optional" => TokenType::Optional,
             "multiple" => TokenType::Multiple,
             "." => TokenType::Period,
@@ -458,5 +460,18 @@ mod test {
             tokens[5].tt,
             super::TokenType::Tuple(("color".to_string(), "green.".to_string()))
         );
+    }
+
+    #[test]
+    fn test_keyword_on() {
+        let zpl = "allow users on green endpoints to access services on red endpoints";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        println!("{:?}", tokens);
+        assert_eq!(tokens.len(), 11);
+        let ontok = &tokens[2];
+        assert_eq!(ontok.tt, super::TokenType::On);
+        let ontok = &tokens[8];
+        assert_eq!(ontok.tt, super::TokenType::On);
     }
 }

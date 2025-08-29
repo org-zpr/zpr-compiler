@@ -5,33 +5,38 @@
 
 <statement> ::= <permission-statement> | <denial-statement> | <define-statement>
 
-<permission-statement> ::= "allow" <subject-clause> "to" "access" <object-clause> 
-                           <through-clause>? <signal-clause>? "." <eol>
+<permission-statement> ::= "allow" <p-statement>
 
-<denial-statement> ::= "never" "allow" <subject-clause> "to" "access" <service-spec>
-                       <signal-clause>? "." <eol>
+<denial-statement> ::= "never" <permission-statement>
 
-<define-statement> ::= "define" <name> <aka-clause>? "as" <article> <class-name> 
+<p-statement> ::= <subject-clause> "to" "access" <service-spec>
+                  <on-device-clause>? <through-clause>? (","? "and" <signal-clause>)? "." <eol>
+
+<define-statement> ::= "define" <name> <aka-clause>? "as" <article> <class-name>
                       <with-attributes-clause>? "." <eol>
 
-<subject-clause> ::= <user-spec> <with-device-clause>?
+<subject-clause> ::= <user-spec> | <endpoint-spec> | <user-spec> "on" <endpoint-spec>
 
-<with-device-clause> ::= ("with" | "on") <endpoint-spec>
+<on-device-clause> ::= "on" <endpoint-spec>
 
 <through-clause> ::= "through" <name>
 
-<signal-clause> ::= "," "and" "signal" <string> "to" <name>
+<signal-clause> ::= "signal" <string> "to" <name>
 
 <aka-clause> ::= "aka" <name>
 
 <article> ::= "a" | "an"
 
-<with-attributes-clause> ::= "with" <attribute-list>
+<with-attributes-clause> ::= "with" <attribute-list> <additional-attributes-clause>?
 
-<attribute-list> ::= <attribute-spec> ("," <attribute-spec>)*
+<additional-attributes-clause> ::= "and" <with-attribute-clause>
 
-<attribute-spec> ::= <name> | 
-                    "optional" "tags" <name> ("," <name>)* ("and" <name>)?
+<attribute-list> ::= <attribute-spec> (<and-token> <attribute-spec>)*
+
+<and-token> := "and" | ","
+
+<attribute-spec> ::= <name> |
+                    "optional" ("tag" | "tags") <name> (<and-token> <name>)*
 
 # A <user-spec> must either be or be descended from the built-in "user" class.
 <user-spec> ::= <attribute-expr>* <class-name> | <name>
@@ -46,10 +51,10 @@
 
 <attr-tag> ::= <name>
 
-# No spaces around ':' in <attr-kv-pair> 
+# No spaces around ':' in <attr-kv-pair>
 <attr-kv-pair> ::= <key-name> ":" <key-value>
 
-# No space may preceed the ':' in <attr-key>
+# No space may preceed the ':' in <attr-key-presence>
 <attr-key-presence> ::= <key-name> ":"
 
 <key-name> ::= <name>
@@ -62,7 +67,8 @@
 
 <class-name> ::= <built-in-class-name> | <name>
 
-<built-in-class-name> ::= "endpoint" | "user" | "service"
+<built-in-class-name> ::= "endpoint" | "user" | "service"  |
+                          "endpoints" | "users" | "services"
 
 <identifier> ::= <letter> (<letter> | <digit> | "-" | "_")*
 

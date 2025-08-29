@@ -1,8 +1,19 @@
 # The ZPR ZPL Compiler Changelog
 
-## In Progress
+## [0.6.1] - 2025-08-28
 
-- (empty)
+- New "on" keyword which can be used after a user clause or service
+  clause. Replaces the WITH construct for a leading endpoint clause.
+
+  OLD: `allow green endpoints with red users to access services`
+  NEW: `allow red users on green endpoints to access services`
+
+- The new "on" keyword also enables setting of "service side" endpoint
+  conditions.  So if you want green users to be able to access services
+  but only if those services are also running on green endpoints, then:
+
+  `allow green users to access services on green endpoints`
+
 
 ## [0.6.0] - 2025-08-26
 
