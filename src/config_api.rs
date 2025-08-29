@@ -551,7 +551,7 @@ impl ConfigApi {
                 .canonicalize()
                 .unwrap_or_else(|_| {
                     println!(
-                        "{}{} failed to canonicalize bootstrap key path: {kpath:?}",
+                        "{}{} failed to locate bootstrap key: {kpath:?}",
                         "error".red().bold(),
                         ":".bold()
                     );
