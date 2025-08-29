@@ -549,7 +549,14 @@ impl ConfigApi {
                 .base_path
                 .join(kpath)
                 .canonicalize()
-                .unwrap_or_else(|_| panic!("failed to canonicalize bootstrap key path: {kpath:?}"));
+                .unwrap_or_else(|_| {
+                    println!(
+                        "{}{} failed to canonicalize bootstrap key path: {kpath:?}",
+                        "error".red().bold(),
+                        ":".bold()
+                    );
+                    std::process::exit(1);
+                });
             load_rsa_public_key(&abspath).unwrap_or_else(|_| {
                 panic!("failed to load bootstrap key from '{}'", abspath.display())
             })
