@@ -61,6 +61,12 @@ impl ZPLStr {
     }
 }
 
+impl Default for ZPLStr {
+    fn default() -> Self {
+        ZPLStr::new_atom("")
+    }
+}
+
 impl fmt::Display for ZPLStr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.tuple {
@@ -99,16 +105,6 @@ impl ZPLStrBuilder {
     pub fn len(&self) -> usize {
         self.name.len() + self.value.len()
     }
-
-    /*
-    pub fn push(&mut self, c: char) {
-        if self.input_to_value {
-            self.value.push(c);
-        } else {
-            self.name.push(c);
-        }
-    }
-    */
 
     pub fn push(
         &mut self,
