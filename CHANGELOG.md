@@ -1,8 +1,11 @@
 # The ZPR ZPL Compiler Changelog
 
-## In Progress
+## [0.6.1] - 2025-08-29
 
-- (empty)
+- Quoting and escaping now in line with ZRFC-15. That is you can quote
+  with either single quotes (any sort and they do not have to match) or
+  with double quotes.  While quoting, you can insert a literal quote or
+  backslash by using a backslash.
 
 ## [0.6.0] - 2025-08-26
 
