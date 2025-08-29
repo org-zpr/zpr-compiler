@@ -592,18 +592,7 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
     } else {
         None
     };
-    match cert_path {
-        Some(ref path_buf) => {
-            if path_buf.to_str() != Some("") && !path_buf.exists() {
-                return Err(err_config!(
-                    "trusted_service {} cert_path {:?} does not exist",
-                    ts_id,
-                    path_buf
-                ));
-            }
-        }
-        None => (),
-    }
+
     let returns_attrs: Vec<String>;
     let identity_attrs: Vec<String>;
     let client_svc: Option<String>;
