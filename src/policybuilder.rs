@@ -23,6 +23,11 @@ pub struct PolicyBuilder {
     policy_date: String,
     policy: polio::Policy,
     connects_table: HashMap<String, usize>, // connect hash string -> connect index
+
+    // Before writing service IDs into the policy we clean up the names by converting
+    // whitespace into underscores.  This map keeps track of that so that we use the
+    // same "mangled" names for fabric service names throughout the policy.
+    name_mangler: HashMap<String, String>, // fabric IDs -> policy IDs
 }
 
 /// These flags are used to set the type of service in the PROC.
@@ -84,6 +89,7 @@ impl PolicyBuilder {
             policy_date,
             policy: pp,
             connects_table: HashMap::new(),
+            name_mangler: HashMap::new(),
         }
     }
 
@@ -201,11 +207,22 @@ impl PolicyBuilder {
 
             // The VS facing service details have been copied out of config.
 
+            let canonical_svc_id = self.get_canonical_service_name(&svc.config_id);
+
+            // pretty sure it is an error if config_id != fabric_id in these cases.
+            // TODO: Not sure why we are using config_id here and not fabric_id.
+            if svc.config_id != svc.fabric_id {
+                panic!(
+                    "logic error - config_id '{}' is not same as fabric id '{}'",
+                    svc.config_id, svc.fabric_id
+                );
+            }
+
             if let Some((l7p, port)) = svc.get_l7protocol_and_port() {
                 let trusted_svc = polio::Service {
                     r#type: polio::SvcT::SvctAuth.into(),
-                    name: svc.config_id.clone(),
-                    prefix: svc.config_id.clone(),
+                    name: canonical_svc_id.clone(),
+                    prefix: canonical_svc_id,
                     domain: String::new(),
                     query_uri: String::new(), // n/a
                     validate_uri: format!("{}://[::1]:{}", l7p, port),
@@ -222,11 +239,19 @@ impl PolicyBuilder {
 
             // The adapter facing auth service (if present) we register as a new-style "authentication" service.
             if let Some(asvc) = fabric.get_service(svc.client_service_name.as_ref().unwrap()) {
+                // TODO: Not sure why we are using config_id here and not fabric_id.
+                if asvc.config_id != asvc.fabric_id {
+                    panic!(
+                        "logic error - config_id '{}' is not same as fabric id '{}'",
+                        asvc.config_id, asvc.fabric_id
+                    );
+                }
+                let canonical_asvc_id = self.get_canonical_service_name(&asvc.config_id);
                 if let Some((l7p, port)) = asvc.get_l7protocol_and_port() {
                     let auth_svc = polio::Service {
                         r#type: polio::SvcT::SvctActorAuth.into(),
-                        name: asvc.config_id.clone(),
-                        prefix: asvc.config_id.clone(),
+                        name: canonical_asvc_id.clone(),
+                        prefix: canonical_asvc_id,
                         domain: String::new(),
                         query_uri: String::new(), // n/a
                         validate_uri: format!("{}://[::1]:{}", l7p, port),
@@ -286,9 +311,10 @@ impl PolicyBuilder {
 
             for policy in &svc.client_policies {
                 pcount += 1;
+                let canonical_svc_id = self.get_canonical_service_name(&svc.fabric_id);
                 let mut cpol = polio::CPolicy {
-                    service_id: svc.fabric_id.clone(),
-                    id: svc.fabric_id.clone(), // TODO: Not sure why we have both id and service_id.
+                    service_id: canonical_svc_id.clone(),
+                    id: canonical_svc_id.clone(), // TODO: Not sure why we have both id and service_id.
                     scope: pscope.clone(),
                     cli_conditions: Vec::new(),
                     svc_conditions: Vec::new(),
@@ -298,7 +324,7 @@ impl PolicyBuilder {
                     let exprs = self.attr_list_to_attrexpr(&policy.cli_condition);
                     let cond = polio::Condition {
                         // TODO: In old ZPL we copied down the docstring from the ZPL into this ID.
-                        id: format!("{}-{}c", svc.fabric_id, pcount),
+                        id: format!("{}-{}c", canonical_svc_id, pcount),
                         attr_exprs: exprs,
                     };
                     cpol.cli_conditions.push(cond);
@@ -307,7 +333,7 @@ impl PolicyBuilder {
                     let exprs = self.attr_list_to_attrexpr(&policy.svc_condition);
                     let cond = polio::Condition {
                         // TODO: In old ZPL we copied down the docstring from the ZPL into this ID.
-                        id: format!("{}-{}s", svc.fabric_id, pcount),
+                        id: format!("{}-{}s", canonical_svc_id, pcount),
                         attr_exprs: exprs,
                     };
                     cpol.svc_conditions.push(cond);
@@ -497,7 +523,7 @@ impl PolicyBuilder {
     /// Create a PROC for the policy binary to register a service and optionally set flags.
     /// `endpoint_str` is comma separated list of endpoint values.
     fn create_service_proc(
-        &self,
+        &mut self,
         svc_id: &str,
         svc_type: &ServiceType,
         endpoint_str: &str,
@@ -508,8 +534,10 @@ impl PolicyBuilder {
         // Args for register are (NAME:String, Type:SvcT, ENDPOINTS:String)
         let mut args = Vec::new();
 
+        let canonical_svc_id = self.get_canonical_service_name(svc_id);
+
         args.push(polio::Argument {
-            arg: Some(polio::argument::Arg::Strval(svc_id.to_string())),
+            arg: Some(polio::argument::Arg::Strval(canonical_svc_id.to_string())),
         });
         let svc_t = match svc_type {
             ServiceType::Regular | ServiceType::Visa | ServiceType::BuiltIn => polio::SvcT::SvctDef,
@@ -564,6 +592,19 @@ impl PolicyBuilder {
         }
 
         polio::Proc { proc }
+    }
+
+    fn get_canonical_service_name(&mut self, svc_id: &str) -> String {
+        if let Some(mangled) = self.name_mangler.get(svc_id) {
+            return mangled.clone();
+        }
+        let mut mangled_sid = svc_id.replace(" ", "_");
+        while self.name_mangler.contains_key(&mangled_sid) {
+            mangled_sid = format!("{}_", mangled_sid); // append trailing underscore until unique
+        }
+        self.name_mangler
+            .insert(svc_id.to_string(), mangled_sid.clone());
+        mangled_sid
     }
 
     /// Convert a list of our Attributes structs into a list of the protocol buffer AttrExprs.
