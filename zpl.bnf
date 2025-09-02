@@ -1,5 +1,5 @@
 // Extracted from ZRFC 15.4
-// Not included: conditions and limits
+// Not included: 'through', conditions and limits
 
 <zpl-policy> ::= <statement>*
 
@@ -10,7 +10,7 @@
 <denial-statement> ::= "never" <permission-statement>
 
 <p-statement> ::= <subject-clause> "to" "access" <service-spec>
-                  <on-device-clause>? <through-clause>? (","? "and" <signal-clause>)? "." <eol>
+                  <on-device-clause>? (","? "and" <signal-clause>)? "." <eol>
 
 <define-statement> ::= "define" <name> <aka-clause>? "as" <article> <class-name>
                       <with-attributes-clause>? "." <eol>
@@ -18,8 +18,6 @@
 <subject-clause> ::= <user-spec> | <endpoint-spec> | <user-spec> "on" <endpoint-spec>
 
 <on-device-clause> ::= "on" <endpoint-spec>
-
-<through-clause> ::= "through" <name>
 
 <signal-clause> ::= "signal" <string> "to" <name>
 
