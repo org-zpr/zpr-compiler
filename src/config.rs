@@ -215,6 +215,17 @@ impl ConfigParse {
         let r = self.ctoml["resolver"]
             .as_table()
             .ok_or(err_config!("error reading resolver section"))?;
+        for elem in r.keys() {
+            match elem.as_str() {
+                "order" => (),
+                "hosts" => (),
+                _ => println!(
+                    "{}: unknown section '{}' detected while parsing resolver",
+                    "warning".yellow().bold(),
+                    elem
+                ),
+            }
+        }
         let mut order_vec = Vec::new();
         if !r.contains_key("order") {
             // Default order is hosts, dns
@@ -299,6 +310,16 @@ impl ConfigParse {
         let vs = self.ctoml["visa_service"]
             .as_table()
             .ok_or(err_config!("error reading visa_service section"))?;
+        for elem in vs.keys() {
+            match elem.as_str() {
+                "dock_node" => (),
+                _ => println!(
+                    "{}: unknown section '{}' detected while parsing visa_service",
+                    "warning".yellow().bold(),
+                    elem
+                ),
+            }
+        }
         if !vs.contains_key("dock_node") {
             return Err(err_config!("visa_service missing dock_node"));
         }
@@ -446,6 +467,7 @@ fn require_key(ctx: &str, table: &Table, key: &str) -> Result<(), CompilationErr
 
 /// Parse a single node table.
 fn parse_node(node_id: &str, node: &Table) -> Result<Node, CompilationError> {
+    warn_unknown_node_property(node);
     require_key(&format!("nodes.{}", node_id), node, "key")?;
     let key = node["key"]
         .as_str()
@@ -498,6 +520,23 @@ fn parse_node(node_id: &str, node: &Table) -> Result<Node, CompilationError> {
         interfaces,
         provider,
     })
+}
+
+fn warn_unknown_node_property(node: &Table) {
+    for elem in node.keys() {
+        match elem.as_str() {
+            "key" => (),
+            "provider" => (),
+            "zpr_address" => (),
+            "interfaces" => (),
+            "in1" => (),
+            _ => println!(
+                "{}: unknown property '{}' detected while parsing node",
+                "warning".yellow().bold(),
+                elem
+            ),
+        }
+    }
 }
 
 fn parse_provider(ctx: &str, table: &Table) -> Result<Vec<(String, String)>, CompilationError> {
@@ -590,6 +629,7 @@ fn tuples_to_tuple_str_vec(
 
 // Parse an individual trusted_service table.
 fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, CompilationError> {
+    warn_unknown_ts_property(ts);
     // The "api" value is optional for the default trusted service.
     let mut is_default = false;
     let api = if ts.contains_key("api") {
@@ -711,6 +751,23 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
     })
 }
 
+fn warn_unknown_ts_property(ts: &Table) {
+    for elem in ts.keys() {
+        match elem.as_str() {
+            "cert_path" => (),
+            "api" => (),
+            "client" => (),
+            "returns_attributes" => (),
+            "provider" => (),
+            _ => println!(
+                "{}: unknown property '{}' detected while parsing trusted_services",
+                "warning".yellow().bold(),
+                elem
+            ),
+        }
+    }
+}
+
 /// Parse table entry `key` as a string array.  If key is not found returns empty vector.
 fn parse_string_array(ts: &Table, key: &str, ctx: &str) -> Result<Vec<String>, CompilationError> {
     if !ts.contains_key(key) {
@@ -790,6 +847,7 @@ fn check_attr_keys_domain_and_uniqueness(
 /// - icmp_type
 /// - icmp_codes
 fn parse_protocol(prot_label: &str, prot: &Table) -> Result<Protocol, CompilationError> {
+    warn_unknown_prot_property(prot);
     if !prot.contains_key("l4protocol") {
         return Err(err_config!(
             "protocol {} missing key 'l4protocol'",
@@ -829,6 +887,22 @@ fn parse_protocol(prot_label: &str, prot: &Table) -> Result<Protocol, Compilatio
             prot_label,
             protocol_name
         ))
+    }
+}
+
+fn warn_unknown_prot_property(prot: &Table) {
+    for elem in prot.keys() {
+        match elem.as_str() {
+            "l4protocol" => (),
+            "port" => (),
+            "icmp_type" => (),
+            "icmp_codes" => (),
+            _ => println!(
+                "{}: unknown property '{}' detected while parsing protocols",
+                "warning".yellow().bold(),
+                elem
+            ),
+        }
     }
 }
 
@@ -879,6 +953,7 @@ fn parse_service(
     s: &Table,
     protocols: &HashMap<String, Protocol>,
 ) -> Result<Service, CompilationError> {
+    warn_unknown_services_property(s);
     if !s.contains_key("protocol") {
         return Err(err_config!("service {} missing protocol", sid));
     }
@@ -936,6 +1011,21 @@ fn parse_service(
         protocol_refinement: opt_refine,
         provider,
     })
+}
+
+fn warn_unknown_services_property(s: &Table) {
+    for elem in s.keys() {
+        match elem.as_str() {
+            "protocol" => (),
+            "icmp_type" => (),
+            "icmp_codes" => (),
+            _ => println!(
+                "{}: unknown property '{}' detected while parsing services",
+                "warning".yellow().bold(),
+                elem
+            ),
+        }
+    }
 }
 
 /// Parse and do light error checking on the ICMP details (the icmp_type and icmp_codes).
