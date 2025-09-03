@@ -1,5 +1,6 @@
 //! config.rs - load/parse a ZPL configuration TOML file
 
+use colored::Colorize;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
@@ -160,6 +161,7 @@ pub fn load_config(path: &Path, ctx: &CompilationCtx) -> Result<Config, Compilat
 /// Parse config from the toml string `cstr`.
 pub fn parse_config(cstr: &str, ctx: &CompilationCtx) -> Result<Config, CompilationError> {
     let mut parser = ConfigParse::new_from_toml_str(cstr)?;
+    parser.warn_unknown_key();
     parser.parse(ctx)
 }
 
@@ -413,6 +415,25 @@ impl ConfigParse {
             ret.push(s);
         }
         Ok(ret)
+    }
+
+    fn warn_unknown_key(&self) {
+        for elem in self.ctoml.keys() {
+            match elem.as_str() {
+                "resolver" => (),
+                "nodes" => (),
+                "visa_service" => (),
+                "bootstrap" => (),
+                "trusted_services" => (),
+                "protocols" => (),
+                "services" => (),
+                _ => println!(
+                    "{}: unknown key '{}' detected while parsing config",
+                    "warning".yellow().bold(),
+                    elem
+                ),
+            }
+        }
     }
 }
 
