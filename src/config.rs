@@ -161,7 +161,7 @@ pub fn load_config(path: &Path, ctx: &CompilationCtx) -> Result<Config, Compilat
 /// Parse config from the toml string `cstr`.
 pub fn parse_config(cstr: &str, ctx: &CompilationCtx) -> Result<Config, CompilationError> {
     let mut parser = ConfigParse::new_from_toml_str(cstr)?;
-    parser.warn_unknown_key();
+    parser.warn_unknown_section();
     parser.parse(ctx)
 }
 
@@ -417,7 +417,7 @@ impl ConfigParse {
         Ok(ret)
     }
 
-    fn warn_unknown_key(&self) {
+    fn warn_unknown_section(&self) {
         for elem in self.ctoml.keys() {
             match elem.as_str() {
                 "resolver" => (),
@@ -428,7 +428,7 @@ impl ConfigParse {
                 "protocols" => (),
                 "services" => (),
                 _ => println!(
-                    "{}: unknown key '{}' detected while parsing config",
+                    "{}: unknown section '{}' detected while parsing config",
                     "warning".yellow().bold(),
                     elem
                 ),
