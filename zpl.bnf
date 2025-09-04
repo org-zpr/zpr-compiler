@@ -37,14 +37,20 @@
 <attribute-spec> ::= <name> |
                     "optional" ("tag" | "tags") <name> (<and-token> <name>)*
 
-# A <user-spec> must either be or be descended from the built-in "user" class.
-<user-spec> ::= <attribute-expr>* <class-name> 
+<user-spec> ::= <attribute-expr>* <user-class-name>
 
-# An <endpoint-spec> must either be or be descended from the built-in "endpoint" class.
-<endpoint-spec> ::= <attribute-expr>* <class-name> 
+# A <user-class-name> must either be or be descended from the built-in "user" class.
+<user-class-name> ::= <name> | <built-in-user-class-name>
 
-# A <service-spec> must either be or be descended from the built-in "service" class
-<service-spec> ::= <attribute-expr>* <class-name> 
+<endpoint-spec> ::= <attribute-expr>* <endpoint-class-name>
+
+# An <endpoint-class-name> must either be or be descended from the built-in "endpoint" class.
+<endpoint-class-name> ::= <name> | <built-in-endpoint-class-name>
+
+<service-spec> ::= <attribute-expr>* <service-class-name>
+
+# An <service-class-name> must either be or be descended from the built-in "endpoint" class.
+<service-class-name> ::= <name> | <built-in-service-class-name>
 
 <attribute-expr> ::= <attr-tag> | <attr-kv-pair> | <attr-key-presence>
 
@@ -66,8 +72,15 @@
 
 <class-name> ::= <built-in-class-name> | <name>
 
-<built-in-class-name> ::= "endpoint" | "user" | "service"  |
-                          "endpoints" | "users" | "services"
+<built-in-class-name> ::= <built-in-endpoint-class-name> |
+                          <built-in-service-class-name> |
+                          <built-in-user-class-name>
+
+<built-in-endpoint-class-name> ::= "endpoint" | "endpoints"
+
+<built-in-service-class-name> ::= "service" | "services"
+
+<built-in-user-class-name> ::= "user" | "users"
 
 <identifier> ::= <letter> (<letter> | <digit> | "-" | "_")*
 
