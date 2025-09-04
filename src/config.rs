@@ -1,6 +1,5 @@
 //! config.rs - load/parse a ZPL configuration TOML file
 
-use colored::Colorize;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
@@ -161,7 +160,7 @@ pub fn load_config(path: &Path, ctx: &CompilationCtx) -> Result<Config, Compilat
 /// Parse config from the toml string `cstr`.
 pub fn parse_config(cstr: &str, ctx: &CompilationCtx) -> Result<Config, CompilationError> {
     let mut parser = ConfigParse::new_from_toml_str(cstr)?;
-    parser.warn_unknown_section();
+    parser.warn_unknown_section(ctx)?;
     parser.parse(ctx)
 }
 
@@ -175,8 +174,8 @@ impl ConfigParse {
     }
 
     fn parse(&mut self, ctx: &CompilationCtx) -> Result<Config, CompilationError> {
-        let resolver = self.parse_resolver()?;
-        let nodes = self.parse_nodes()?;
+        let resolver = self.parse_resolver(ctx)?;
+        let nodes = self.parse_nodes(ctx)?;
         let visa_service = self.parse_visa_service(ctx)?;
         let bootstrap = self.parse_bootstrap(ctx)?;
         let trusted_services = self.parse_trusted_services(ctx)?;
@@ -208,7 +207,7 @@ impl ConfigParse {
     /// Parse the resolver section which is optional.  The defualt is just
     /// to have an `resolver.order` set to [hosts, dns].  The hosts section is optional, but
     /// if present is mapping of hostnames to IP addresses.
-    fn parse_resolver(&self) -> Result<Resolver, CompilationError> {
+    fn parse_resolver(&self, ctx: &CompilationCtx) -> Result<Resolver, CompilationError> {
         if !self.ctoml.contains_key("resolver") {
             return Ok(Resolver::default());
         }
@@ -219,13 +218,12 @@ impl ConfigParse {
             match elem.as_str() {
                 "order" => (),
                 "hosts" => (),
-                _ => println!(
-                    "{}: unknown section '{}' detected while parsing resolver",
-                    "warning".yellow().bold(),
-                    elem
-                ),
+                _ => ctx.warn(&format!(
+                    "unknown section '{elem}' detected while parsing resolver",
+                ))?,
             }
         }
+
         let mut order_vec = Vec::new();
         if !r.contains_key("order") {
             // Default order is hosts, dns
@@ -274,7 +272,7 @@ impl ConfigParse {
     }
 
     /// Parse all the nodes.<ID> sections. There must be at least one.
-    fn parse_nodes(&self) -> Result<HashMap<String, Node>, CompilationError> {
+    fn parse_nodes(&self, ctx: &CompilationCtx) -> Result<HashMap<String, Node>, CompilationError> {
         if !self.ctoml.contains_key("nodes") {
             return Err(err_config!("missing section: nodes"));
         }
@@ -293,6 +291,7 @@ impl ConfigParse {
                 node_id,
                 v.as_table()
                     .ok_or(err_config!("node {} is not a table", node_id))?,
+                ctx,
             )?;
             node_map.insert(node_id.to_string(), n);
         }
@@ -302,7 +301,7 @@ impl ConfigParse {
     /// Parse the very basic visa_service section.
     fn parse_visa_service(
         &mut self,
-        _ctx: &CompilationCtx,
+        ctx: &CompilationCtx,
     ) -> Result<VisaService, CompilationError> {
         if !self.ctoml.contains_key("visa_service") {
             return Err(err_config!("missing section: visa_service"));
@@ -313,11 +312,9 @@ impl ConfigParse {
         for elem in vs.keys() {
             match elem.as_str() {
                 "dock_node" => (),
-                _ => println!(
-                    "{}: unknown section '{}' detected while parsing visa_service",
-                    "warning".yellow().bold(),
-                    elem
-                ),
+                _ => ctx.warn(&format!(
+                    "unknown section '{elem}' detected while parsing visa_service",
+                ))?,
             }
         }
         if !vs.contains_key("dock_node") {
@@ -379,6 +376,7 @@ impl ConfigParse {
                 ts_id,
                 v.as_table()
                     .ok_or(err_config!("trusted_service {} is not a table", ts_id))?,
+                ctx,
             )?;
             trusted_services.push(ts);
         }
@@ -406,6 +404,7 @@ impl ConfigParse {
                 prot_id,
                 v.as_table()
                     .ok_or(err_config!("protocol {} is not a table", prot_id))?,
+                ctx,
             )?;
             protocols.insert(prot_id.to_string(), prot);
         }
@@ -432,13 +431,14 @@ impl ConfigParse {
                 v.as_table()
                     .ok_or(err_config!("service {} is not a table", sid))?,
                 protocols,
+                ctx,
             )?;
             ret.push(s);
         }
         Ok(ret)
     }
 
-    fn warn_unknown_section(&self) {
+    fn warn_unknown_section(&self, ctx: &CompilationCtx) -> Result<(), CompilationError> {
         for elem in self.ctoml.keys() {
             match elem.as_str() {
                 "resolver" => (),
@@ -448,13 +448,13 @@ impl ConfigParse {
                 "trusted_services" => (),
                 "protocols" => (),
                 "services" => (),
-                _ => println!(
-                    "{}: unknown section '{}' detected while parsing config",
-                    "warning".yellow().bold(),
-                    elem
-                ),
+                _ => ctx.warn(&format!(
+                    "unknown section '{elem}' detected while parsing config",
+                ))?,
             }
         }
+
+        Ok(())
     }
 }
 
@@ -466,8 +466,8 @@ fn require_key(ctx: &str, table: &Table, key: &str) -> Result<(), CompilationErr
 }
 
 /// Parse a single node table.
-fn parse_node(node_id: &str, node: &Table) -> Result<Node, CompilationError> {
-    warn_unknown_node_property(node);
+fn parse_node(node_id: &str, node: &Table, ctx: &CompilationCtx) -> Result<Node, CompilationError> {
+    warn_unknown_node_property(node, ctx)?;
     require_key(&format!("nodes.{}", node_id), node, "key")?;
     let key = node["key"]
         .as_str()
@@ -522,7 +522,7 @@ fn parse_node(node_id: &str, node: &Table) -> Result<Node, CompilationError> {
     })
 }
 
-fn warn_unknown_node_property(node: &Table) {
+fn warn_unknown_node_property(node: &Table, ctx: &CompilationCtx) -> Result<(), CompilationError> {
     for elem in node.keys() {
         match elem.as_str() {
             "key" => (),
@@ -530,13 +530,13 @@ fn warn_unknown_node_property(node: &Table) {
             "zpr_address" => (),
             "interfaces" => (),
             "in1" => (),
-            _ => println!(
-                "{}: unknown property '{}' detected while parsing node",
-                "warning".yellow().bold(),
-                elem
-            ),
+            _ => ctx.warn(&format!(
+                "unknown property '{elem}' detected while parsing node",
+            ))?,
         }
     }
+
+    Ok(())
 }
 
 fn parse_provider(ctx: &str, table: &Table) -> Result<Vec<(String, String)>, CompilationError> {
@@ -628,8 +628,12 @@ fn tuples_to_tuple_str_vec(
 }
 
 // Parse an individual trusted_service table.
-fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, CompilationError> {
-    warn_unknown_ts_property(ts);
+fn parse_trusted_service(
+    ts_id: &str,
+    ts: &Table,
+    ctx: &CompilationCtx,
+) -> Result<TrustedService, CompilationError> {
+    warn_unknown_ts_property(ts, ctx)?;
     // The "api" value is optional for the default trusted service.
     let mut is_default = false;
     let api = if ts.contains_key("api") {
@@ -751,7 +755,7 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
     })
 }
 
-fn warn_unknown_ts_property(ts: &Table) {
+fn warn_unknown_ts_property(ts: &Table, ctx: &CompilationCtx) -> Result<(), CompilationError> {
     for elem in ts.keys() {
         match elem.as_str() {
             "cert_path" => (),
@@ -759,13 +763,14 @@ fn warn_unknown_ts_property(ts: &Table) {
             "client" => (),
             "returns_attributes" => (),
             "provider" => (),
-            _ => println!(
-                "{}: unknown property '{}' detected while parsing trusted_services",
-                "warning".yellow().bold(),
-                elem
-            ),
+            "prefix" => (),
+            "identity_attributes" => (),
+            _ => ctx.warn(&format!(
+                "unknown property '{elem}' detected while parsing trusted_services",
+            ))?,
         }
     }
+    Ok(())
 }
 
 /// Parse table entry `key` as a string array.  If key is not found returns empty vector.
@@ -846,8 +851,12 @@ fn check_attr_keys_domain_and_uniqueness(
 /// - port (optional)
 /// - icmp_type
 /// - icmp_codes
-fn parse_protocol(prot_label: &str, prot: &Table) -> Result<Protocol, CompilationError> {
-    warn_unknown_prot_property(prot);
+fn parse_protocol(
+    prot_label: &str,
+    prot: &Table,
+    ctx: &CompilationCtx,
+) -> Result<Protocol, CompilationError> {
+    warn_unknown_prot_property(prot, ctx)?;
     if !prot.contains_key("l4protocol") {
         return Err(err_config!(
             "protocol {} missing key 'l4protocol'",
@@ -890,20 +899,21 @@ fn parse_protocol(prot_label: &str, prot: &Table) -> Result<Protocol, Compilatio
     }
 }
 
-fn warn_unknown_prot_property(prot: &Table) {
+fn warn_unknown_prot_property(prot: &Table, ctx: &CompilationCtx) -> Result<(), CompilationError> {
     for elem in prot.keys() {
         match elem.as_str() {
             "l4protocol" => (),
             "port" => (),
             "icmp_type" => (),
             "icmp_codes" => (),
-            _ => println!(
-                "{}: unknown property '{}' detected while parsing protocols",
-                "warning".yellow().bold(),
-                elem
-            ),
+            "l7protocol" => (),
+            "protocol" => (),
+            _ => ctx.warn(&format!(
+                "unknown property '{elem}' detected while parsing protocols",
+            ))?,
         }
     }
+    Ok(())
 }
 
 fn parse_port_and_or_icmp(
@@ -952,8 +962,9 @@ fn parse_service(
     sid: &str,
     s: &Table,
     protocols: &HashMap<String, Protocol>,
+    ctx: &CompilationCtx,
 ) -> Result<Service, CompilationError> {
-    warn_unknown_services_property(s);
+    warn_unknown_services_property(s, ctx)?;
     if !s.contains_key("protocol") {
         return Err(err_config!("service {} missing protocol", sid));
     }
@@ -1013,19 +1024,20 @@ fn parse_service(
     })
 }
 
-fn warn_unknown_services_property(s: &Table) {
+fn warn_unknown_services_property(s: &Table, ctx: &CompilationCtx) -> Result<(), CompilationError> {
     for elem in s.keys() {
         match elem.as_str() {
             "protocol" => (),
             "icmp_type" => (),
             "icmp_codes" => (),
-            _ => println!(
-                "{}: unknown property '{}' detected while parsing services",
-                "warning".yellow().bold(),
-                elem
-            ),
+            "port" => (),
+            "provider" => (),
+            _ => ctx.warn(&format!(
+                "unknown property '{elem}' detected while parsing services",
+            ))?,
         }
     }
+    Ok(())
 }
 
 /// Parse and do light error checking on the ICMP details (the icmp_type and icmp_codes).
@@ -1105,7 +1117,7 @@ mod test {
         [resolver]
         "#;
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let r = cparser.parse_resolver();
+        let r = cparser.parse_resolver(&CompilationCtx::new(false, false));
         assert!(r.is_ok());
         let r = r.unwrap();
         assert_eq!(r.order.len(), 2);
@@ -1124,7 +1136,7 @@ mod test {
         "n1.foo" = "5.6.7.8"
         "#;
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let r = cparser.parse_resolver();
+        let r = cparser.parse_resolver(&CompilationCtx::new(false, false));
         assert!(r.is_ok());
         let r = r.unwrap();
         assert_eq!(r.order.len(), 3);
@@ -1151,7 +1163,7 @@ mod test {
         eth1.netaddr = "foo.addr:9000"
         "#;
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let nodes = cparser.parse_nodes();
+        let nodes = cparser.parse_nodes(&CompilationCtx::new(false, false));
         assert!(nodes.is_ok(), "{:?}", nodes);
         let nodes = nodes.unwrap();
         assert_eq!(nodes.len(), 1);
@@ -1194,7 +1206,7 @@ mod test {
         eth1.netaddr = "foo.addr:9000"
         "#;
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let nodes = cparser.parse_nodes();
+        let nodes = cparser.parse_nodes(&CompilationCtx::new(false, false));
         assert!(nodes.is_err());
         let err = nodes.unwrap_err();
         assert!(err.to_string().contains("is reserved"));
