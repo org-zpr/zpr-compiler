@@ -431,6 +431,9 @@ impl PolicyBuilder {
         for svc in &fabric.services {
             // Any agent that can access a service can connect
             for clipol in &svc.client_policies {
+                if clippol.never_allow {
+                    continue; // obviously we don't want you to connect if you only appear in a deny policy.
+                }
                 if !clipol.access_only {
                     let pconnect = polio::Connect {
                         attr_exprs: self.attr_list_to_attrexpr(&clipol.cli_condition),
