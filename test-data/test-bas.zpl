@@ -2,6 +2,18 @@ allow clearance:classified government users to access classified
 services.
 
 
+# test
+define database as a service with user.bas_id:1234.
+define employee as a user with user.bas_id.
+
+allow color:red employees to access classified databases on tint:sales endpoints.
+
+allow endpoint.zpr.adapter.cn: users to access classified services.
+
+
+# FIXME?
+# allow classified services to access database.
+
 # ZPL author must define any auth services and ensure that
 # the service name is present in the configuration.
 

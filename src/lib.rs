@@ -20,6 +20,7 @@ pub mod errors;
 mod fabric;
 mod fabric_util;
 mod lex;
+mod never;
 mod parser;
 pub mod policybuilder;
 pub mod protocols;

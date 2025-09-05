@@ -58,6 +58,9 @@ pub struct FabricNode {
 
 #[derive(Debug, Clone, Default)]
 pub struct ClientPolicy {
+    /// If true, this policy denies access
+    pub never_allow: bool,
+
     /// If true, this policy is only for access, not for setting up a connection
     pub access_only: bool,
 
@@ -401,7 +404,7 @@ impl Fabric {
             format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT),
         );
         let vss_id = self.add_builtin_service(&svc_name, &vss_prot, &provider_attrs)?;
-        self.add_condition_to_service(&vss_id, &vs_provider_attrs, false)?;
+        self.add_condition_to_service(false, &vss_id, &vs_provider_attrs, false)?;
         Ok(())
     }
 
@@ -409,6 +412,7 @@ impl Fabric {
     /// fabric service ID.
     pub fn add_condition_to_service(
         &mut self,
+        never_allow: bool,
         service_id: &str,
         attrs: &[Attribute],
         access_only: bool,
@@ -423,6 +427,7 @@ impl Fabric {
         }
         let svc = svc.unwrap();
         svc.client_policies.push(ClientPolicy {
+            never_allow: never_allow,
             cli_condition: attrs.to_vec(),
             svc_condition: Vec::new(),
             access_only,
@@ -433,6 +438,7 @@ impl Fabric {
     /// Add a condition (aka plicy aka rule) to all services -- EXCEPT nodes, trusted services, and visa services.
     pub fn add_condition_to_all_services(
         &mut self,
+        never_allow: bool,
         cli_attrs: &[Attribute],
         svc_attrs: &[Attribute],
     ) -> Result<(), CompilationError> {
@@ -446,6 +452,7 @@ impl Fabric {
                     .cloned()
                     .collect();
                 svc.client_policies.push(ClientPolicy {
+                    never_allow: never_allow,
                     access_only: false, // TODO: this is a guess
                     cli_condition: cli_attrs.to_vec(),
                     svc_condition: unique_svc_attrs.to_vec(),

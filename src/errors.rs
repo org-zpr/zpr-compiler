@@ -41,6 +41,9 @@ pub enum CompilationError {
     AllowStmtParseError(String, usize, usize),
 
     #[error("[ line {1}, column {2} ]  {0}")]
+    NeverStmtParseError(String, usize, usize),
+
+    #[error("[ line {1}, column {2} ]  {0}")]
     DefineStmtParseError(String, usize, usize),
 
     #[error("[ line {1}, column {2} ]  syntax error in {0}")]

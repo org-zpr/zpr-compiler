@@ -143,7 +143,11 @@ fn main() {
     if !pol.policies.is_empty() {
         print_section_hdr("COMMUNICATION POLICIES");
         for (i, cp) in pol.policies.iter().enumerate() {
-            println!("policy {}", format!("{}", i + 1).yellow());
+            print!("policy {}", format!("{}", i + 1).yellow());
+            if !cp.allow {
+                print!(" {}", "DENY".red().bold());
+            }
+            println!();
             println!("     service_id: {}", cp.service_id.yellow());
             println!("             id: {}", cp.id.yellow());
             println!("          scope: {}", scopes_to_string(&cp.scope).yellow());

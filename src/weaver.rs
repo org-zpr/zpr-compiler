@@ -1,8 +1,7 @@
 //! weaver.rs - Poetically named module that can "weave" a "fabric" from a ZPL policy and configuration.
 
-use std::collections::{HashMap, HashSet};
-
 use base64::prelude::*;
+use std::collections::{HashMap, HashSet};
 
 use crate::compilation::Compilation;
 use crate::config_api::{ConfigApi, ConfigItem};
@@ -12,7 +11,7 @@ use crate::errors::CompilationError;
 use crate::fabric::{Fabric, ServiceType};
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
 use crate::protocols::{IanaProtocol, Protocol, ZPR_OAUTH_RSA, ZPR_VALIDATION_2};
-use crate::ptypes::{Attribute, Class, ClassFlavor, FPos, Policy};
+use crate::ptypes::{AllowClause, Attribute, Class, ClassFlavor, FPos, Policy};
 use crate::zpl;
 
 pub struct Weaver {
@@ -67,7 +66,8 @@ pub fn weave(
 
     weaver.init_services(&class_idx, policy, config, ctx)?;
     weaver.init_nodes(config)?;
-    weaver.add_client_policies(&class_idx, policy, config)?;
+    weaver.add_client_deny_policies(&class_idx, policy, config)?;
+    weaver.add_client_allow_policies(&class_idx, policy, config)?;
     // By the time we get here, we have resolved all attributes and so know which trusted
     // services are in play.
     weaver.add_trusted_services(config, ctx)?;
@@ -148,7 +148,7 @@ impl Weaver {
         // we don't care about individual node names.
         let vs_access_attrs = vec![Attribute::zpr_internal_attr(zpl::KATTR_ROLE, "node")];
         self.fabric
-            .add_condition_to_service(&fab_svc_id, &vs_access_attrs, true)?;
+            .add_condition_to_service(false, &fab_svc_id, &vs_access_attrs, true)?;
 
         // Now add a service for the admin HTTPS API.
         let admin_api_protocol = Protocol::new_l4_with_port(
@@ -192,8 +192,12 @@ impl Weaver {
                 config,
             )?;
             if !resolved_attrs.is_empty() {
-                self.fabric
-                    .add_condition_to_service(&fab_admin_svc_id, &resolved_attrs, false)?;
+                self.fabric.add_condition_to_service(
+                    false,
+                    &fab_admin_svc_id,
+                    &resolved_attrs,
+                    false,
+                )?;
                 condition_count += 1;
             }
         }
@@ -216,7 +220,6 @@ impl Weaver {
         policy: &Policy,
         config: &ConfigApi,
     ) -> Result<(), CompilationError> {
-        let mut svc_id = usize::MAX;
         for define in &policy.defines {
             if define.flavor != ClassFlavor::Service {
                 continue;
@@ -226,12 +229,10 @@ impl Weaver {
             //
             // TODO: If there are no allow rules that permit access to the service then
             // maybe we don't even allow it to connect?
-
             let mut attrs = Vec::new();
             let svc_class_attrs = attrs_for_class(class_idx, &define.name);
             attrs.extend_from_slice(&svc_class_attrs);
-            self.add_service(class_idx, define, &attrs, svc_id, config)?;
-            svc_id -= 1;
+            self.add_service(class_idx, define, &attrs, define.class_id, config)?;
         }
         Ok(())
     }
@@ -351,6 +352,14 @@ impl Weaver {
                 continue;
             }
 
+            let svc_id = match class_idx.get(&ac.service.class) {
+                Some(cls) => cls.class_id,
+                None => panic!(
+                    "service class {} not found in class index",
+                    ac.service.class
+                ),
+            };
+
             let mut attrs = Vec::new();
 
             let svc_class_attrs = attrs_for_class(class_idx, &ac.service.class);
@@ -359,7 +368,7 @@ impl Weaver {
             let svc_class = class_idx
                 .get(&ac.service.class)
                 .expect("service class not found in class index");
-            self.add_service(class_idx, svc_class, &attrs, ac.id, config)?;
+            self.add_service(class_idx, svc_class, &attrs, svc_id, config)?;
         }
         Ok(())
     }
@@ -485,7 +494,7 @@ impl Weaver {
 
     /// Process the ZPL policy into conditions for accessing fabric services.
     /// Must be done after initializing the services.
-    fn add_client_policies(
+    fn add_client_allow_policies(
         &mut self,
         class_idx: &HashMap<String, &Class>,
         policy: &Policy,
@@ -493,7 +502,28 @@ impl Weaver {
     ) -> Result<(), CompilationError> {
         // Every allow is an access condition (aka rule, aka policy).
         // We need the attributes from the user and device clauses.
-        for ac in &policy.allows {
+        self.add_client_policies_allow_or_deny(&policy.allows, false, class_idx, config)
+    }
+
+    fn add_client_deny_policies(
+        &mut self,
+        class_idx: &HashMap<String, &Class>,
+        policy: &Policy,
+        config: &ConfigApi,
+    ) -> Result<(), CompilationError> {
+        // Every allow is an access condition (aka rule, aka policy).
+        // We need the attributes from the user and device clauses.
+        self.add_client_policies_allow_or_deny(&policy.nevers, true, class_idx, config)
+    }
+
+    fn add_client_policies_allow_or_deny(
+        &mut self,
+        allow_clause: &[AllowClause],
+        never_allow: bool,
+        class_idx: &HashMap<String, &Class>,
+        config: &ConfigApi,
+    ) -> Result<(), CompilationError> {
+        for ac in allow_clause {
             if ac.service.class == zpl::DEF_CLASS_VISA_SERVICE_NAME {
                 // Visa service is handled separately.
                 continue;
@@ -558,23 +588,37 @@ impl Weaver {
 
             if ac.service.class == zpl::DEF_CLASS_SERVICE_NAME {
                 // Add to all services (not nodes or trusted services or visa service)
-                self.fabric
-                    .add_condition_to_all_services(&required_attrs, &svc_required_attrs)?;
+                self.fabric.add_condition_to_all_services(
+                    never_allow,
+                    &required_attrs,
+                    &svc_required_attrs,
+                )?;
             } else {
-                let svc_id = match self.allowid_to_fab_svc.get(&ac.id) {
+                let svc_id = match class_idx.get(&ac.service.class) {
+                    Some(cls) => cls.class_id,
+                    None => panic!(
+                        "service class {} not found in class index",
+                        ac.service.class
+                    ),
+                };
+                let fab_svc_id = match self.allowid_to_fab_svc.get(&svc_id) {
                     Some(s) => s,
                     None => {
                         // programming error
                         panic!(
-                            "error - allow clause id {} not found in map, allow = {}",
-                            ac.id, ac
+                            "error - service {} with id {} not found in map, allow = {}",
+                            ac.service.class, svc_id, ac
                         );
                     }
                 };
                 // Note we ignore any service attributes here. I think those are already handled in the
                 // service class definition.
-                self.fabric
-                    .add_condition_to_service(svc_id, &required_attrs, false)?;
+                self.fabric.add_condition_to_service(
+                    never_allow,
+                    fab_svc_id,
+                    &required_attrs,
+                    false,
+                )?;
             }
         }
         Ok(())
@@ -773,7 +817,7 @@ impl Weaver {
                 zpl::VISA_SERVICE_CN,
             )];
             self.fabric
-                .add_condition_to_service(&ts_name, &vs_access_attrs, true)?;
+                .add_condition_to_service(false, &ts_name, &vs_access_attrs, true)?;
         }
         Ok(())
     }
@@ -1058,7 +1102,7 @@ mod test {
         // We are only calling init_services which does not create policies anyway.
         // Will only notice that the 'foo' service is referenced.
         let a_foo = AllowClause {
-            id: 1,
+            clause_id: 1,
             endpoint: Clause::new("endpoint", Token::default()),
             user: Clause::new("user", Token::default()),
             service: Clause::new("foo", Token::default()),
@@ -1078,6 +1122,7 @@ mod test {
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
             extensible: true,
+            class_id: 100,
         };
         class_idx.insert("foo".to_string(), &foo_cls);
 

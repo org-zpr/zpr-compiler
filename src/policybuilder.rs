@@ -319,6 +319,7 @@ impl PolicyBuilder {
                     cli_conditions: Vec::new(),
                     svc_conditions: Vec::new(),
                     constraints: Vec::new(), // TODO
+                    allow: !policy.never_allow,
                 };
                 if !policy.cli_condition.is_empty() {
                     let exprs = self.attr_list_to_attrexpr(&policy.cli_condition);

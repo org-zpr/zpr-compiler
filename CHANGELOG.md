@@ -1,5 +1,13 @@
 # The ZPR ZPL Compiler Changelog
 
+## pending
+
+- (empty)
+
+## [0.7.0] - 2025-09-05
+
+- Support for deny statements in the form of "never allow...".
+
 ## [0.6.2] - 2025-08-29
 
 - Quoting and escaping now in line with ZRFC-15. That is you can quote
@@ -67,6 +75,7 @@ repository.
 
 
 
+[0.7.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.7.0
 [0.6.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.6.0
 [0.5.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.5.0
 [0.4.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.4.0
