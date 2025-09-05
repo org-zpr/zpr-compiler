@@ -144,7 +144,7 @@ pub fn parse_allow(
         None => {
             // end of tokens!
             return Err(CompilationError::AllowStmtParseError(
-                "expected a TO or WITH not EOF".to_string(),
+                "expected a TO or ON not EOF".to_string(),
                 parse_state.root_tok.line,
                 parse_state.root_tok.col,
             ));
@@ -186,7 +186,7 @@ pub fn parse_allow(
         TokenType::To => { /* continue to parse service clause */ }
         _ => {
             // We already peek'd the iterator above, so this case should not happen.
-            panic!("assertion fails - expected WITH or TO token");
+            panic!("assertion fails - expected ON or TO token");
         }
     }
 
