@@ -8,6 +8,7 @@ use crate::zplstr::{ZPLStr, ZPLStrBuilder};
 #[derive(Debug, PartialEq, Clone)]
 pub enum TokenType {
     Undefined, // default value, never parsed
+    Never,
     Allow,
     Define,
     With,
@@ -49,6 +50,7 @@ impl Token {
         }
         let ls = s.as_atom().to_lowercase();
         let tok = match ls.as_str() {
+            "never" => TokenType::Never,
             "allow" => TokenType::Allow,
             "define" => TokenType::Define,
             "with" => TokenType::With,
@@ -589,5 +591,16 @@ mod test {
         assert_eq!(ontok.tt, super::TokenType::On);
         let ontok = &tokens[8];
         assert_eq!(ontok.tt, super::TokenType::On);
+    }
+
+    #[test]
+    fn test_keyword_never() {
+        let zpl = "never allow users on green endpoints to access services";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        println!("{:?}", tokens);
+        assert_eq!(tokens.len(), 9);
+        let nevtok = &tokens[0];
+        assert_eq!(nevtok.tt, super::TokenType::Never);
     }
 }

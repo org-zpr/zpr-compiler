@@ -13,6 +13,7 @@ use crate::zpl;
 pub struct Policy {
     pub digest: Option<Digest>,
     pub defines: Vec<Class>,
+    pub nevers: Vec<AllowClause>,
     pub allows: Vec<AllowClause>,
 }
 
@@ -44,7 +45,7 @@ impl From<&Token> for FPos {
 /// A parsed "allow" statement.
 #[derive(Clone, Debug)]
 pub struct AllowClause {
-    pub id: usize, // Within a given zpl policy, each allow clause gets a unique id.
+    pub clause_id: usize, // Within a given zpl policy, each allow clause gets a unique id.
     pub endpoint: Clause,
     pub user: Clause,
     pub service: Clause,
@@ -55,7 +56,18 @@ impl fmt::Display for AllowClause {
         write!(
             f,
             "[{}] ALLOW {}\n   WITH {}\n      TO ACCESS {}",
-            self.id, self.endpoint, self.user, self.service
+            self.clause_id, self.endpoint, self.user, self.service
+        )
+    }
+}
+
+impl AllowClause {
+    /// Default `fmt` for allow assumes the allow is just a normal allow.
+    /// Use this debug stringer to get a NEVER thrown in to the output.
+    pub fn to_string_never(&self) -> String {
+        format!(
+            "[{}] NEVER ALLOW {}\n   WITH {}\n      TO ACCESS {}",
+            self.clause_id, self.endpoint, self.user, self.service
         )
     }
 }
@@ -134,6 +146,7 @@ pub struct Class {
     pub pos: FPos, // location of the define token
     pub with_attrs: Vec<Attribute>,
     pub extensible: bool,
+    pub class_id: usize,
     // TODO: withouts
 }
 
@@ -156,6 +169,7 @@ impl Class {
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
             extensible: true,
+            class_id: usize::MAX - 1,
         }
     }
     pub fn default_service() -> Class {
@@ -167,6 +181,7 @@ impl Class {
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
             extensible: true,
+            class_id: usize::MAX - 2,
         }
     }
     pub fn default_visa_service() -> Class {
@@ -178,6 +193,7 @@ impl Class {
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
             extensible: false,
+            class_id: usize::MAX - 3,
         }
     }
     pub fn default_endpoint() -> Class {
@@ -189,6 +205,7 @@ impl Class {
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
             extensible: true,
+            class_id: usize::MAX - 4,
         }
     }
     pub fn is_builtin(&self) -> bool {

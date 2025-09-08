@@ -26,9 +26,9 @@ impl ParseAllowState {
     }
 
     /// This consumes all the clauses or panics.
-    fn to_allow_clause(&mut self, id: usize) -> AllowClause {
+    fn to_allow_clause(&mut self, clause_id: usize) -> AllowClause {
         AllowClause {
-            id,
+            clause_id,
             endpoint: self
                 .endpoint_clause
                 .take()

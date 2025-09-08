@@ -10,7 +10,11 @@ use crate::putil;
 use crate::zpl;
 
 // First token exists and is a DEFINE which is checked by the caller.
-pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationError> {
+// `statement_num` must be unique for each statement.
+pub fn parse_define(
+    define_statement: &[Token],
+    statement_num: usize,
+) -> Result<Class, CompilationError> {
     if define_statement.is_empty() {
         panic!("parse_define called with empty statement");
     }
@@ -86,6 +90,7 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
         pos: root_tok.into(),
         with_attrs: Vec::new(),
         extensible: true,
+        class_id: statement_num,
     };
 
     match tokens.peek() {
@@ -351,7 +356,7 @@ mod test {
         let statement = "define marketing-emp as a user with tag full-time";
         let tz = tokenize_str(statement, &CompilationCtx::default()).unwrap();
         let tokens = tz.tokens;
-        let class = parse_define(&tokens).unwrap();
+        let class = parse_define(&tokens, 1).unwrap();
         assert_eq!(class.name, "marketing-emp");
     }
 
@@ -367,7 +372,7 @@ mod test {
         for statement in invalids {
             let tz = tokenize_str(statement, &ctx).unwrap();
             let tokens = tz.tokens;
-            match parse_define(&tokens) {
+            match parse_define(&tokens, 1) {
                 Ok(_) => panic!("should have failed on: '{}'", statement),
                 Err(_) => {}
             }

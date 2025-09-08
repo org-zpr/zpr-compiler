@@ -5,6 +5,7 @@ use crate::context::CompilationCtx;
 use crate::define::{parse_define, resolve_class_flavors};
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
+use crate::never::parse_never;
 use crate::ptypes::{AttrDomain, Class, Policy};
 
 #[derive(Default)]
@@ -22,6 +23,7 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
     // Periods are still optional, but if you use them incorrectly they parser will
     // complain.
     let mut in_statement = false;
+    let mut in_never: bool = false;
     for tok in tokens {
         match tok.tt {
             TokenType::Period => {
@@ -30,12 +32,17 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
                     current_statement = Vec::new();
                 }
                 in_statement = false;
+                in_never = false;
             }
-            TokenType::Allow | TokenType::Define => {
+            TokenType::Allow if in_never => {
+                current_statement.push(tok);
+            }
+            TokenType::Allow | TokenType::Define | TokenType::Never => {
                 if !current_statement.is_empty() {
                     statements.push(current_statement);
                     current_statement = Vec::new();
                 }
+                in_never = tok.tt == TokenType::Never;
                 current_statement.push(tok);
                 in_statement = true;
             }
@@ -76,9 +83,9 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
     }
 
     // Define statements create classes.
-    for statement in &statements {
+    for (i, statement) in statements.iter().enumerate() {
         if statement[0].tt == TokenType::Define {
-            let class = parse_define(statement)?;
+            let class = parse_define(statement, i + 1)?;
 
             // It is an error to redefine a class.
             if classes.contains_key(&class.name) || class_index.contains_key(&class.name) {
@@ -112,6 +119,17 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
                     class.pos.col,
                 ));
             }
+        }
+    }
+
+    // Next parse all the nevers.
+    for (i, statement) in statements.iter().enumerate() {
+        if statement[0].tt == TokenType::Never {
+            let never = parse_never(statement, i + 1, &class_index, &classes)?;
+            if ctx.verbose {
+                println!("{}", never.to_string_never());
+            }
+            policy.nevers.push(never);
         }
     }
 
@@ -425,6 +443,28 @@ allow marketing-emps to access role:marketing services
                     );
                 }
             };
+        }
+    }
+
+    #[test]
+    fn test_base_never() {
+        let valids = vec!["never allow color:green users to access services"];
+        let ctx = CompilationCtx::default();
+        for valid in valids {
+            let tokens: Result<Tokenization, CompilationError> =
+                tokenize_str(valid, &ctx).or_else(|e| {
+                    panic!("failed to tokenize '{}': {:?}", valid, e);
+                });
+            let toks = tokens.unwrap().tokens;
+            assert_eq!(7, toks.len());
+            let pol = match parse(toks, &ctx) {
+                Ok(policy) => policy,
+                Err(e) => {
+                    panic!("failed to parse '{}': {:?}", valid, e);
+                }
+            };
+            assert_eq!(pol.policy.nevers.len(), 1);
+            assert_eq!(pol.policy.allows.len(), 0);
         }
     }
 }
