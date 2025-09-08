@@ -5,7 +5,7 @@ use crate::ptypes::{AllowClause, Class};
 use std::collections::HashMap;
 
 /// A "never" statement is just an allow statement preceeded by the token
-/// "never".
+/// "never".  Caller must ensure first token is "never".
 pub fn parse_never(
     never_statement: &[Token],
     statement_id: usize,
@@ -16,13 +16,20 @@ pub fn parse_never(
         panic!("parse_never called with empty statement");
     }
     if never_statement[0].tt != TokenType::Never {
-        panic!("parse_never called with non-ALLOW statement");
+        panic!("parse_never called with non-NEVER statement");
     }
     if never_statement.len() < 3 {
         return Err(CompilationError::NeverStmtParseError(
             "incomplete never statement".to_string(),
             never_statement[0].line,
             never_statement[0].col,
+        ));
+    }
+    if never_statement[1].tt != TokenType::Allow {
+        return Err(CompilationError::NeverStmtParseError(
+            "expected 'allow' after 'never'".to_string(),
+            never_statement[1].line,
+            never_statement[1].col,
         ));
     }
     parse_allow(
