@@ -1,5 +1,4 @@
-use ::polio;
-use ::polio::{Policy, PolicyContainer};
+use polio::polio;
 use clap::Parser;
 use colored::Colorize;
 use std::net::IpAddr;
@@ -35,8 +34,8 @@ fn main() {
     let fname = cli.zpl.display().to_string();
     let encoded = std::fs::read(cli.zpl).expect("failed to read binary policy file");
     let encoded_buf = Bytes::from(encoded);
-    let container: PolicyContainer =
-        PolicyContainer::decode(encoded_buf).expect("failed to decode binary policy file");
+    let container: polio::PolicyContainer =
+        polio::PolicyContainer::decode(encoded_buf).expect("failed to decode binary policy file");
 
     let (current_version, version_mismatch) = {
         let (major, minor, patch) = get_compiler_version();
@@ -78,7 +77,7 @@ fn main() {
     println!();
 
     let encoded_buf = Bytes::from(container.policy);
-    let pol: Policy = Policy::decode(encoded_buf).expect("failed to decode policy");
+    let pol: polio::Policy = polio::Policy::decode(encoded_buf).expect("failed to decode policy");
 
     print!(
         "       connection rules: {:>3}",

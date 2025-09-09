@@ -1,4 +1,4 @@
-use ::polio;
+use polio::polio;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 

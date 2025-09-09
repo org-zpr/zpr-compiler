@@ -1,6 +1,6 @@
 //! policybuilder.rs - Build a protocol buffer policy from the fabric.
 
-use ::polio;
+use polio::polio;
 use chrono::prelude::*;
 use std::collections::HashMap;
 use std::env;

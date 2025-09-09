@@ -103,6 +103,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
+name = "capnp"
+version = "0.21.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f62fcad97587224e2a1bd12ec1c7c0e95b93cefd285763a174cf1b34048c6437"
+dependencies = [
+ "embedded-io",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -203,6 +212,12 @@ name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
+
+[[package]]
+name = "embedded-io"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
 
 [[package]]
 name = "equivalent"
@@ -765,7 +780,7 @@ dependencies = [
 
 [[package]]
 name = "zplc"
-version = "0.6.2"
+version = "0.7.0"
 dependencies = [
  "base64",
  "bytes",
@@ -785,7 +800,9 @@ dependencies = [
 
 [[package]]
 name = "zpr-policy"
-version = "0.7.0"
+version = "0.9.0"
+source = "git+https://github.com/org-zpr/zpr-policy-rs.git?tag=v0.8.1#f3a091d6f8ddc08c586ca1cfa71c3b641900f548"
 dependencies = [
+ "capnp",
  "prost",
 ]
