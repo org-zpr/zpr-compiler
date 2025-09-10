@@ -178,6 +178,13 @@ impl Compilation {
     }
 }
 
+#[derive(Debug, Default)]
+pub enum OutputFormat {
+    #[default]
+    V1,
+    V2,
+}
+
 /// The entry point for the compilation process, this builder is used to configure
 /// the various settings for the compiler.
 #[derive(Default)]
@@ -190,6 +197,7 @@ pub struct CompilationBuilder {
     parse_only: bool,
     output_directory: Option<PathBuf>,
     out_filename: Option<String>,
+    output_format: OutputFormat,
 }
 
 impl CompilationBuilder {
@@ -240,6 +248,11 @@ impl CompilationBuilder {
 
     pub fn output_filename(mut self, out_filename: &str) -> Self {
         self.out_filename = Some(out_filename.into());
+        self
+    }
+
+    pub fn output_format(mut self, format: OutputFormat) -> Self {
+        self.output_format = format;
         self
     }
 

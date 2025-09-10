@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 base64 = "0.22.1"
 bytes = "1.10.1"
+capnp = "0.21.5"
 chrono = "0.4.39"
 clap = { version = "4.5.23", features = ["derive"] }
 colored = "3.0.0"

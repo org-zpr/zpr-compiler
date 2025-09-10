@@ -784,6 +784,7 @@ version = "0.7.0"
 dependencies = [
  "base64",
  "bytes",
+ "capnp",
  "chrono",
  "clap",
  "colored",

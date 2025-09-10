@@ -22,6 +22,7 @@ mod fabric_util;
 mod lex;
 mod never;
 mod parser;
+pub mod policybinary;
 pub mod policybuilder;
 pub mod protocols;
 mod ptypes;
