@@ -2,9 +2,10 @@ use ::polio::policy_capnp;
 use capnp::message::HeapAllocator;
 use std::collections::HashMap;
 
+use crate::compiler::get_compiler_version;
 use crate::errors::CompilationError;
 use crate::fabric::ServiceType; // TODO: remove refs to fabric
-use crate::policywriter::{PFlags, PolicyWriter, TSType};
+use crate::policywriter::{PFlags, PolicyContainer, PolicyWriter, TSType};
 use crate::protocols::Protocol;
 use crate::ptypes::Attribute; // TODO: remove refs to fabric
 
@@ -17,6 +18,9 @@ pub struct PolicyBinaryV2<'a> {
 pub struct PbV2Memory {
     policy_msg: Box<::capnp::message::Builder<HeapAllocator>>,
 }
+
+#[derive(Default)]
+pub struct PolicyContainerV2 {}
 
 impl PbV2Memory {
     pub fn new() -> PbV2Memory {
@@ -32,6 +36,36 @@ impl PolicyBinaryV2<'_> {
             .init_root::<policy_capnp::policy::Builder>();
 
         PolicyBinaryV2 { policy }
+    }
+}
+
+impl PolicyContainer for PolicyContainerV2 {
+    fn contain_policy(
+        &self,
+        policy_data: Vec<u8>,
+        signature: Option<Vec<u8>>,
+    ) -> Result<Vec<u8>, CompilationError> {
+        let mut container_msg = Box::new(::capnp::message::Builder::new_default());
+        let mut container = container_msg.init_root::<policy_capnp::policy_container::Builder>();
+        let (major, minor, patch) = get_compiler_version();
+        container.set_zplc_ver_major(major);
+        container.set_zplc_ver_minor(minor);
+        container.set_zplc_ver_patch(patch);
+        container.set_policy(policy_data.as_slice());
+        if let Some(sig) = signature {
+            container.set_signature(sig.as_slice());
+        };
+        let mut container_bytes: Vec<u8> = Vec::new();
+        match capnp::serialize::write_message(&mut container_bytes, &container_msg) {
+            Err(e) => {
+                return Err(CompilationError::EncodingError(format!(
+                    "failed to serialize policy container: {}",
+                    e
+                )));
+            }
+            Ok(_) => {}
+        }
+        Ok(container_bytes)
     }
 }
 

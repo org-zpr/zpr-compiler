@@ -10,6 +10,7 @@ use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
 use crate::policybinaryv1::{PolicyBinaryV1, PolicyContainerV1};
+use crate::policybinaryv2::{PbV2Memory, PolicyBinaryV2, PolicyContainerV2};
 use crate::policybuilder::PolicyBuilder;
 use crate::policywriter::PolicyContainer;
 use crate::weaver::weave;
@@ -23,6 +24,8 @@ pub struct Compilation {
     pub output_file: PathBuf,
     pub parse_only: bool,
     private_key: Option<Rsa<Private>>,
+    output_format: OutputFormat,
+    v2_memory: Option<PbV2Memory>,
 }
 
 impl Compilation {
@@ -33,19 +36,26 @@ impl Compilation {
     }
 
     /// Create/write a policy from the ZPL source and configuration.
-    pub fn compile(&self) -> Result<(), CompilationError> {
+    pub fn compile(&mut self) -> Result<(), CompilationError> {
         let cctx = CompilationCtx::new(self.verbose, self.werror);
         let pol = self.compile_to_policy(&cctx)?;
         cctx.info("build successful");
         if let Some(pol) = pol {
-            let pcontainer = self.contain_policy(pol, &cctx, PolicyContainerV1::default())?;
-            self.write_container(&pcontainer, &self.output_file, &cctx)?;
+            let container_bytes = match self.output_format {
+                OutputFormat::V1 => {
+                    self.contain_policy(pol, &cctx, PolicyContainerV1::default())?
+                }
+                OutputFormat::V2 => {
+                    self.contain_policy(pol, &cctx, PolicyContainerV2::default())?
+                }
+            };
+            self.write_container(&container_bytes, &self.output_file, &cctx)?;
         }
         Ok(())
     }
 
     pub fn compile_to_policy(
-        &self,
+        &mut self,
         cctx: &CompilationCtx,
     ) -> Result<Option<Vec<u8>>, CompilationError> {
         if self.verbose {
@@ -86,15 +96,24 @@ impl Compilation {
             return Ok(None);
         }
 
-        let mut builder = PolicyBuilder::new(self.verbose, PolicyBinaryV1::new());
-
-        builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
-
-        builder.with_fabric(&fabric, &cctx)?;
-
-        let pol = builder.build()?;
+        let policy_bytes = match self.output_format {
+            OutputFormat::V1 => {
+                let writer = PolicyBinaryV1::new();
+                let mut builder = PolicyBuilder::new(self.verbose, writer);
+                builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
+                builder.with_fabric(&fabric, &cctx)?;
+                builder.build()?
+            }
+            OutputFormat::V2 => {
+                let writer = PolicyBinaryV2::new(self.v2_memory.as_mut().unwrap());
+                let mut builder = PolicyBuilder::new(self.verbose, writer);
+                builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
+                builder.with_fabric(&fabric, &cctx)?;
+                builder.build()?
+            }
+        };
         cctx.info("build successful");
-        Ok(Some(pol))
+        Ok(Some(policy_bytes))
     }
 
     /// Write the policy container to the output file, serializing with protocol buffers.
@@ -249,6 +268,10 @@ impl CompilationBuilder {
             let base = output_file.parent().unwrap();
             output_file = base.join(out_filename);
         }
+        let v2_memory = match self.output_format {
+            OutputFormat::V2 => Some(PbV2Memory::new()),
+            _ => None,
+        };
 
         Compilation {
             verbose: self.verbose,
@@ -258,6 +281,8 @@ impl CompilationBuilder {
             output_file,
             private_key: self.private_key,
             parse_only: self.parse_only,
+            output_format: self.output_format,
+            v2_memory,
         }
     }
 }
@@ -374,7 +399,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -402,7 +427,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -455,7 +480,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, zplc).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -482,7 +507,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -511,7 +536,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -540,7 +565,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -571,7 +596,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BAS_CONFIG).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
