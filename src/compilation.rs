@@ -109,7 +109,7 @@ impl Compilation {
                 let mut builder = PolicyBuilder::new(self.verbose, writer);
                 builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
                 builder.with_fabric(&fabric, &cctx)?;
-                builder.build()?
+                builder.build()? // XXX I need the memory here!!
             }
         };
         cctx.info("build successful");
@@ -249,6 +249,11 @@ impl CompilationBuilder {
             }
         };
 
+        let default_extension = match self.output_format {
+            OutputFormat::V1 => "bin",
+            OutputFormat::V2 => "bin2",
+        };
+
         let mut output_file = match self.output_directory {
             Some(outdir) => {
                 if !outdir.is_dir() {
@@ -257,10 +262,10 @@ impl CompilationBuilder {
                         outdir
                     );
                 }
-                let ofile = self.source_zpl.with_extension("bin");
+                let ofile = self.source_zpl.with_extension(default_extension);
                 outdir.join(ofile.file_name().unwrap())
             }
-            None => self.source_zpl.with_extension("bin"),
+            None => self.source_zpl.with_extension(default_extension),
         };
 
         // If user has selected an alternate output file, substitute that in now.

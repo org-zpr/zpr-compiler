@@ -33,7 +33,7 @@ struct Cli {
     #[arg(short = 'f', long = "outfmt", value_name = "OUTPUT_FORMAT")]
     outfmt: Option<String>,
 
-    /// Write the binary policy to filed named NAME instead of the default (input file with extension switched to .bin)
+    /// Write the binary policy to filed named NAME instead of the default (input file with extension switched to .bin or .bin2)
     #[arg(short = 'o', long, value_name = "NAME")]
     outfname: Option<String>,
 
