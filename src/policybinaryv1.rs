@@ -1,165 +1,61 @@
 use std::collections::HashMap;
 
-use ::polio::policy_capnp;
-use capnp::message::HeapAllocator;
 use polio::polio;
+use prost::Message;
 
+use crate::compiler::get_compiler_version;
+use crate::errors::CompilationError;
 use crate::fabric::ServiceType; // TODO: remove refs to fabric
+use crate::policywriter::{PFlags, PolicyContainer, PolicyWriter, TSType};
+use crate::protocols::{IcmpFlowType, Protocol};
 use crate::ptypes::Attribute;
 use crate::zpl;
-
-pub trait PolicyWriter {
-    fn write_compiler_version(&mut self, major: u32, minor: u32, patch: u32);
-    fn write_created_timestamp(&mut self, timestamp: &str);
-    fn write_policy_version(&mut self, version: u64);
-    fn write_policy_revision(&mut self, revision: &str);
-    fn write_policy_metadata(&mut self, metadata: &str);
-    fn write_max_visa_lifetime(&mut self, lifetime: std::time::Duration);
-    fn write_connect_match(&mut self, conditions: &[Attribute]);
-    fn write_connect_match_for_provider(
-        &mut self,
-        svc_attrs: &[Attribute],
-        svc_id: &str,
-        stype: &ServiceType,
-        endpoint: &str,
-        flags: Option<PFlags>,
-    );
-    fn write_service_cert(&mut self, svc_id: &str, cert_data: &[u8]);
-
-    // This one is just to support V1 lookup tables.
-    fn write_attribute_tables(
-        &mut self,
-        key_table: &HashMap<String, usize>,
-        value_table: &HashMap<String, usize>,
-    );
-}
 
 /// This value for a PROC in a connect record means NO PROC.  Binary format v1.
 pub const NO_PROC: u32 = u32::MAX; // 0xffffffff
 
-/// In V1 These flags are used to set the type of service in the PROC.
-/// TODO: Maybe switch to using the protocol buffer type directly?
-#[derive(Debug, Clone, PartialEq, Copy)]
-pub struct PFlags {
-    pub node: bool,
-    pub vs: bool,
-    pub vs_dock: bool,
-}
-
-impl PFlags {
-    /// Create the set of flags for a node.
-    pub fn node() -> PFlags {
-        PFlags {
-            node: true,
-            vs: false,
-            vs_dock: true,
-        }
-    }
-
-    /// Create the set of flags for a visa service.
-    pub fn vs() -> PFlags {
-        PFlags {
-            node: false,
-            vs: true,
-            vs_dock: false,
-        }
-    }
+#[derive(Default)]
+pub struct PolicyBinaryV1 {
+    policy: polio::Policy,
+    connects_table: HashMap<String, usize>, // connect hash string -> connect index
 }
 
 #[derive(Default)]
-pub struct PolicyBinaryV1 {
-    container: polio::PolicyContainer,
-    policy: polio::Policy,
-    key_table: HashMap<String, usize>,
-    value_table: HashMap<String, usize>,
-    connects_table: HashMap<String, usize>, // connect hash string -> connect index
+pub struct PolicyContainerV1 {}
 
-    // Before writing service IDs into the policy we clean up the names by converting
-    // whitespace into underscores.  This map keeps track of that so that we use the
-    // same "mangled" names for fabric service names throughout the policy.
-    name_mangler: HashMap<String, String>, // fabric IDs -> policy IDs
-}
+impl PolicyContainer for PolicyContainerV1 {
+    fn contain_policy(
+        &self,
+        pol_buf: Vec<u8>,
+        signature: Option<Vec<u8>>,
+    ) -> Result<Vec<u8>, CompilationError> {
+        // We need to de-serialize the policy to get some of the header fields.
+        let pol: polio::Policy =
+            polio::Policy::decode(pol_buf.as_slice()).expect("failed to decode binary policy file");
 
-pub struct PolicyBinaryV2<'a> {
-    container: policy_capnp::policy_container::Builder<'a>,
+        let (major, minor, patch) = get_compiler_version();
 
-    policy: policy_capnp::policy::Builder<'a>,
-}
+        let sig_or_empty = match signature {
+            Some(s) => s,
+            None => Vec::new(),
+        };
 
-/// Holds memory for the two capn proto messages.
-/// Needs to live as long as the PolicyBinaryV2.
-pub struct PbV2Memory {
-    container_msg: Box<::capnp::message::Builder<HeapAllocator>>,
-    policy_msg: Box<::capnp::message::Builder<HeapAllocator>>,
-}
-
-impl PbV2Memory {
-    pub fn new() -> PbV2Memory {
-        let container_msg = Box::new(::capnp::message::Builder::new_default());
-        let policy_msg = Box::new(::capnp::message::Builder::new_default());
-        PbV2Memory {
-            container_msg,
-            policy_msg,
-        }
-    }
-}
-
-impl PolicyBinaryV2<'_> {
-    pub fn new<'a>(msg_mem: &'a mut PbV2Memory) -> PolicyBinaryV2<'a> {
-        let container = msg_mem
-            .container_msg
-            .init_root::<policy_capnp::policy_container::Builder>();
-        let policy = msg_mem
-            .policy_msg
-            .init_root::<policy_capnp::policy::Builder>();
-
-        PolicyBinaryV2 { container, policy }
-    }
-}
-
-impl PolicyWriter for PolicyBinaryV2<'_> {
-    fn write_compiler_version(&mut self, major: u32, minor: u32, patch: u32) {
-        self.container.set_zplc_ver_major(major);
-        self.container.set_zplc_ver_minor(minor);
-        self.container.set_zplc_ver_patch(patch);
-    }
-    fn write_created_timestamp(&mut self, timestamp: &str) {
-        self.policy.set_created(timestamp);
-    }
-    fn write_policy_version(&mut self, version: u64) {
-        self.policy.set_version(version);
-    }
-    fn write_policy_revision(&mut self, _revision: &str) {
-        // nop
-    }
-    fn write_policy_metadata(&mut self, metadata: &str) {
-        self.policy.set_metadata(metadata);
-    }
-    fn write_max_visa_lifetime(&mut self, _lifetime: std::time::Duration) {
-        // nop
-    }
-    fn write_attribute_tables(
-        &mut self,
-        _key_table: &HashMap<String, usize>,
-        _value_table: &HashMap<String, usize>,
-    ) {
-        // nop
-    }
-    fn write_connect_match(&mut self, conditions: &[Attribute]) {
-        // TODO.
-    }
-    fn write_connect_match_for_provider(
-        &mut self,
-        svc_attrs: &[Attribute],
-        svc_id: &str,
-        stype: &ServiceType,
-        endpoint: &str,
-        flags: Option<PFlags>,
-    ) {
-        // TODO
-    }
-    fn write_service_cert(&mut self, _svc_id: &str, _cert_data: &[u8]) {
-        // nop
+        let container = polio::PolicyContainer {
+            version_major: major,
+            version_minor: minor,
+            version_patch: patch,
+            policy_date: pol.policy_date.clone(),
+            policy_version: pol.policy_version,
+            policy_revision: pol.policy_revision.clone(),
+            policy_metadata: pol.policy_metadata.clone(),
+            policy: pol_buf,
+            signature: sig_or_empty,
+        };
+        let mut buf = Vec::with_capacity(container.encoded_len());
+        container.encode(&mut buf).map_err(|e| {
+            CompilationError::EncodingError(format!("failed to encode policy container: {}", e))
+        })?;
+        Ok(buf)
     }
 }
 
@@ -265,24 +161,11 @@ impl PolicyBinaryV1 {
         hash
     }
 
-    fn get_canonical_service_name(&mut self, svc_id: &str) -> String {
-        if let Some(mangled) = self.name_mangler.get(svc_id) {
-            return mangled.clone();
-        }
-        let mut mangled_sid = svc_id.replace(" ", "_");
-        while self.name_mangler.contains_key(&mangled_sid) {
-            mangled_sid = format!("{}_", mangled_sid); // append trailing underscore until unique
-        }
-        self.name_mangler
-            .insert(svc_id.to_string(), mangled_sid.clone());
-        mangled_sid
-    }
-
     /// Create a PROC for the policy binary to register a service and optionally set flags.
     /// `endpoint_str` is comma separated list of endpoint values.
     fn create_service_proc(
         &mut self,
-        svc_id: &str,
+        canonical_svc_id: &str,
         svc_type: &ServiceType,
         endpoint_str: &str,
         flags: Option<PFlags>,
@@ -291,8 +174,6 @@ impl PolicyBinaryV1 {
 
         // Args for register are (NAME:String, Type:SvcT, ENDPOINTS:String)
         let mut args = Vec::new();
-
-        let canonical_svc_id = self.get_canonical_service_name(svc_id);
 
         args.push(polio::Argument {
             arg: Some(polio::argument::Arg::Strval(canonical_svc_id.to_string())),
@@ -351,28 +232,85 @@ impl PolicyBinaryV1 {
 
         polio::Proc { proc }
     }
+
+    /// Create a polio::Scope from a FabricService.protocol.
+    /// Only services with protocols should be passed here.
+    ///
+    /// Will panic if there are any errors -- all error checking should have
+    /// been done earlier.
+    fn scope_for_protocol(&self, svc_prot: &Protocol) -> Vec<polio::Scope> {
+        let mut scopes = Vec::new();
+
+        // The visa service and policy protobuf support a much richer protcol description than
+        // we do in our current ZPL parser.  The current ZPL supports one protocol and one port
+        // per service.
+
+        let parg: polio::scope::Protarg;
+
+        match &svc_prot.get_icmp() {
+            Some(icmp) => {
+                let picmp = match icmp {
+                    IcmpFlowType::OneShot(codes) => {
+                        let pcodes = codes.iter().map(|c| *c as u32).collect();
+                        polio::Icmp {
+                            r#type: polio::Icmpt::Once as i32,
+                            codes: pcodes,
+                        }
+                    }
+                    IcmpFlowType::RequestResponse(req, resp) => {
+                        let pcodes = vec![*req as u32, *resp as u32];
+                        polio::Icmp {
+                            r#type: polio::Icmpt::Reqrep as i32,
+                            codes: pcodes,
+                        }
+                    }
+                };
+                parg = polio::scope::Protarg::Icmp(picmp);
+            }
+            None => {
+                match &svc_prot.get_port() {
+                    Some(port_str) => {
+                        let port_num: u16 = match port_str.parse() {
+                            Ok(n) => n,
+                            Err(_) => {
+                                panic!("service with invalid port number: {}", port_str);
+                            }
+                        };
+                        let pspec = polio::PortSpecList {
+                            spec: vec![polio::PortSpec {
+                                parg: Some(polio::port_spec::Parg::Port(port_num as u32)),
+                            }],
+                        };
+                        parg = polio::scope::Protarg::Pspec(pspec);
+                    }
+                    None => {
+                        // TODO: Catch this earlier when we revamp port parsing.
+                        panic!("service protocol must be ICMP or have a valid port");
+                    }
+                }
+            }
+        }
+
+        let scope = polio::Scope {
+            protocol: svc_prot.get_layer4().into(),
+            protarg: Some(parg),
+        };
+        scopes.push(scope);
+        scopes
+    }
 }
 
 impl PolicyWriter for PolicyBinaryV1 {
-    fn write_compiler_version(&mut self, major: u32, minor: u32, patch: u32) {
-        self.container.version_major = major;
-        self.container.version_minor = minor;
-        self.container.version_patch = patch;
-    }
     fn write_created_timestamp(&mut self, timestamp: &str) {
-        self.container.policy_date = timestamp.to_string();
         self.policy.policy_date = timestamp.to_string();
     }
     fn write_policy_version(&mut self, version: u64) {
-        self.container.policy_version = version;
         self.policy.policy_version = version;
     }
     fn write_policy_revision(&mut self, revision: &str) {
-        self.container.policy_revision = revision.to_string();
         self.policy.policy_revision = revision.to_string();
     }
     fn write_policy_metadata(&mut self, metadata: &str) {
-        self.container.policy_metadata = metadata.to_string();
         self.policy.policy_metadata = metadata.to_string();
     }
     fn write_max_visa_lifetime(&mut self, lifetime: std::time::Duration) {
@@ -421,5 +359,117 @@ impl PolicyWriter for PolicyBinaryV1 {
             name: svc_id.to_string(),
         };
         self.policy.certificates.push(pcert);
+    }
+    fn write_cpolicy(
+        &mut self,
+        svc_id: &str,
+        policy_num: usize,
+        protocol: &Protocol,
+        allow: bool,
+        cli_conditions: &[Attribute],
+        svc_conditions: &[Attribute],
+    ) {
+        let pscope = self.scope_for_protocol(protocol);
+        let mut cpol = polio::CPolicy {
+            service_id: svc_id.into(),
+            id: svc_id.into(), // TODO: Not sure why we have both id and service_id.
+            scope: pscope.clone(),
+            cli_conditions: Vec::new(),
+            svc_conditions: Vec::new(),
+            constraints: Vec::new(), // TODO
+            allow,
+        };
+        if !cli_conditions.is_empty() {
+            let exprs = self.attr_list_to_attrexpr(cli_conditions);
+            let cond = polio::Condition {
+                // TODO: In old ZPL we copied down the docstring from the ZPL into this ID.
+                id: format!("{}-{}c", svc_id, policy_num),
+                attr_exprs: exprs,
+            };
+            cpol.cli_conditions.push(cond);
+        }
+        if !svc_conditions.is_empty() {
+            let exprs = self.attr_list_to_attrexpr(svc_conditions);
+            let cond = polio::Condition {
+                // TODO: In old ZPL we copied down the docstring from the ZPL into this ID.
+                id: format!("{}-{}s", svc_id, policy_num),
+                attr_exprs: exprs,
+            };
+            cpol.svc_conditions.push(cond);
+        }
+        self.policy.policies.push(cpol);
+    }
+
+    fn write_bootstrap_key(&mut self, cn: &str, keydata: &[u8]) {
+        self.policy.pubkeys.push(polio::PublicKey {
+            cn: cn.to_string(),
+            keydata: keydata.to_vec(),
+        });
+    }
+
+    fn write_trusted_service(
+        &mut self,
+        svc_id: &str,
+        ts_type: TSType,
+        query_uri: Option<&str>,
+        validate_uri: Option<&str>,
+        returns_attrs: Option<&Vec<String>>,
+        identity_attrs: Option<&Vec<String>>,
+    ) {
+        let query_uri = match query_uri {
+            Some(q) => q,
+            None => "",
+        };
+
+        let validate_uri = match validate_uri {
+            Some(v) => v,
+            None => "",
+        };
+
+        let attrs = match returns_attrs {
+            Some(a) => a.clone(),
+            None => Vec::new(),
+        };
+
+        let id_attrs = match identity_attrs {
+            Some(a) => a.clone(),
+            None => Vec::new(),
+        };
+
+        let polio_ts_t = match ts_type {
+            TSType::VsAuth => polio::SvcT::SvctAuth,
+            TSType::ActorAuth => polio::SvcT::SvctActorAuth,
+        };
+
+        let trusted_svc = polio::Service {
+            r#type: polio_ts_t.into(),
+            name: svc_id.into(),
+            prefix: svc_id.into(),
+            domain: String::new(),
+            query_uri: query_uri.into(),
+            validate_uri: validate_uri.into(),
+            attrs: attrs,
+            id_attrs: id_attrs,
+        };
+        self.policy.services.push(trusted_svc);
+    }
+
+    fn print_stats(&self) {
+        println!("  {} connect rules", self.policy.connects.len());
+        println!("  {} trusted services", self.policy.services.len());
+        println!("  {} communication policies", self.policy.policies.len());
+        println!(
+            "  {} attr keys / {} attr values",
+            self.policy.attr_key_index.len() - 1,
+            self.policy.attr_val_index.len() - 1
+        );
+    }
+
+    fn finalize(&mut self) -> Result<Vec<u8>, CompilationError> {
+        let mut buf = Vec::with_capacity(self.policy.encoded_len());
+        self.policy.encode(&mut buf).map_err(|e| {
+            CompilationError::EncodingError(format!("failed to encode policy: {}", e))
+        })?;
+        Ok(buf)
     }
 }

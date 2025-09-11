@@ -1,10 +1,7 @@
-use polio::polio;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
-
 use openssl::pkey::Private;
 use openssl::rsa::Rsa;
-use prost::Message;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::config_api::ConfigApi;
 use crate::context::CompilationCtx;
@@ -12,7 +9,9 @@ use crate::crypto::{sha256_of_file, sign_pkcs1v15_sha256};
 use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
+use crate::policybinaryv1::{PolicyBinaryV1, PolicyContainerV1};
 use crate::policybuilder::PolicyBuilder;
+use crate::policywriter::PolicyContainer;
 use crate::weaver::weave;
 
 /// Create one of these with the [CompilationBuilder].
@@ -24,27 +23,6 @@ pub struct Compilation {
     pub output_file: PathBuf,
     pub parse_only: bool,
     private_key: Option<Rsa<Private>>,
-}
-
-pub fn get_compiler_version() -> (u32, u32, u32) {
-    let version = env!("CARGO_PKG_VERSION");
-    let version_parts: Vec<&str> = version.split('.').collect();
-    let major = version_parts
-        .get(0)
-        .unwrap_or(&"0")
-        .parse::<u32>()
-        .unwrap_or(0);
-    let minor = version_parts
-        .get(1)
-        .unwrap_or(&"0")
-        .parse::<u32>()
-        .unwrap_or(0);
-    let patch = version_parts
-        .get(2)
-        .unwrap_or(&"0")
-        .parse::<u32>()
-        .unwrap_or(0);
-    (major, minor, patch)
 }
 
 impl Compilation {
@@ -60,7 +38,7 @@ impl Compilation {
         let pol = self.compile_to_policy(&cctx)?;
         cctx.info("build successful");
         if let Some(pol) = pol {
-            let pcontainer = self.contain_policy(&pol, &cctx)?;
+            let pcontainer = self.contain_policy(pol, &cctx, PolicyContainerV1::default())?;
             self.write_container(&pcontainer, &self.output_file, &cctx)?;
         }
         Ok(())
@@ -69,7 +47,7 @@ impl Compilation {
     pub fn compile_to_policy(
         &self,
         cctx: &CompilationCtx,
-    ) -> Result<Option<polio::Policy>, CompilationError> {
+    ) -> Result<Option<Vec<u8>>, CompilationError> {
         if self.verbose {
             println!(
                 "compiling {:?} with config {:?}",
@@ -108,7 +86,8 @@ impl Compilation {
             return Ok(None);
         }
 
-        let mut builder = PolicyBuilder::new(self.verbose);
+        let mut builder = PolicyBuilder::new(self.verbose, PolicyBinaryV1::new());
+
         builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
 
         builder.with_fabric(&fabric, &cctx)?;
@@ -121,15 +100,11 @@ impl Compilation {
     /// Write the policy container to the output file, serializing with protocol buffers.
     fn write_container(
         &self,
-        container: &polio::PolicyContainer,
+        container: &[u8],
         file: &Path,
         ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
-        let mut buf = Vec::with_capacity(container.encoded_len());
-        container.encode(&mut buf).map_err(|e| {
-            CompilationError::EncodingError(format!("failed to encode policy container: {}", e))
-        })?;
-        std::fs::write(file, &buf).map_err(|e| {
+        std::fs::write(file, container).map_err(|e| {
             CompilationError::FileError(format!(
                 "failed to write policy container to {:?}: {}",
                 file, e
@@ -139,42 +114,29 @@ impl Compilation {
         Ok(())
     }
 
-    /// Create the container struct and optionally sign the policy with the private key.
-    fn contain_policy(
+    /// Create the container struct, move policy into it and optionally sign the policy with the private key.
+    fn contain_policy<T>(
         &self,
-        pol: &polio::Policy,
+        pol_buf: Vec<u8>,
         ctx: &CompilationCtx,
-    ) -> Result<polio::PolicyContainer, CompilationError> {
-        let mut buf = Vec::with_capacity(pol.encoded_len());
-        pol.encode(&mut buf).map_err(|e| {
-            CompilationError::EncodingError(format!("failed to encode policy: {}", e))
-        })?;
-
-        let signature: Vec<u8> = match self.private_key {
-            Some(ref key) => sign_pkcs1v15_sha256(key, &buf)?,
+        container: T,
+    ) -> Result<Vec<u8>, CompilationError>
+    where
+        T: PolicyContainer,
+    {
+        let signature = match self.private_key {
+            Some(ref key) => {
+                let sig = sign_pkcs1v15_sha256(key, &pol_buf)?;
+                Some(sig)
+            }
             None => {
                 ctx.warn(
                     "policy not signed, use `--key <pemfile>` to specify a private key for signing",
                 )?;
-                Vec::new()
+                None
             }
         };
-
-        let (major, minor, patch) = get_compiler_version();
-
-        let container = polio::PolicyContainer {
-            version_major: major,
-            version_minor: minor,
-            version_patch: patch,
-            policy_date: pol.policy_date.clone(),
-            policy_version: pol.policy_version,
-            policy_revision: pol.policy_revision.clone(),
-            policy_metadata: pol.policy_metadata.clone(),
-            policy: buf,
-            signature,
-        };
-
-        Ok(container)
+        container.contain_policy(pol_buf, signature)
     }
 }
 
@@ -304,6 +266,8 @@ impl CompilationBuilder {
 mod test {
     use super::*;
 
+    use polio::polio;
+    use prost::Message;
     use std::env;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -616,7 +580,9 @@ mod test {
         let result = compilation.compile_to_policy(&ctx);
         match result {
             Ok(pol) => {
-                let pol = pol.unwrap();
+                let pol_bin = pol.unwrap();
+                let pol: polio::Policy = polio::Policy::decode(pol_bin.as_slice())
+                    .expect("failed to decode binary policy file");
 
                 let mut pcount = 0;
 

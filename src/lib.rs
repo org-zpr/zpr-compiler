@@ -11,6 +11,7 @@
 
 mod allow;
 pub mod compilation;
+pub mod compiler;
 mod config;
 mod config_api;
 mod context;
@@ -22,8 +23,10 @@ mod fabric_util;
 mod lex;
 mod never;
 mod parser;
-pub mod policybinary;
+pub mod policybinaryv1;
+pub mod policybinaryv2;
 pub mod policybuilder;
+pub mod policywriter;
 pub mod protocols;
 mod ptypes;
 mod putil;

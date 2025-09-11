@@ -1,19 +1,15 @@
 //! policybuilder.rs - Build a protocol buffer policy from the fabric.
 
 use chrono::prelude::*;
-use polio::polio;
 use std::collections::HashMap;
 use std::env;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use capnp;
-
 use crate::context::CompilationCtx;
 use crate::errors::CompilationError;
-use crate::fabric::{Fabric, FabricService, ServiceType};
-use crate::policybinary::{PFlags, PolicyWriter};
-use crate::protocols::IcmpFlowType;
-use crate::ptypes::{Attribute, Policy};
+use crate::fabric::{Fabric, ServiceType};
+use crate::policywriter::{PFlags, PolicyWriter, TSType};
+use crate::ptypes::Attribute;
 use crate::zpl;
 
 #[allow(dead_code)]
@@ -66,8 +62,8 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
 
     /// Returns the built policy. This doesn't actually do anything except return the already built policy.
     /// you must call [PolicyBuilder::with_fabric] to do the real work before calling this.
-    pub fn build(self) -> Result<polio::Policy, CompilationError> {
-        Ok(self.policy)
+    pub fn build(&mut self) -> Result<Vec<u8>, CompilationError> {
+        self.policy_writer.finalize()
     }
 
     /// The binary policy has a place for global settings, the only valid
@@ -112,14 +108,7 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
         self.set_auth_services(fabric, ctx)?;
 
         if self.verbose {
-            println!("  {} connect rules", self.policy.connects.len());
-            println!("  {} trusted services", self.policy.services.len());
-            println!("  {} communication policies", self.policy.policies.len());
-            println!(
-                "  {} attr keys / {} attr values",
-                self.policy.attr_key_index.len() - 1,
-                self.policy.attr_val_index.len() - 1
-            );
+            self.policy_writer.print_stats();
         }
         Ok(())
     }
@@ -134,12 +123,8 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
         if fabric.default_auth_cert_asn.is_empty() {
             return Ok(());
         }
-        let pcert = polio::Cert {
-            id: (self.policy.certificates.len() + 1) as u32,
-            asn1data: fabric.default_auth_cert_asn.clone(),
-            name: zpl::DEFAULT_TS_PREFIX.to_string(),
-        };
-        self.policy.certificates.push(pcert);
+        self.policy_writer
+            .write_service_cert(&zpl::DEFAULT_TS_PREFIX, &fabric.default_auth_cert_asn);
         Ok(())
     }
 
@@ -188,17 +173,14 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
             }
 
             if let Some((l7p, port)) = svc.get_l7protocol_and_port() {
-                let trusted_svc = polio::Service {
-                    r#type: polio::SvcT::SvctAuth.into(),
-                    name: canonical_svc_id.clone(),
-                    prefix: canonical_svc_id,
-                    domain: String::new(),
-                    query_uri: String::new(), // n/a
-                    validate_uri: format!("{}://[::1]:{}", l7p, port),
-                    attrs: svc.returns_attrs.clone().unwrap_or_default(),
-                    id_attrs: svc.identity_attrs.clone().unwrap_or_default(),
-                };
-                self.policy.services.push(trusted_svc);
+                self.policy_writer.write_trusted_service(
+                    &canonical_svc_id,
+                    TSType::VsAuth,
+                    None,                                       // query uri
+                    Some(&format!("{}://[::1]:{}", l7p, port)), // validate uri
+                    svc.returns_attrs.as_ref(),
+                    svc.identity_attrs.as_ref(),
+                );
             } else {
                 return Err(CompilationError::ConfigError(format!(
                     "trusted service {}: must have single port number",
@@ -217,17 +199,14 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                 }
                 let canonical_asvc_id = self.get_canonical_service_name(&asvc.config_id);
                 if let Some((l7p, port)) = asvc.get_l7protocol_and_port() {
-                    let auth_svc = polio::Service {
-                        r#type: polio::SvcT::SvctActorAuth.into(),
-                        name: canonical_asvc_id.clone(),
-                        prefix: canonical_asvc_id,
-                        domain: String::new(),
-                        query_uri: String::new(), // n/a
-                        validate_uri: format!("{}://[::1]:{}", l7p, port),
-                        attrs: Vec::new(),    // do not set for adapter facing
-                        id_attrs: Vec::new(), // do not set for adapter facing
-                    };
-                    self.policy.services.push(auth_svc);
+                    self.policy_writer.write_trusted_service(
+                        &canonical_asvc_id,
+                        TSType::ActorAuth,
+                        None, // query uri
+                        Some(&format!("{}://[::1]:{}", l7p, port)),
+                        None, // not set for adapter facing
+                        None, // not set for adapter facing
+                    );
                 } else {
                     return Err(CompilationError::ConfigError(format!(
                         "authentication service {}: must have single port number",
@@ -249,10 +228,7 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
         _ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         for (cnval, keydata) in &fabric.bootstrap_records {
-            self.policy.pubkeys.push(polio::PublicKey {
-                cn: cnval.clone(),
-                keydata: keydata.clone(),
-            });
+            self.policy_writer.write_bootstrap_key(&cnval, keydata);
         }
         Ok(())
     }
@@ -273,127 +249,21 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
         // Each service has a set of client policies.
         // Each policy is a list of conditions that permit access to the service.
         // We convert each policy to its own CPolicy.
-
         for svc in &fabric.services {
-            let pscope = self.scope_for_service(svc)?;
-            let mut pcount = 0;
-
-            for policy in &svc.client_policies {
-                pcount += 1;
-                let canonical_svc_id = self.get_canonical_service_name(&svc.fabric_id);
-                let mut cpol = polio::CPolicy {
-                    service_id: canonical_svc_id.clone(),
-                    id: canonical_svc_id.clone(), // TODO: Not sure why we have both id and service_id.
-                    scope: pscope.clone(),
-                    cli_conditions: Vec::new(),
-                    svc_conditions: Vec::new(),
-                    constraints: Vec::new(), // TODO
-                    allow: !policy.never_allow,
-                };
-                if !policy.cli_condition.is_empty() {
-                    let exprs = self.attr_list_to_attrexpr(&policy.cli_condition);
-                    let cond = polio::Condition {
-                        // TODO: In old ZPL we copied down the docstring from the ZPL into this ID.
-                        id: format!("{}-{}c", canonical_svc_id, pcount),
-                        attr_exprs: exprs,
-                    };
-                    cpol.cli_conditions.push(cond);
-                }
-                if !policy.svc_condition.is_empty() {
-                    let exprs = self.attr_list_to_attrexpr(&policy.svc_condition);
-                    let cond = polio::Condition {
-                        // TODO: In old ZPL we copied down the docstring from the ZPL into this ID.
-                        id: format!("{}-{}s", canonical_svc_id, pcount),
-                        attr_exprs: exprs,
-                    };
-                    cpol.svc_conditions.push(cond);
-                }
-                self.policy.policies.push(cpol);
+            let svc_id = self.get_canonical_service_name(&svc.fabric_id);
+            for (i, policy) in svc.client_policies.iter().enumerate() {
+                let protocol = svc.protocol.clone().unwrap(); // MUST BE SET
+                self.policy_writer.write_cpolicy(
+                    &svc_id,
+                    i + 1,
+                    &protocol,
+                    !policy.never_allow,
+                    &policy.cli_condition,
+                    &policy.svc_condition,
+                );
             }
         }
-
         Ok(())
-    }
-
-    /// Create a polio::Scope from a FabricService.protocol.
-    /// Only services with protocols should be passed here.
-    fn scope_for_service(
-        &self,
-        svc: &FabricService,
-    ) -> Result<Vec<polio::Scope>, CompilationError> {
-        let mut scopes = Vec::new();
-
-        // The visa service and policy protobuf support a much richer protcol description than
-        // we do in our current ZPL parser.  The current ZPL supports one protocol and one port
-        // per service.
-
-        let parg: polio::scope::Protarg;
-
-        if svc.protocol.is_none() {
-            panic!(
-                "cannot call scope_for_service on a service with no protocol: {}",
-                svc.config_id
-            );
-        }
-        let svc_prot = svc.protocol.clone().unwrap();
-
-        match &svc_prot.get_icmp() {
-            Some(icmp) => {
-                let picmp = match icmp {
-                    IcmpFlowType::OneShot(codes) => {
-                        let pcodes = codes.iter().map(|c| *c as u32).collect();
-                        polio::Icmp {
-                            r#type: polio::Icmpt::Once as i32,
-                            codes: pcodes,
-                        }
-                    }
-                    IcmpFlowType::RequestResponse(req, resp) => {
-                        let pcodes = vec![*req as u32, *resp as u32];
-                        polio::Icmp {
-                            r#type: polio::Icmpt::Reqrep as i32,
-                            codes: pcodes,
-                        }
-                    }
-                };
-                parg = polio::scope::Protarg::Icmp(picmp);
-            }
-            None => {
-                match &svc_prot.get_port() {
-                    Some(port_str) => {
-                        let port_num: u16 = match port_str.parse() {
-                            Ok(n) => n,
-                            Err(_) => {
-                                return Err(CompilationError::ConfigError(format!(
-                                    "service {} port '{}' is invalid or out of range",
-                                    svc.config_id, &port_str
-                                )));
-                            }
-                        };
-                        let pspec = polio::PortSpecList {
-                            spec: vec![polio::PortSpec {
-                                parg: Some(polio::port_spec::Parg::Port(port_num as u32)),
-                            }],
-                        };
-                        parg = polio::scope::Protarg::Pspec(pspec);
-                    }
-                    None => {
-                        // TODO: Catch this earlier when we revamp port parsing.
-                        return Err(CompilationError::ConfigError(format!(
-                            "service {} protcol must be ICMP or have a valid port",
-                            svc.config_id
-                        )));
-                    }
-                }
-            }
-        }
-
-        let scope = polio::Scope {
-            protocol: svc_prot.get_layer4().into(),
-            protarg: Some(parg),
-        };
-        scopes.push(scope);
-
-        Ok(scopes)
     }
 
     fn set_connects(&mut self, fabric: &Fabric) -> Result<(), CompilationError> {
@@ -419,9 +289,10 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                     } else {
                         None
                     };
+                    let svc_id = self.get_canonical_service_name(&svc.fabric_id);
                     self.policy_writer.write_connect_match_for_provider(
                         &svc.provider_attrs,
-                        &svc.fabric_id,
+                        &svc_id,
                         &svc.service_type,
                         &svc.protocol.as_ref().unwrap().to_endpoint_str(),
                         flags,

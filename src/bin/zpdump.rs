@@ -1,6 +1,6 @@
-use polio::polio;
 use clap::Parser;
 use colored::Colorize;
+use polio::polio;
 use std::net::IpAddr;
 use std::path::PathBuf;
 
@@ -10,8 +10,8 @@ use openssl::rsa::Rsa;
 use openssl::x509::X509;
 use prost::Message;
 
-use zplc::compilation::get_compiler_version;
-use zplc::policybuilder::NO_PROC;
+use zplc::compiler::get_compiler_version;
+use zplc::policybinaryv1::NO_PROC;
 use zplc::protocols::IanaProtocol;
 use zplc::zpl;
 
