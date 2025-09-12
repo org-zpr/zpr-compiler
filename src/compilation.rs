@@ -10,7 +10,7 @@ use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
 use crate::policybinaryv1::{PolicyBinaryV1, PolicyContainerV1};
-use crate::policybinaryv2::{PbV2Memory, PolicyBinaryV2, PolicyContainerV2};
+use crate::policybinaryv2::{PolicyBinaryV2, PolicyContainerV2};
 use crate::policybuilder::PolicyBuilder;
 use crate::policywriter::PolicyContainer;
 use crate::weaver::weave;
@@ -25,7 +25,6 @@ pub struct Compilation {
     pub parse_only: bool,
     private_key: Option<Rsa<Private>>,
     output_format: OutputFormat,
-    v2_memory: Option<PbV2Memory>,
 }
 
 impl Compilation {
@@ -105,11 +104,11 @@ impl Compilation {
                 builder.build()?
             }
             OutputFormat::V2 => {
-                let writer = PolicyBinaryV2::new(self.v2_memory.as_mut().unwrap());
+                let writer = PolicyBinaryV2::new();
                 let mut builder = PolicyBuilder::new(self.verbose, writer);
                 builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
                 builder.with_fabric(&fabric, &cctx)?;
-                builder.build()? // XXX I need the memory here!!
+                builder.build()?
             }
         };
         cctx.info("build successful");
@@ -273,10 +272,6 @@ impl CompilationBuilder {
             let base = output_file.parent().unwrap();
             output_file = base.join(out_filename);
         }
-        let v2_memory = match self.output_format {
-            OutputFormat::V2 => Some(PbV2Memory::new()),
-            _ => None,
-        };
 
         Compilation {
             verbose: self.verbose,
@@ -287,7 +282,6 @@ impl CompilationBuilder {
             private_key: self.private_key,
             parse_only: self.parse_only,
             output_format: self.output_format,
-            v2_memory,
         }
     }
 }
