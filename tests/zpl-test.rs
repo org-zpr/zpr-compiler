@@ -1,7 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-use zplc::compilation::CompilationBuilder;
+use zplc::compilation::{CompilationBuilder, OutputFormat};
 
 fn get_zpl_dir() -> PathBuf {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -63,16 +63,19 @@ fn can_parse_rfc_examples() {
                     }
                 }
             }
-            let cb = CompilationBuilder::new(path)
-                .verbose(true)
-                .parse_only(true)
-                .config(&config_file);
-            let mut comp = cb.build();
-            match comp.compile() {
-                Ok(_warnings) => println!("{:?}: compiled ok", fent.path()),
-                Err(e) => {
-                    println!("error: {}", e);
-                    panic!("failed to compile {:?}", fent.path());
+            for outfmt in &[OutputFormat::V1, OutputFormat::V2] {
+                let cb = CompilationBuilder::new(path.clone())
+                    .verbose(true)
+                    .parse_only(true)
+                    .output_format(*outfmt)
+                    .config(&config_file);
+                let mut comp = cb.build();
+                match comp.compile() {
+                    Ok(_warnings) => println!("{:?}: compiled to {outfmt:?} ok", fent.path()),
+                    Err(e) => {
+                        println!("error: {}", e);
+                        panic!("failed to compile (format {outfmt:?}) {:?}", fent.path());
+                    }
                 }
             }
         }
@@ -107,15 +110,18 @@ fn can_compile_m3_policies() {
                     }
                 }
             }
-            let cb = CompilationBuilder::new(path)
-                .verbose(true)
-                .output_directory(&temp_dir.path);
-            let mut comp = cb.build();
-            match comp.compile() {
-                Ok(_warnings) => println!("{:?}: compiled ok", fent.path()),
-                Err(e) => {
-                    println!("error: {}", e);
-                    panic!("failed to compile {:?}", fent.path());
+            for outfmt in &[OutputFormat::V1, OutputFormat::V2] {
+                let cb = CompilationBuilder::new(path.clone())
+                    .verbose(true)
+                    .output_format(*outfmt)
+                    .output_directory(&temp_dir.path);
+                let mut comp = cb.build();
+                match comp.compile() {
+                    Ok(_warnings) => println!("{:?}: compiled to {outfmt:?} ok", fent.path()),
+                    Err(e) => {
+                        println!("error: {}", e);
+                        panic!("failed to compile (format {outfmt:?}) {:?}", fent.path());
+                    }
                 }
             }
         }
@@ -153,15 +159,18 @@ fn can_compile_integtest_policies() {
                     }
                 }
             }
-            let cb = CompilationBuilder::new(path)
-                .verbose(true)
-                .output_directory(&temp_dir.path);
-            let mut comp = cb.build();
-            match comp.compile() {
-                Ok(_warnings) => println!("{:?}: compiled ok", fent.path()),
-                Err(e) => {
-                    println!("error: {}", e);
-                    panic!("failed to compile {:?}", fent.path());
+            for outfmt in &[OutputFormat::V1, OutputFormat::V2] {
+                let cb = CompilationBuilder::new(path.clone())
+                    .verbose(true)
+                    .output_format(*outfmt)
+                    .output_directory(&temp_dir.path);
+                let mut comp = cb.build();
+                match comp.compile() {
+                    Ok(_warnings) => println!("{:?}: compiled to {outfmt:?} ok", fent.path()),
+                    Err(e) => {
+                        println!("error: {}", e);
+                        panic!("failed to compile (format {outfmt:?}) {:?}", fent.path());
+                    }
                 }
             }
         }

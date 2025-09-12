@@ -158,7 +158,7 @@ impl Compilation {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 pub enum OutputFormat {
     #[default]
     V1,
