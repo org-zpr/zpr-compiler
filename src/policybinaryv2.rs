@@ -26,12 +26,15 @@ struct CommunicationPolicy {
     svc_conditions: Vec<Attribute>,
 }
 
+/// This scope flag mirrors what is in the capnp schema.
 #[derive(PartialEq, Eq, Debug)]
 #[allow(dead_code)]
 enum ScopeFlag {
     UdpOneWay,
     IcmpRequestReply,
 }
+
+/// This struct mirrors what is in the capnp schema.
 struct Scope {
     protocol: u8,
     flag: Option<ScopeFlag>,
@@ -39,14 +42,17 @@ struct Scope {
     port_range: Option<(u16, u16)>,
 }
 
+/// The V2 binary policy container.
 #[derive(Default)]
 pub struct PolicyContainerV2 {}
 
+/// The V2 binary policy format.
 impl PolicyBinaryV2 {
     pub fn new() -> PolicyBinaryV2 {
         PolicyBinaryV2::default()
     }
 
+    /// Take a service protocol and store it as capnp "Scopes"
     fn protocol_to_scopes(&self, svc_prot: &Protocol) -> Vec<Scope> {
         let mut scopes = Vec::new();
         // The service "protocol" struct is a bit poorly defined. But in general
@@ -90,6 +96,8 @@ impl PolicyBinaryV2 {
         scopes
     }
 
+    /// Helper to write attributes into capnp AttrExpr list.
+    /// We have to do this for client conditions and service conditions.
     fn write_attributes(
         &self,
         attrs: &[Attribute],

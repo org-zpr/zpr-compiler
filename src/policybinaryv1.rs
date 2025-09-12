@@ -20,6 +20,7 @@ pub struct PolicyBinaryV1 {
     connects_table: HashMap<String, usize>, // connect hash string -> connect index
 }
 
+/// The old prototype visa service binary policy format container.
 #[derive(Default)]
 pub struct PolicyContainerV1 {}
 
@@ -59,6 +60,7 @@ impl PolicyContainer for PolicyContainerV1 {
     }
 }
 
+/// The old prototype visa service binary policy format.
 impl PolicyBinaryV1 {
     pub fn new() -> PolicyBinaryV1 {
         PolicyBinaryV1::default()
