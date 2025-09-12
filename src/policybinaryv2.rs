@@ -26,7 +26,7 @@ struct CommunicationPolicy {
     svc_conditions: Vec<Attribute>,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 #[allow(dead_code)]
 enum ScopeFlag {
     UdpOneWay,
@@ -149,18 +149,23 @@ impl PolicyWriter for PolicyBinaryV2 {
     fn write_created_timestamp(&mut self, timestamp: &str) {
         self.created_timestamp = timestamp.to_string();
     }
+
     fn write_policy_version(&mut self, version: u64) {
         self.policy_version = version;
     }
+
     fn write_policy_revision(&mut self, _revision: &str) {
         // nop
     }
+
     fn write_policy_metadata(&mut self, metadata: &str) {
         self.policy_metadata = metadata.to_string();
     }
+
     fn write_max_visa_lifetime(&mut self, _lifetime: std::time::Duration) {
         // nop
     }
+
     fn write_attribute_tables(
         &mut self,
         _key_table: &HashMap<String, usize>,
@@ -168,9 +173,11 @@ impl PolicyWriter for PolicyBinaryV2 {
     ) {
         // nop
     }
+
     fn write_connect_match(&mut self, _conditions: &[Attribute]) {
         // nop
     }
+
     fn write_connect_match_for_provider(
         &mut self,
         _svc_attrs: &[Attribute],
@@ -181,12 +188,15 @@ impl PolicyWriter for PolicyBinaryV2 {
     ) {
         // nop
     }
+
     fn write_service_cert(&mut self, _svc_id: &str, _cert_data: &[u8]) {
         // nop
     }
+
     fn write_bootstrap_key(&mut self, _cn: &str, _keydata: &[u8]) {
         // nop
     }
+
     fn write_cpolicy(
         &mut self,
         svc_id: &str,
@@ -205,6 +215,7 @@ impl PolicyWriter for PolicyBinaryV2 {
             svc_conditions: svc_conditions.to_vec(),
         });
     }
+
     fn write_trusted_service(
         &mut self,
         _svc_id: &str,
@@ -216,16 +227,15 @@ impl PolicyWriter for PolicyBinaryV2 {
     ) {
         // nop
     }
+
     fn print_stats(&self) {
         println!(
             "  {} communication policies",
             self.communication_policies.len()
         );
     }
+
     fn finalize(&mut self) -> Result<Vec<u8>, CompilationError> {
-        // TODO - The capnp serialization needs writable memory buffer which I was unable to
-        // figure out how to incrementally update then then "finalize" ... so we do everything
-        // here using the state we built up.
         let mut policy_msg = ::capnp::message::Builder::new_default();
         let mut policy = policy_msg.init_root::<policy_capnp::policy::Builder>();
 
@@ -233,8 +243,6 @@ impl PolicyWriter for PolicyBinaryV2 {
         policy.set_version(self.policy_version);
         policy.set_metadata(&self.policy_metadata);
 
-        // HMM: since you need to init these arrays before using it may be hard to incrementally
-        // build the message.  So this state copy thing may be our only way to go.
         let mut cpols = policy.init_com_policies(self.communication_policies.len() as u32);
         for (i, cp) in self.communication_policies.iter().enumerate() {
             let scopes = self.protocol_to_scopes(&cp.protocol);
@@ -290,5 +298,72 @@ impl PolicyWriter for PolicyBinaryV2 {
             Ok(_) => {}
         }
         Ok(policy_bytes)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::protocols::{IanaProtocol, IcmpFlowType, Protocol};
+
+    #[test]
+    fn test_protocol_to_scopes_basic_tcp() {
+        let pb = PolicyBinaryV2::new();
+
+        let prot1 =
+            Protocol::new_l4_with_port("foo".to_string(), IanaProtocol::TCP, "80".to_string());
+        let scopes1 = pb.protocol_to_scopes(&prot1);
+        assert_eq!(scopes1.len(), 1);
+        assert_eq!(scopes1[0].protocol, 6);
+        assert_eq!(scopes1[0].port, Some(80));
+        assert_eq!(scopes1[0].port_range, None);
+        assert_eq!(scopes1[0].flag, None);
+    }
+
+    #[test]
+    fn test_protocol_to_scopes_icmp_request_reply() {
+        let pb = PolicyBinaryV2::new();
+        let flow = IcmpFlowType::RequestResponse(128, 129);
+        let prot1 = Protocol::new_l4_with_icmp("foo".to_string(), IanaProtocol::ICMPv6, flow);
+        let scopes1 = pb.protocol_to_scopes(&prot1);
+        assert_eq!(scopes1.len(), 1);
+        assert_eq!(scopes1[0].protocol, 58);
+        assert_eq!(scopes1[0].port, None);
+        assert_eq!(scopes1[0].port_range, Some((128, 129)));
+        assert_eq!(scopes1[0].flag, Some(ScopeFlag::IcmpRequestReply));
+    }
+
+    #[test]
+    fn test_protocol_to_scopes_icmp_once() {
+        let pb = PolicyBinaryV2::new();
+        let flow = IcmpFlowType::OneShot(vec![128]);
+        let prot1 = Protocol::new_l4_with_icmp("foo".to_string(), IanaProtocol::ICMPv6, flow);
+        let scopes1 = pb.protocol_to_scopes(&prot1);
+        assert_eq!(scopes1.len(), 1);
+        assert_eq!(scopes1[0].protocol, 58);
+        assert_eq!(scopes1[0].port, Some(128));
+        assert_eq!(scopes1[0].port_range, None);
+        assert_eq!(scopes1[0].flag, None);
+    }
+
+    #[test]
+    fn test_protocol_to_scopes_icmp_once_multiple() {
+        let pb = PolicyBinaryV2::new();
+        let flow = IcmpFlowType::OneShot(vec![128, 129, 130]);
+        let prot1 = Protocol::new_l4_with_icmp("foo".to_string(), IanaProtocol::ICMPv6, flow);
+        let scopes1 = pb.protocol_to_scopes(&prot1);
+        assert_eq!(scopes1.len(), 3);
+        assert_eq!(scopes1[0].protocol, 58);
+        assert_eq!(scopes1[0].port, Some(128));
+        assert_eq!(scopes1[0].port_range, None);
+        assert_eq!(scopes1[0].flag, None);
+        assert_eq!(scopes1[1].protocol, 58);
+        assert_eq!(scopes1[1].port, Some(129));
+        assert_eq!(scopes1[1].port_range, None);
+        assert_eq!(scopes1[1].flag, None);
+        assert_eq!(scopes1[2].protocol, 58);
+        assert_eq!(scopes1[2].port, Some(130));
+        assert_eq!(scopes1[2].port_range, None);
+        assert_eq!(scopes1[2].flag, None);
     }
 }
