@@ -71,8 +71,8 @@ impl fmt::Display for AllowClause {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "[{}] ALLOW {:?}\n      TO ACCESS {:?}",
-            self.clause_id, self.client, self.server
+            "[{}] ALLOW {}\n   WITH {}\n      TO ACCESS {} \n         AND SIGNAL {:?}",
+            self.clause_id, self.endpoint, self.user, self.service, self.signal
         )
     }
 }
@@ -155,6 +155,32 @@ impl fmt::Display for Clause {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Signal {
+    pub phrase: String,
+    pub endpoint: Class,
+}
+
+impl Signal {
+    pub fn new(phrase: String, endpoint: Class) -> Self {
+        Signal { phrase, endpoint }
+    }
+
+    pub fn get_phrase(&self) -> String {
+        self.phrase.clone()
+    }
+
+    pub fn get_endpoint(&self) -> Class {
+        self.endpoint.clone()
+    }
+}
+
+impl fmt::Display for Signal {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} to {}", self.phrase, self.endpoint.name)
+    }
+}
+
 /// A defined class in ZPL has a type which we call "flavor".
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Default)]
 pub enum ClassFlavor {
@@ -178,7 +204,7 @@ impl Display for ClassFlavor {
 
 /// A class is created from a ZPL define statement.
 /// There are also three built in classes: user, service, and endpoint.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Class {
     pub flavor: ClassFlavor,
     pub parent: String,

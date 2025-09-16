@@ -9,6 +9,7 @@
 
 - Initial support for a v2 binary format.
 - Services can be on LHS of statements.
+- Support for signal clause
 
 ## [0.7.0] - 2025-09-05
 

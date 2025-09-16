@@ -5,7 +5,7 @@ use std::iter::Peekable;
 
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{AllowClause, AttrDomain, Attribute, Class, ClassFlavor, Clause};
+use crate::ptypes::{AllowClause, AttrDomain, Attribute, Class, ClassFlavor, Clause, Signal};
 use crate::putil;
 use crate::zpl;
 
@@ -16,6 +16,7 @@ struct ParseAllowState {
     client_user_clause: Option<Clause>,
     client_service_clause: Option<Clause>,
     service_clause: Option<Clause>,
+    signal_clause: Option<Signal>,
 }
 
 impl ParseAllowState {
@@ -286,9 +287,16 @@ pub fn parse_allow(
     }
 
     // The remaining tokens should start with "access ..." which we pass to the service class parser.
+    // It is also possible there is a signal clause
     parse_allow_service_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
 
+    if let Some(_tok) = tokens.peek() {
+        parse_allow_signal_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
+    }
+
     let mut ac = parse_state.to_allow_clause(statement_id);
+
+    println!("{ac}");
 
     // Set any UNSPECIFIED (lacking domain) attributes to the domain of the clause they are in.
 
@@ -421,7 +429,8 @@ where
 
     // Need a service clause now -- parse to end of statement.
     let mut ps = PState::new(&pa_state.root_tok);
-    let popts = ParseOpts::stop_at_any(&[TokenType::On, TokenType::Eos]);
+    // Signal clause will always
+    let popts = ParseOpts::stop_at_any(&[TokenType::On, TokenType::Eos, TokenType::Signal]);
     ps.parse_tags_attrs_and_classname(tokens, classes_idx, &popts, "service clause")?;
 
     let cn = ps.class_name.as_ref().unwrap();
@@ -434,50 +443,66 @@ where
     }
     let mut service_clause = ps.to_clause(ClassFlavor::Service)?;
 
-    // If we read an ON then we need to parse an endpoint clause.
-    if let Some(tok) = tokens.next() {
-        if tok.tt == TokenType::On {
-            let mut nested_ps = PState::new(&pa_state.root_tok);
+    // If we read an ON then we need to parse an endpoint clause or a Signal clause.
+    if let Some(tok) = tokens.peek() {
+        match tok.tt {
+            TokenType::On => {
+                // Previously used tokens.next() above, changed to peek because if we read a
+                // Signal that should remain for error checking outside this function call
+                tokens.next();
 
-            nested_ps.parse_tags_attrs_and_classname(
-                tokens,
-                classes_idx,
-                &ParseOpts::default(),
-                "service endpoint clause",
-            )?;
+                let mut nested_ps = PState::new(&pa_state.root_tok);
 
-            // This is a good parse if we actually got a endpoint flavor class.
-            let cn = nested_ps.class_name.as_ref().unwrap();
-            if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
-                let service_ec = nested_ps.to_clause(ClassFlavor::Endpoint)?;
+                nested_ps.parse_tags_attrs_and_classname(
+                    tokens,
+                    classes_idx,
+                    &ParseOpts::default(),
+                    "service endpoint clause",
+                )?;
 
-                // Since ZPL could use a defined class in the on clause we need to walk the tree and
-                // gather any attributes.
-                let mut all_endpoint_attrs = collect_all_attributes(&service_ec.class, classes_map);
-                all_endpoint_attrs.extend(service_ec.with);
+                // This is a good parse if we actually got a endpoint flavor class.
+                let cn = nested_ps.class_name.as_ref().unwrap();
+                if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
+                    let service_ec = nested_ps.to_clause("endpoint")?;
 
-                for ec_attr in &all_endpoint_attrs {
-                    let mut domained_attr = ec_attr.clone();
-                    if domained_attr.is_unspecified_domain() {
-                        domained_attr.set_domain(AttrDomain::Endpoint);
-                    } else if !domained_attr.is_domain(AttrDomain::Endpoint) {
-                        // This is not permitted. You can only talk about endpoints in the ON clause.
-                        return Err(CompilationError::AllowStmtParseError(
-                            format!(
-                                "illegal non-endpoint attribute in service ON clause: '{domained_attr}'"
-                            ),
-                            pa_state.root_tok.line,
-                            pa_state.root_tok.col,
-                        ));
+                    // Since ZPL could use a defined class in the on clause we need to walk the tree and
+                    // gather any attributes.
+                    let mut all_endpoint_attrs =
+                        collect_all_attributes(&service_ec.class, classes_map);
+                    all_endpoint_attrs.extend(service_ec.with);
+
+                    for ec_attr in &all_endpoint_attrs {
+                        let mut domained_attr = ec_attr.clone();
+                        if domained_attr.is_unspecified_domain() {
+                            domained_attr.set_domain(AttrDomain::Endpoint);
+                        } else if !domained_attr.is_domain(AttrDomain::Endpoint) {
+                            // This is not permitted. You can only talk about endpoints in the ON clause.
+                            return Err(CompilationError::AllowStmtParseError(
+                                format!(
+                                    "illegal non-endpoint attribute in service ON clause: '{domained_attr}'"
+                                ),
+                                pa_state.root_tok.line,
+                                pa_state.root_tok.col,
+                            ));
+                        }
+                        service_clause.with.push(domained_attr); // TODO: Are these already in endpoint domain?
                     }
-                    service_clause.with.push(domained_attr); // TODO: Are these already in endpoint domain?
+                } else {
+                    return Err(CompilationError::AllowStmtParseError(
+                        format!(
+                            "expected an endpoint class in service ON clause, got: '{}'",
+                            cn
+                        ),
+                        pa_state.root_tok.line,
+                        pa_state.root_tok.col,
+                    ));
                 }
-            } else {
+            }
+            TokenType::Signal => { // Want to fall through
+            }
+            _ => {
                 return Err(CompilationError::AllowStmtParseError(
-                    format!(
-                        "expected an endpoint class in service ON clause, got: '{}'",
-                        cn
-                    ),
+                    format!("Expected 'on' or 'signal' not {:?}", tok.tt),
                     pa_state.root_tok.line,
                     pa_state.root_tok.col,
                 ));
@@ -487,6 +512,104 @@ where
 
     pa_state.service_clause = Some(service_clause);
     Ok(())
+}
+
+fn parse_allow_signal_clause<'a, I>(
+    pa_state: &mut ParseAllowState,
+    tokens: &mut Peekable<I>,
+    _classes_idx: &HashMap<String, String>,
+    classes_map: &HashMap<String, Class>,
+) -> Result<(), CompilationError>
+where
+    I: Iterator<Item = &'a Token>,
+{
+    // Pop off the SIGNAL token
+    // Checking for type is theoretically redundant...I don't think any starting token
+    // other than a SIGNAL could reach this point because it would error out in service clause func
+    putil::require_tt(
+        &pa_state.root_tok,
+        tokens.next(),
+        "SIGNAL",
+        "allow",
+        TokenType::Signal,
+    )?;
+
+    let literal: String;
+    let endpoint: Class;
+
+    // The first part of the signal clause should be a literal to signal
+    if let Some(tok) = tokens.next() {
+        literal = tok.get_string_from_literal()?;
+    } else {
+        return Err(CompilationError::ParseError(
+            format!("Signal clause requires a payload"),
+            pa_state.root_tok.line,
+            pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
+        ));
+    }
+
+    // The next part should be the token TO
+    if let Some(tok) = tokens.next() {
+        if tok.tt != TokenType::To {
+            return Err(CompilationError::ParseError(
+                format!(
+                    "Signal clause requires 'TO' to declare service name, found: {:?}",
+                    tok
+                ),
+                tok.line,
+                tok.col, // TODO this will provide col 1, not the col where the signal is
+            ));
+        }
+    } else {
+        return Err(CompilationError::ParseError(
+            format!("Signal clause requires 'TO' to declare service name"),
+            pa_state.root_tok.line,
+            pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
+        ));
+    }
+
+    // The final portion of the signal clause should be an existing service class
+    if let Some(tok) = tokens.next() {
+        let service_name = tok.get_string_from_literal()?;
+        let service_class = classes_map.get(&service_name);
+        if service_class.is_none() {
+            return Err(CompilationError::ParseError(
+                format!("Invalid service name: {service_name}"),
+                pa_state.root_tok.line,
+                pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
+            ));
+        }
+        if service_class.unwrap().flavor != ClassFlavor::Service {
+            return Err(CompilationError::ParseError(
+                format!(
+                    "{service_name} is not a service, it is of type {:?}",
+                    service_class.unwrap().flavor
+                ),
+                pa_state.root_tok.line,
+                pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
+            ));
+        }
+        endpoint = service_class.unwrap().clone();
+    } else {
+        return Err(CompilationError::ParseError(
+            format!("Signal clause requires a service"),
+            pa_state.root_tok.line,
+            pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
+        ));
+    }
+
+    // Nothing should follow the signal clause
+    // TODO allow for multiple signal clauses
+    if tokens.peek().is_some() {
+        return Err(CompilationError::ParseError(
+            format!("No data should follow a signal clause"),
+            pa_state.root_tok.line,
+            pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
+        ));
+    }
+
+    pa_state.signal_clause = Some(Signal::new(literal, endpoint));
+    return Ok(());
 }
 
 // Note that this does not check for duplicates.
