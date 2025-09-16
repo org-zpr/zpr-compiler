@@ -71,8 +71,8 @@ impl fmt::Display for AllowClause {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "[{}] ALLOW {}\n   WITH {}\n      TO ACCESS {} \n         AND SIGNAL {:?}",
-            self.clause_id, self.endpoint, self.user, self.service, self.signal
+            "[{}] ALLOW {:?}\n      TO ACCESS {:?} \n         AND SIGNAL {:?}",
+            self.clause_id, self.client, self.server, self.signal
         )
     }
 }
@@ -161,7 +161,6 @@ pub struct Signal {
     pub endpoint: Class,
 }
 
-#[allow(dead_code)]
 impl Signal {
     pub fn new(phrase: String, endpoint: Class) -> Self {
         Signal { phrase, endpoint }
