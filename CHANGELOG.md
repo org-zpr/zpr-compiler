@@ -4,6 +4,12 @@
 
 - (empty)
 
+## [0.7.1] - 2025-09-16
+
+- Support for signal clause
+- Maybe requires a full version increase (0.8.0) because the format of the 
+  output is going to change, thus old versions will not be compatible
+
 ## [0.7.0] - 2025-09-05
 
 - Support for deny statements in the form of "never allow...".

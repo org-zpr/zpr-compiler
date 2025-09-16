@@ -1106,6 +1106,7 @@ mod test {
             endpoint: Clause::new("endpoint", Token::default()),
             user: Clause::new("user", Token::default()),
             service: Clause::new("foo", Token::default()),
+            signal: None,
         };
         policy.allows.push(a_foo);
 
