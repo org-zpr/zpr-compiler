@@ -133,6 +133,7 @@ pub struct Signal {
     pub endpoint: Class,
 }
 
+#[allow(dead_code)]
 impl Signal {
     pub fn new(phrase: String, endpoint: Class) -> Self {
         Signal { phrase, endpoint }
