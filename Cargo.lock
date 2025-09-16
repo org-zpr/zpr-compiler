@@ -765,7 +765,7 @@ dependencies = [
 
 [[package]]
 name = "zplc"
-version = "0.6.2"
+version = "0.7.1"
 dependencies = [
  "base64",
  "bytes",
@@ -786,6 +786,7 @@ dependencies = [
 [[package]]
 name = "zpr-policy"
 version = "0.7.0"
+source = "git+https://github.com/org-zpr/zpr-policy-rs.git?tag=v0.7.0#11295555272457b41da193269737bc3c8062e345"
 dependencies = [
  "prost",
 ]

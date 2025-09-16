@@ -29,6 +29,7 @@ pub enum TokenType {
     Tuple((String, String)),
     Period,
     Eos, // means "end of statement" but is never actually created
+    Signal,
 }
 
 #[allow(dead_code)]
@@ -68,6 +69,7 @@ impl Token {
             "optional" => TokenType::Optional,
             "multiple" => TokenType::Multiple,
             "." => TokenType::Period,
+            "signal" => TokenType::Signal,
             _ => TokenType::Literal(s.as_atom()),
         };
         Token::new(tok, line, col)
@@ -75,6 +77,19 @@ impl Token {
 
     pub fn new(tt: TokenType, line: usize, col: usize) -> Token {
         Token { tt, line, col }
+    }
+
+    pub fn get_string_from_literal(&self) -> Result<String, CompilationError> {
+        match &self.tt {
+            TokenType::Literal(phrase) => Ok(phrase.clone()),
+            ty => {
+                return Err(CompilationError::ParseError(
+                    format!("Expected a Literal, found: {:?}", ty),
+                    self.line,
+                    self.col,
+                ));
+            }
+        }
     }
 }
 
