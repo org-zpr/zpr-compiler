@@ -456,11 +456,11 @@ where
                 nested_ps.parse_tags_attrs_and_classname(
                     tokens,
                     classes_idx,
-                    &ParseOpts::default(),
+                    &ParseOpts::stop_at_any(&[TokenType::Eos, TokenType::Signal]),
                     "service endpoint clause",
                 )?;
 
-                // This is a good parse if we actually got a endpoint flavor class.
+                // This is a good parse if we actually got a endpoint or signal flavor class.
                 let cn = nested_ps.class_name.as_ref().unwrap();
                 if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
                     let service_ec = nested_ps.to_clause("endpoint")?;
