@@ -167,22 +167,44 @@ impl Weaver {
         // The admin permissions come from ZPL allow statements, not from configuration.
         let mut condition_count = 0;
         for ac in &policy.allows {
+            // Seeking a RHS service class that is the visa service.
+
+            let vs_rhs_count = ac
+                .server
+                .iter()
+                .map(|c| {
+                    c.flavor == ClassFlavor::Service && c.class == zpl::DEF_CLASS_VISA_SERVICE_NAME
+                })
+                .count();
+            if vs_rhs_count < 1 {
+                continue;
+            }
+            /* XXX
             if ac.service.class != zpl::DEF_CLASS_VISA_SERVICE_NAME {
                 continue;
             }
+            */
 
             // TODO: User may be able to shoot themselves in the foot here if they add
             // too many attributes to VisaService. May want to consider disallowing
             // any attributes on the service (but allow on user and endpoint).
-            let mut admin_access_attrs = ac.user.with.clone();
-            admin_access_attrs.extend_from_slice(&ac.endpoint.with);
-            admin_access_attrs.extend_from_slice(&ac.service.with);
 
-            admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.user.class));
-            admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.endpoint.class));
-            admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.service.class));
+            // The admin access attributes are all the attributes declared on the client side of
+            // the clause.
+            //
+            // TODO: Where do we add the service side attributes for visa service?
+            let mut admin_access_attrs = Vec::new();
 
-            let fp = FPos::from(&ac.endpoint.class_tok);
+            for lhs_clause in &ac.client {
+                // Add the attributes from this clause
+                admin_access_attrs.extend_from_slice(&lhs_clause.with);
+
+                // And add the attributes defined at class level
+                admin_access_attrs
+                    .extend_from_slice(&attrs_for_class(class_idx, &lhs_clause.class));
+            }
+
+            let fp = FPos::from(&ac.server[0].class_tok);
             let attr_map = squash_attributes(&admin_access_attrs, &fp)?;
             let resolved_attrs = self.resolve_attributes(
                 attr_map
@@ -342,31 +364,37 @@ impl Weaver {
         config: &ConfigApi,
     ) -> Result<(), CompilationError> {
         for ac in &policy.allows {
-            if ac.service.class == zpl::DEF_CLASS_SERVICE_NAME {
+            // Parser ensures that the allow clause has a server.service clause.
+            let server_service = ac.get_server_service_clause().unwrap();
+            if server_service.class == zpl::DEF_CLASS_SERVICE_NAME {
                 // ZPL that applies to ALL services does not generate additional
                 // connect rules.  But it will create access rules.
                 continue;
             }
-            if ac.service.class == zpl::DEF_CLASS_VISA_SERVICE_NAME {
+            if server_service.class == zpl::DEF_CLASS_VISA_SERVICE_NAME {
                 // Handled elswhere.
                 continue;
             }
 
-            let svc_id = match class_idx.get(&ac.service.class) {
+            let svc_id = match class_idx.get(&server_service.class) {
                 Some(cls) => cls.class_id,
                 None => panic!(
                     "service class {} not found in class index",
-                    ac.service.class
+                    server_service.class
                 ),
             };
 
             let mut attrs = Vec::new();
 
-            let svc_class_attrs = attrs_for_class(class_idx, &ac.service.class);
+            let svc_class_attrs = attrs_for_class(class_idx, &server_service.class);
             attrs.extend_from_slice(&svc_class_attrs);
-            attrs.extend_from_slice(&ac.service.with);
+
+            // And include any server side attributes.
+            for rhs_clause in &ac.server {
+                attrs.extend_from_slice(&rhs_clause.with);
+            }
             let svc_class = class_idx
-                .get(&ac.service.class)
+                .get(&server_service.class)
                 .expect("service class not found in class index");
             self.add_service(class_idx, svc_class, &attrs, svc_id, config)?;
         }
@@ -524,7 +552,8 @@ impl Weaver {
         config: &ConfigApi,
     ) -> Result<(), CompilationError> {
         for ac in allow_clause {
-            if ac.service.class == zpl::DEF_CLASS_VISA_SERVICE_NAME {
+            let server_service = ac.get_server_service_clause().unwrap();
+            if server_service.class == zpl::DEF_CLASS_VISA_SERVICE_NAME {
                 // Visa service is handled separately.
                 continue;
             }
@@ -532,29 +561,44 @@ impl Weaver {
             // Here we collect all attributes -- some will have no values.
             let mut attrs = Vec::new();
 
-            // Grab all the endpoint attributes
-            let ep_class_attrs = attrs_for_class(class_idx, &ac.endpoint.class);
-            attrs.extend_from_slice(&ep_class_attrs);
-            attrs.extend_from_slice(
-                &ac.endpoint
-                    .with
-                    .iter()
-                    .filter(|a| !a.optional)
-                    .cloned()
-                    .collect::<Vec<Attribute>>(),
-            );
+            // Grab the LHS endpoint and user attributes.
+            for lhs_class in &ac.client {
+                if lhs_class.flavor == ClassFlavor::Endpoint
+                    || lhs_class.flavor == ClassFlavor::User
+                {
+                    // Add attributes from parent
+                    attrs.extend_from_slice(&attrs_for_class(class_idx, &lhs_class.class));
 
-            // Grab all the user attributes
-            let user_class_attrs = attrs_for_class(class_idx, &ac.user.class);
-            attrs.extend_from_slice(&user_class_attrs);
-            attrs.extend_from_slice(
-                &ac.user
-                    .with
-                    .iter()
-                    .filter(|a| !a.optional)
-                    .cloned()
-                    .collect::<Vec<Attribute>>(),
-            );
+                    // Add non-optional instance attributes
+                    attrs.extend(lhs_class.with.iter().filter(|a| !a.optional).cloned());
+                }
+            }
+
+            // Grab all the endpoint attributes
+            /*
+                let ep_class_attrs = attrs_for_class(class_idx, &ac.endpoint.class);
+                attrs.extend_from_slice(&ep_class_attrs);
+                attrs.extend_from_slice(
+                    &ac.client[0]
+                        .with
+                        .iter()
+                        .filter(|a| !a.optional)
+                        .cloned()
+                        .collect::<Vec<Attribute>>(),
+                );
+
+                // Grab all the user attributes
+                let user_class_attrs = attrs_for_class(class_idx, &ac.user.class);
+                attrs.extend_from_slice(&user_class_attrs);
+                attrs.extend_from_slice(
+                    &ac.user
+                        .with
+                        .iter()
+                        .filter(|a| !a.optional)
+                        .cloned()
+                        .collect::<Vec<Attribute>>(),
+                );
+            */
 
             // Now we consolidate the attributes into a map, preferring attributes that have a value.
             let fp = FPos::from(&ac.endpoint.class_tok);
