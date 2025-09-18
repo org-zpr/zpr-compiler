@@ -206,8 +206,6 @@ pub fn parse_allow(
 
     let mut ac = parse_state.to_allow_clause(statement_id);
 
-    println!("{ac}");
-
     // Set any UNSPECIFIED (lacking domain) attributes to the domain of the clause they are in.
     for attr in &mut ac.endpoint.with {
         if attr.is_unspecified_domain() {
