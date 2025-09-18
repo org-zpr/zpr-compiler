@@ -148,7 +148,7 @@ impl Weaver {
         // we don't care about individual node names.
         let vs_access_attrs = vec![Attribute::zpr_internal_attr(zpl::KATTR_ROLE, "node")];
         self.fabric
-            .add_condition_to_service(false, &fab_svc_id, &vs_access_attrs, true)?;
+            .add_condition_to_service(false, &fab_svc_id, &vs_access_attrs, true, None)?;
 
         // Now add a service for the admin HTTPS API.
         let admin_api_protocol = Protocol::new_l4_with_port(
@@ -197,6 +197,7 @@ impl Weaver {
                     &fab_admin_svc_id,
                     &resolved_attrs,
                     false,
+                    None,
                 )?;
                 condition_count += 1;
             }
@@ -592,6 +593,7 @@ impl Weaver {
                     never_allow,
                     &required_attrs,
                     &svc_required_attrs,
+                    ac.signal.clone(),
                 )?;
             } else {
                 let svc_id = match class_idx.get(&ac.service.class) {
@@ -618,6 +620,7 @@ impl Weaver {
                     fab_svc_id,
                     &required_attrs,
                     false,
+                    ac.signal.clone(),
                 )?;
             }
         }
@@ -817,7 +820,7 @@ impl Weaver {
                 zpl::VISA_SERVICE_CN,
             )];
             self.fabric
-                .add_condition_to_service(false, &ts_name, &vs_access_attrs, true)?;
+                .add_condition_to_service(false, &ts_name, &vs_access_attrs, true, None)?;
         }
         Ok(())
     }
