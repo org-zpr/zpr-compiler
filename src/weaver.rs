@@ -405,9 +405,6 @@ impl Weaver {
         attrs: &[Attribute],
         config: &ConfigApi,
     ) -> Result<Vec<Attribute>, CompilationError> {
-        // TODO: The trusted service support is no yet real, this is a hack to permit compilation of
-        //       ZPL files that use more than just the "cn" (default) attribute.
-
         let trusted_service_names = config.must_get_keys("/trusted_services");
 
         let mut resolved_attrs = Vec::new();
@@ -419,46 +416,62 @@ impl Weaver {
                     a,
                 )));
             }
-            if attr_name == zpl::KATTR_CN {
-                resolved_attrs.push(a.clone());
-                self.used_trusted_services
-                    .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
-            } else if attr_name == zpl::DEFAULT_ATTR {
-                resolved_attrs.push(a.clone_with_new_name(zpl::KATTR_CN));
-                self.used_trusted_services
-                    .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
-            } else {
-                // TODO: This should be cached
-                // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
-                let mut matched = false;
-                for ts_name in &trusted_service_names {
-                    let search_name = if a.tag {
-                        a.zpl_value().clone()
-                    } else {
-                        attr_name.clone()
-                    };
-                    let ts_attrs = if a.tag {
-                        config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name))
-                    } else {
-                        config.must_get_keys(&format!("/trusted_services/{}/attributes", ts_name))
-                    };
-                    if ts_attrs.contains(&search_name) {
-                        if matched {
-                            return Err(CompilationError::ConfigError(format!(
-                                "attribute {a} found in multiple trusted services"
-                            )));
+
+            match attr_name.as_str() {
+                zpl::KATTR_CN => {
+                    resolved_attrs.push(a.clone());
+                    self.used_trusted_services
+                        .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+                }
+                zpl::DEFAULT_ATTR => {
+                    resolved_attrs.push(a.clone_with_new_name(zpl::KATTR_CN));
+                    self.used_trusted_services
+                        .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+                }
+                zpl::KATTR_SERVICES => {
+                    resolved_attrs.push(a.clone());
+                    self.used_trusted_services
+                        .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+                }
+                _ => {
+                    // TODO: This should be cached
+                    // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
+                    let mut matched = false;
+                    for ts_name in &trusted_service_names {
+                        let search_name = if a.tag {
+                            a.zpl_value().clone()
+                        } else {
+                            attr_name.clone()
+                        };
+                        let ts_attrs = if a.tag {
+                            config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name))
+                        } else {
+                            config
+                                .must_get_keys(&format!("/trusted_services/{}/attributes", ts_name))
+                        };
+                        if ts_attrs.contains(&search_name) {
+                            if matched {
+                                return Err(CompilationError::ConfigError(format!(
+                                    "attribute {a} found in multiple trusted services"
+                                )));
+                            }
+                            let new_attr = a.clone();
+                            resolved_attrs.push(new_attr);
+                            self.used_trusted_services.insert(ts_name.clone());
+                            matched = true;
                         }
-                        let new_attr = a.clone();
-                        resolved_attrs.push(new_attr);
-                        self.used_trusted_services.insert(ts_name.clone());
-                        matched = true;
+                    }
+                    if !matched {
+                        return Err(CompilationError::ConfigError(format!(
+                            "attribute {a} not found in any trusted service"
+                        )));
                     }
                 }
-                if !matched {
-                    return Err(CompilationError::ConfigError(format!(
-                        "attribute {a} not found in any trusted service"
-                    )));
-                }
+            }
+
+            if attr_name == zpl::KATTR_CN {
+            } else if attr_name == zpl::DEFAULT_ATTR {
+            } else {
             }
         }
         Ok(resolved_attrs)

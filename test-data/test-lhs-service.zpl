@@ -10,4 +10,5 @@ Allow red services                                    to access user.green, blue
 
 # TODO: try some defines
 
-# POLICY: Do we need a sort of "is-a-service" attribute to match on for LHS in visa service?
+# If you put a service class on the LHS, implies actor must provide a service.
+# AND match the attribute. 
