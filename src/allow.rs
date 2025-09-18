@@ -34,28 +34,34 @@ impl ParseAllowState {
     }
 
     /// This consumes all the clauses or panics.
+    ///
+    /// Note that ever allow clause will get a user and endpoint clause in the client vector
+    /// even if they are just the default.
+    ///
+    /// The `server` vector in the [AllowClause] will just have one element -- a service clause
+    /// that may have attributes from other domains (eg, endpoint or user attributes).
     fn to_allow_clause(&mut self, clause_id: usize) -> AllowClause {
-        let mut cu_clause = self.client_user_clause.take().unwrap_or(Clause::new(
+        let mut client_user_clause = self.client_user_clause.take().unwrap_or(Clause::new(
             ClassFlavor::User,
             zpl::DEF_CLASS_USER_NAME,
             self.root_tok.clone(),
         ));
 
-        let mut cep_clause = self.client_endpoint_clause.take().unwrap_or(Clause::new(
+        let mut client_endpoint_clause = self.client_endpoint_clause.take().unwrap_or(Clause::new(
             ClassFlavor::Endpoint,
             zpl::DEF_CLASS_ENDPOINT_NAME,
             self.root_tok.clone(),
         ));
 
         // For now keep service as none if it is not yet defined.
-        let mut opt_csvc_clause = self.client_service_clause.take();
+        let mut opt_client_service_clause = self.client_service_clause.take();
 
         // Move any non endpoint attributes from the endpoint clause into the correct one.
         let mut keep_attrs = Vec::new();
-        for attr in cep_clause.with {
+        for attr in client_endpoint_clause.with {
             match attr.get_domain_ref() {
                 &AttrDomain::Service => {
-                    if let Some(ref mut sc) = opt_csvc_clause {
+                    if let Some(ref mut sc) = opt_client_service_clause {
                         sc.with.push(attr)
                     } else {
                         let mut cl = Clause::new(
@@ -64,21 +70,21 @@ impl ParseAllowState {
                             self.root_tok.clone(),
                         );
                         cl.with.push(attr);
-                        opt_csvc_clause = Some(cl)
+                        opt_client_service_clause = Some(cl)
                     }
                 }
-                &AttrDomain::User => cu_clause.with.push(attr),
+                &AttrDomain::User => client_user_clause.with.push(attr),
                 _ => keep_attrs.push(attr),
             }
         }
-        cep_clause.with = keep_attrs;
+        client_endpoint_clause.with = keep_attrs;
 
         // Move any non user attributes from the user clause into the correct one.
         let mut keep_attrs = Vec::new();
-        for attr in cu_clause.with {
+        for attr in client_user_clause.with {
             match attr.get_domain_ref() {
                 &AttrDomain::Service => {
-                    if let Some(ref mut sc) = opt_csvc_clause {
+                    if let Some(ref mut sc) = opt_client_service_clause {
                         sc.with.push(attr)
                     } else {
                         let mut cl = Clause::new(
@@ -87,19 +93,19 @@ impl ParseAllowState {
                             self.root_tok.clone(),
                         );
                         cl.with.push(attr);
-                        opt_csvc_clause = Some(cl)
+                        opt_client_service_clause = Some(cl)
                     }
                 }
-                &AttrDomain::Endpoint => cep_clause.with.push(attr),
+                &AttrDomain::Endpoint => client_endpoint_clause.with.push(attr),
                 _ => keep_attrs.push(attr),
             }
         }
-        cu_clause.with = keep_attrs;
+        client_user_clause.with = keep_attrs;
 
         let mut client_clauses = Vec::new();
-        client_clauses.push(cu_clause);
-        client_clauses.push(cep_clause);
-        if let Some(sc) = opt_csvc_clause.take() {
+        client_clauses.push(client_user_clause);
+        client_clauses.push(client_endpoint_clause);
+        if let Some(sc) = opt_client_service_clause.take() {
             client_clauses.push(sc);
         }
         AllowClause {
@@ -163,17 +169,14 @@ pub fn parse_allow(
                     // Must have either a device or user clause.
                     match classes_map.get(cn).unwrap().flavor {
                         ClassFlavor::User => {
-                            // Device clause is skipped, so use default.
                             let uc = ps.to_clause(ClassFlavor::User, "user")?;
                             parse_state.client_user_clause = Some(uc);
                         }
                         ClassFlavor::Endpoint => {
-                            // User clause is skipped, so use default.
                             let dc = ps.to_clause(ClassFlavor::Endpoint, "endpoint")?;
                             parse_state.client_endpoint_clause = Some(dc);
                         }
                         ClassFlavor::Service => {
-                            // User clause is skipped, so use default.
                             let dc = ps.to_clause(ClassFlavor::Service, "service")?;
                             parse_state.client_service_clause = Some(dc);
                         }
@@ -786,21 +789,25 @@ mod test {
 
         // Blue tag goes on user.
 
-        assert_eq!(1, clause.client.len());
+        assert_eq!(2, clause.client.len(), "{:?}", clause.client); // user & endpoint
+        let mut matched = false;
         for lhs_clause in &clause.client {
-            assert_eq!(lhs_clause.flavor, ClassFlavor::User);
-            lhs_clause
-                .with
-                .iter()
-                .find(|a| a.to_string() == "#user.blue")
-                .expect("blue tag missing from user clause");
+            if lhs_clause.flavor == ClassFlavor::User {
+                matched = true;
+                lhs_clause
+                    .with
+                    .iter()
+                    .find(|a| a.to_string() == "#user.blue")
+                    .expect("blue tag missing from user clause");
+            }
         }
+        assert!(matched, "failed to find a user clause");
+        matched = false;
 
         // level:seven attr goes in as an endpoint domain attribute on the service.
-        assert_eq!(2, clause.server.len()); // services & endpoints
-        let mut matched = false;
+        assert_eq!(1, clause.server.len(), "{:?}", clause.server); // service & endpoint
         for rhs_clause in &clause.server {
-            if rhs_clause.flavor == ClassFlavor::Endpoint {
+            if rhs_clause.flavor == ClassFlavor::Service {
                 matched = true;
                 rhs_clause
                     .with
@@ -878,7 +885,7 @@ mod test {
         let clause = parse_allow(&tokens, 1, &class_index, &classes).unwrap();
 
         assert_eq!(2, clause.client.len()); // users, endpoints
-        assert_eq!(2, clause.server.len()); // services, endpoints
+        assert_eq!(1, clause.server.len()); // services
 
         let mut matched_user = false;
         let mut matched_endpoint = false;
@@ -910,15 +917,10 @@ mod test {
         assert!(matched_user, "failed to locate user clause in LHS");
         assert!(matched_endpoint, "failed to locate endpoint clause in LHS");
 
-        matched_endpoint = false;
         for rhs_clause in clause.server {
             match rhs_clause.flavor {
                 ClassFlavor::Service => {
                     matched_service = true;
-                }
-                ClassFlavor::Endpoint => {
-                    // level:eight attr goes in as an endpoint domain attribute on the service.
-                    matched_endpoint = true;
                     rhs_clause
                         .with
                         .iter()
@@ -929,7 +931,6 @@ mod test {
             }
         }
         assert!(matched_service, "failed to locate service clause in RHS");
-        assert!(matched_endpoint, "failed to locate endpoint clause in RHS");
     }
 
     // TODO: Test the LHS services

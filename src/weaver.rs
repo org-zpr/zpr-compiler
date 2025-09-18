@@ -574,48 +574,19 @@ impl Weaver {
                 }
             }
 
-            // Grab all the endpoint attributes
-            /*
-                let ep_class_attrs = attrs_for_class(class_idx, &ac.endpoint.class);
-                attrs.extend_from_slice(&ep_class_attrs);
-                attrs.extend_from_slice(
-                    &ac.client[0]
-                        .with
-                        .iter()
-                        .filter(|a| !a.optional)
-                        .cloned()
-                        .collect::<Vec<Attribute>>(),
-                );
-
-                // Grab all the user attributes
-                let user_class_attrs = attrs_for_class(class_idx, &ac.user.class);
-                attrs.extend_from_slice(&user_class_attrs);
-                attrs.extend_from_slice(
-                    &ac.user
-                        .with
-                        .iter()
-                        .filter(|a| !a.optional)
-                        .cloned()
-                        .collect::<Vec<Attribute>>(),
-                );
-            */
-
             // Now we consolidate the attributes into a map, preferring attributes that have a value.
-            let fp = FPos::from(&ac.endpoint.class_tok);
+            let fp = FPos::from(server_service.class_tok);
             let attr_map = squash_attributes(&attrs, &fp)?;
             let required_attrs = self
                 .resolve_attributes(&attr_map.into_values().collect::<Vec<Attribute>>(), config)?;
 
+            // Now grab the RHS attributes (attributes for the server)
             let svc_required_attrs = {
-                let mut service_class_attrs = attrs_for_class(class_idx, &ac.service.class);
-                service_class_attrs.extend_from_slice(
-                    &ac.service
-                        .with
-                        .iter()
-                        .filter(|a| !a.optional)
-                        .cloned()
-                        .collect::<Vec<Attribute>>(),
-                );
+                let mut service_class_attrs = Vec::new();
+                for rhs_class in &ac.server {
+                    service_class_attrs
+                        .extend(rhs_class.with.iter().filter(|a| !a.optional).cloned());
+                }
                 let attr_map = squash_attributes(&service_class_attrs, &fp)?;
                 self.resolve_attributes(
                     &attr_map.into_values().collect::<Vec<Attribute>>(),
@@ -630,7 +601,7 @@ impl Weaver {
             // c) the base service, eg, "service" - "allow red users to access services" -- in which case this condition applied to
             //    all services.
 
-            if ac.service.class == zpl::DEF_CLASS_SERVICE_NAME {
+            if server_service.class == zpl::DEF_CLASS_SERVICE_NAME {
                 // Add to all services (not nodes or trusted services or visa service)
                 self.fabric.add_condition_to_all_services(
                     never_allow,
@@ -638,11 +609,11 @@ impl Weaver {
                     &svc_required_attrs,
                 )?;
             } else {
-                let svc_id = match class_idx.get(&ac.service.class) {
+                let svc_id = match class_idx.get(&server_service.class) {
                     Some(cls) => cls.class_id,
                     None => panic!(
                         "service class {} not found in class index",
-                        ac.service.class
+                        server_service.class
                     ),
                 };
                 let fab_svc_id = match self.allowid_to_fab_svc.get(&svc_id) {
@@ -651,7 +622,7 @@ impl Weaver {
                         // programming error
                         panic!(
                             "error - service {} with id {} not found in map, allow = {}",
-                            ac.service.class, svc_id, ac
+                            server_service.class, svc_id, ac
                         );
                     }
                 };
@@ -1147,9 +1118,11 @@ mod test {
         // Will only notice that the 'foo' service is referenced.
         let a_foo = AllowClause {
             clause_id: 1,
-            endpoint: Clause::new("endpoint", Token::default()),
-            user: Clause::new("user", Token::default()),
-            service: Clause::new("foo", Token::default()),
+            client: vec![
+                Clause::new(ClassFlavor::Endpoint, "endpoint", Token::default()),
+                Clause::new(ClassFlavor::User, "user", Token::default()),
+            ],
+            server: vec![Clause::new(ClassFlavor::Service, "foo", Token::default())],
         };
         policy.allows.push(a_foo);
 
