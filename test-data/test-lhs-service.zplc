@@ -23,9 +23,20 @@ provider = [["endpoint.zpr.adapter.cn", "foo"]]
 l4protocol = "iana.TCP"
 port = 80
 
+[protocols.dbprot]
+l4protocol = "iana.TCP"
+port = 9012
+
 [services.foo-client]
 protocol = "zpr-oauthrsa"
 
 [services.foo-vs]
 protocol = "zpr-validation2"
 
+[services.MyWeb]
+protocol = "http"
+provider = [[ "endpoint.zpr.adapter.cn", "webserver.zpr" ]]
+
+[services.MyDb]
+protocol = "dbprot"
+provider = [[ "endpoint.zpr.adapter.cn", "dbserver.zpr" ]]

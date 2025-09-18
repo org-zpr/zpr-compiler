@@ -172,7 +172,7 @@ impl Weaver {
             let vs_rhs_count = ac
                 .server
                 .iter()
-                .map(|c| {
+                .filter(|c| {
                     c.flavor == ClassFlavor::Service && c.class == zpl::DEF_CLASS_VISA_SERVICE_NAME
                 })
                 .count();
@@ -352,6 +352,33 @@ impl Weaver {
         Ok(())
     }
 
+    /// This requires that `add_services` has already been run.
+    ///
+    /// Panics if
+    /// * `name` is not in the `class_idx`
+    /// * the class ID for `name` is not in the fabric services map.
+    fn service_clause_name_to_fabric_id(
+        &self,
+        class_idx: &HashMap<String, &Class>,
+        name: &str,
+    ) -> String {
+        let svc_id = match class_idx.get(name) {
+            Some(cls) => cls.class_id,
+            None => panic!("service class {} not found in class index", name),
+        };
+        let fab_svc_id = match self.allowid_to_fab_svc.get(&svc_id) {
+            Some(s) => s,
+            None => {
+                // programming error
+                panic!(
+                    "error - service {} with id {} not found in map",
+                    name, svc_id
+                );
+            }
+        };
+        fab_svc_id.clone()
+    }
+
     fn allow_clauses_to_services(
         &mut self,
         class_idx: &HashMap<String, &Class>,
@@ -379,12 +406,10 @@ impl Weaver {
                 ),
             };
 
-            let mut attrs = Vec::new();
+            // start with parent class attributes
+            let mut attrs = attrs_for_class(class_idx, &server_service.class);
 
-            let svc_class_attrs = attrs_for_class(class_idx, &server_service.class);
-            attrs.extend_from_slice(&svc_class_attrs);
-
-            // And include any server side attributes.
+            // And include any additionaal server side attributes from the RHS clause.
             for rhs_clause in &ac.server {
                 attrs.extend_from_slice(&rhs_clause.with);
             }
@@ -569,16 +594,32 @@ impl Weaver {
             // Here we collect all attributes -- some will have no values.
             let mut attrs = Vec::new();
 
-            // Grab the LHS endpoint and user attributes.
+            // Grab the LHS endpoint, service and user attributes.
             for lhs_class in &ac.client {
                 if lhs_class.flavor == ClassFlavor::Endpoint
                     || lhs_class.flavor == ClassFlavor::User
+                    || lhs_class.flavor == ClassFlavor::Service
                 {
                     // Add attributes from parent
                     attrs.extend_from_slice(&attrs_for_class(class_idx, &lhs_class.class));
 
                     // Add non-optional instance attributes
                     attrs.extend(lhs_class.with.iter().filter(|a| !a.optional).cloned());
+
+                    // If there is a service clause on the LHS then we assert that the
+                    // connecting client is a provider of that service. Note, there may not
+                    // be a concrete service specified, in that case we just say client must be
+                    // a provider of ANY service.
+                    if lhs_class.flavor == ClassFlavor::Service {
+                        let svc_attr = if lhs_class.class == zpl::DEF_CLASS_SERVICE_NAME {
+                            Attribute::zpr_internal_attr(zpl::KATTR_SERVICES, "")
+                        } else {
+                            let fab_svc_name =
+                                self.service_clause_name_to_fabric_id(class_idx, &lhs_class.class);
+                            Attribute::zpr_internal_attr_mv(zpl::KATTR_SERVICES, &fab_svc_name)
+                        };
+                        attrs.push(svc_attr);
+                    }
                 }
             }
 
@@ -617,28 +658,13 @@ impl Weaver {
                     &svc_required_attrs,
                 )?;
             } else {
-                let svc_id = match class_idx.get(&server_service.class) {
-                    Some(cls) => cls.class_id,
-                    None => panic!(
-                        "service class {} not found in class index",
-                        server_service.class
-                    ),
-                };
-                let fab_svc_id = match self.allowid_to_fab_svc.get(&svc_id) {
-                    Some(s) => s,
-                    None => {
-                        // programming error
-                        panic!(
-                            "error - service {} with id {} not found in map, allow = {}",
-                            server_service.class, svc_id, ac
-                        );
-                    }
-                };
+                let fab_svc_id =
+                    self.service_clause_name_to_fabric_id(class_idx, &server_service.class);
                 // Note we ignore any service attributes here. I think those are already handled in the
                 // service class definition.
                 self.fabric.add_condition_to_service(
                     never_allow,
-                    fab_svc_id,
+                    &fab_svc_id,
                     &required_attrs,
                     false,
                 )?;

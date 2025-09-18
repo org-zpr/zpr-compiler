@@ -429,6 +429,25 @@ impl Attribute {
         }
     }
 
+    /// Special constructor for ZPR internal attributes.
+    /// Panics if passed `name` must start with `zpr`.
+    pub fn zpr_internal_attr_mv(name: &str, value: &str) -> Self {
+        if let Some(name_without_domain) =
+            name.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_ZPR_INTERNAL))
+        {
+            return Attribute {
+                domain: AttrDomain::ZprInternal,
+                name: name_without_domain.to_string(),
+                value: Some(value.to_string()),
+                multi_valued: true,
+                tag: false,
+                optional: false,
+            };
+        } else {
+            panic!("zpr internal attribute must start with 'zpr.'");
+        }
+    }
+
     /// Create a tuple type attribute and will set domain unspecified if not present on the `name`.
     pub fn attr_domain_opt(name: &str, value: &str) -> Self {
         let (dom, rest) = Attribute::parse_domain(name)

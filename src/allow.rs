@@ -105,12 +105,6 @@ impl ParseAllowState {
         let mut client_clauses = Vec::new();
         client_clauses.push(client_user_clause);
         client_clauses.push(client_endpoint_clause);
-        if let Some(cs) = opt_client_service_clause.as_mut() {
-            // If the client has a services clause, add a condition that the client is a provider.
-            // That is done with 'zpr.services:' (meaning: has a value for the attribute 'zpr.provides').
-            cs.with
-                .push(Attribute::zpr_internal_attr(zpl::KATTR_SERVICES, ""));
-        }
         if let Some(sc) = opt_client_service_clause.take() {
             client_clauses.push(sc);
         }
