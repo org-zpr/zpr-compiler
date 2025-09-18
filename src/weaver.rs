@@ -179,11 +179,6 @@ impl Weaver {
             if vs_rhs_count < 1 {
                 continue;
             }
-            /* XXX
-            if ac.service.class != zpl::DEF_CLASS_VISA_SERVICE_NAME {
-                continue;
-            }
-            */
 
             // TODO: User may be able to shoot themselves in the foot here if they add
             // too many attributes to VisaService. May want to consider disallowing

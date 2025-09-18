@@ -2,6 +2,7 @@
 use ring::digest::Digest;
 use std::collections::HashMap;
 use std::fmt;
+use std::fmt::Display;
 
 use crate::errors::AttributeError;
 use crate::lex::Token;
@@ -47,25 +48,23 @@ impl From<&Token> for FPos {
 /// Originally this was parsed into three clauses that mapped to a permission
 /// statement: and ENDPOINT cluase, a USER clause and a SERVICE clause.  The
 /// endpoint and user clauses were assumed to be on the LHS of the statment,
-/// and the service clause on the RHS. Thing: users on endpoints can access services.
+/// and the service clause on the RHS. Think: users on endpoints can access services.
 ///
 /// However, over time it has become clear that it is better to think in terms
 /// of CLIENTS and SERVERS.  Clients access services on servers.  Clients are LHS (left hand side) and
 /// serviers are RHS.  Both clients and servers can have attributes in any of the
-/// three classes (user, endpoint, service).  Not only that a client may also indicate that
+/// three classes (user, endpoint, service).  A client may also indicate that
 /// it is a service.
 ///
-/// The server side (RHS) must always have a service clause.
+/// The server side (RHS) must always have at least a service clause.
+///
+/// Attributes of the classes may not always be in the domain of the class. For example, the
+/// service clause may have endpoint attributes in it.
 #[derive(Clone, Debug)]
 pub struct AllowClause {
     pub clause_id: usize, // Within a given zpl policy, each allow clause gets a unique id.
     pub client: Vec<Clause>,
     pub server: Vec<Clause>,
-    /*
-    pub endpoint: Clause,
-    pub user: Clause,
-    pub service: Clause,
-    */
 }
 
 impl fmt::Display for AllowClause {
@@ -128,6 +127,8 @@ impl Clause {
 
     /// Given a clause (and classes map) return the number of "with" attributes that are
     /// required by the clause class (and parent classes if any).
+    ///
+    #[allow(dead_code)]
     pub fn with_attr_count(&self, classes_map: &HashMap<String, Class>) -> usize {
         let mut cur_class = &self.class;
         let mut with_count = self.with.len();
@@ -162,6 +163,17 @@ pub enum ClassFlavor {
     Endpoint,
     User,
     Service,
+}
+
+impl Display for ClassFlavor {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ClassFlavor::Endpoint => write!(f, "endpoint"),
+            ClassFlavor::User => write!(f, "user"),
+            ClassFlavor::Service => write!(f, "service"),
+            ClassFlavor::Undefined => write!(f, "undefined"),
+        }
+    }
 }
 
 /// A class is created from a ZPL define statement.

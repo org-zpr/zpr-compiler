@@ -35,7 +35,7 @@ impl ParseAllowState {
 
     /// This consumes all the clauses or panics.
     ///
-    /// Note that ever allow clause will get a user and endpoint clause in the client vector
+    /// Note that every allow clause will get a user and endpoint clause in the client vector
     /// even if they are just the default.
     ///
     /// The `server` vector in the [AllowClause] will just have one element -- a service clause
@@ -111,6 +111,9 @@ impl ParseAllowState {
         AllowClause {
             clause_id,
             client: client_clauses,
+            // TODO: Note that above we spend a lot of time to move the attributes on each
+            // client class into the client class of the attribute domain. We do not to that (yet?)
+            // for the service clause.
             server: vec![self.service_clause.take().expect("service clause not set")],
         }
     }
@@ -169,15 +172,15 @@ pub fn parse_allow(
                     // Must have either a device or user clause.
                     match classes_map.get(cn).unwrap().flavor {
                         ClassFlavor::User => {
-                            let uc = ps.to_clause(ClassFlavor::User, "user")?;
+                            let uc = ps.to_clause(ClassFlavor::User)?;
                             parse_state.client_user_clause = Some(uc);
                         }
                         ClassFlavor::Endpoint => {
-                            let dc = ps.to_clause(ClassFlavor::Endpoint, "endpoint")?;
+                            let dc = ps.to_clause(ClassFlavor::Endpoint)?;
                             parse_state.client_endpoint_clause = Some(dc);
                         }
                         ClassFlavor::Service => {
-                            let dc = ps.to_clause(ClassFlavor::Service, "service")?;
+                            let dc = ps.to_clause(ClassFlavor::Service)?;
                             parse_state.client_service_clause = Some(dc);
                         }
                         _ => {
@@ -195,11 +198,11 @@ pub fn parse_allow(
                     // Hit ON which means we must have parsed a user clause, and we expect an endpoint clause to follow.
                     match classes_map.get(cn).unwrap().flavor {
                         ClassFlavor::User => {
-                            let dc = ps.to_clause(ClassFlavor::User, "user")?;
+                            let dc = ps.to_clause(ClassFlavor::User)?;
                             parse_state.client_user_clause = Some(dc);
                         }
                         ClassFlavor::Service => {
-                            let dc = ps.to_clause(ClassFlavor::Service, "service")?;
+                            let dc = ps.to_clause(ClassFlavor::Service)?;
                             parse_state.client_service_clause = Some(dc);
                         }
                         _ => {
@@ -318,16 +321,6 @@ fn validate_clause(
     root_tok: &Token,
     _classes_map: &HashMap<String, Class>,
 ) -> Result<(), CompilationError> {
-    /* XXX - Not sure this is true anymore
-    if ac.user.with_attr_count(classes_map) + ac.endpoint.with_attr_count(classes_map) == 0 {
-        return Err(CompilationError::AllowStmtParseError(
-            "user and/or endpoint must specify at least one discriminating attribute".to_string(),
-            ac.user.class_tok.line,
-            ac.user.class_tok.col,
-        ));
-    }
-    */
-
     check_clause_composition(&ac.client, root_tok, "in LHS of allow statement")?;
     check_clause_composition(&ac.server, root_tok, "in RHS of allow statement")?;
 
@@ -396,7 +389,7 @@ where
     // This is a good parse if we actually got a endpoint flavor class.
     let cn = ps.class_name.as_ref().unwrap();
     if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
-        let ec = ps.to_clause(ClassFlavor::Endpoint, "endpoint")?;
+        let ec = ps.to_clause(ClassFlavor::Endpoint)?;
         pa_state.client_endpoint_clause = Some(ec);
         Ok(true)
     } else {
@@ -439,7 +432,7 @@ where
             pa_state.root_tok.col,
         ));
     }
-    let mut service_clause = ps.to_clause(ClassFlavor::Service, "service")?;
+    let mut service_clause = ps.to_clause(ClassFlavor::Service)?;
 
     // If we read an ON then we need to parse an endpoint clause.
     if let Some(tok) = tokens.next() {
@@ -456,7 +449,7 @@ where
             // This is a good parse if we actually got a endpoint flavor class.
             let cn = nested_ps.class_name.as_ref().unwrap();
             if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
-                let service_ec = nested_ps.to_clause(ClassFlavor::Endpoint, "endpoint")?;
+                let service_ec = nested_ps.to_clause(ClassFlavor::Endpoint)?;
 
                 // Since ZPL could use a defined class in the on clause we need to walk the tree and
                 // gather any attributes.
@@ -574,11 +567,10 @@ impl PState {
         }
     }
 
-    /// `kind` is used for reporting errors.
-    fn to_clause(&self, flavor: ClassFlavor, kind: &str) -> Result<Clause, CompilationError> {
+    fn to_clause(&self, flavor: ClassFlavor) -> Result<Clause, CompilationError> {
         if self.class_name.is_none() {
             return Err(CompilationError::AllowStmtParseError(
-                format!("expected a class name in a {} clause", kind),
+                format!("expected a class name in a {flavor} clause"),
                 self.root_tok.line,
                 self.root_tok.col,
             ));
@@ -805,7 +797,7 @@ mod test {
         matched = false;
 
         // level:seven attr goes in as an endpoint domain attribute on the service.
-        assert_eq!(1, clause.server.len(), "{:?}", clause.server); // service & endpoint
+        assert_eq!(1, clause.server.len(), "{:?}", clause.server); // service only
         for rhs_clause in &clause.server {
             if rhs_clause.flavor == ClassFlavor::Service {
                 matched = true;
@@ -933,5 +925,81 @@ mod test {
         assert!(matched_service, "failed to locate service clause in RHS");
     }
 
-    // TODO: Test the LHS services
+    #[test]
+    fn test_sets_service_attrs_lhs() {
+        let statement = "allow blue services on level:seven endpoints to access services on level:eight endpoints";
+
+        let mut classes: HashMap<String, Class> = HashMap::new();
+        for defclass in Class::defaults() {
+            classes.insert(defclass.name.clone(), defclass);
+        }
+        let mut class_index: HashMap<String, String> = HashMap::new();
+        for (name, class) in classes.iter() {
+            class_index.insert(name.clone(), name.clone());
+            class_index.insert(class.aka.clone(), name.clone());
+        }
+
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        let tokens = tz.tokens;
+        let clause = parse_allow(&tokens, 1, &class_index, &classes).unwrap();
+
+        assert_eq!(3, clause.client.len()); // services, users, endpoints
+        assert_eq!(1, clause.server.len()); // services
+
+        let mut matched_user = false;
+        let mut matched_endpoint = false;
+        let mut matched_service = false;
+
+        for lhs_clause in clause.client {
+            match lhs_clause.flavor {
+                ClassFlavor::User => {
+                    // no attrs.
+                    matched_user = true;
+                    assert!(lhs_clause.with.is_empty());
+                }
+                ClassFlavor::Service => {
+                    matched_service = true;
+                    // Blue tag goes on service.
+                    matched_user = true;
+                    lhs_clause
+                        .with
+                        .iter()
+                        .find(|a| a.to_string() == "#service.blue")
+                        .expect(
+                            format!("blue tag missing from service clause: {:?}", lhs_clause)
+                                .as_str(),
+                        );
+                }
+                ClassFlavor::Endpoint => {
+                    // level:seven attr goes in as an endpoint attribute
+                    matched_endpoint = true;
+                    lhs_clause
+                        .with
+                        .iter()
+                        .find(|a| a.to_string() == "endpoint.level:seven")
+                        .expect("level:seven tag missing from endpoint clause");
+                }
+                _ => (),
+            }
+        }
+        assert!(matched_user, "failed to locate user clause in LHS");
+        assert!(matched_endpoint, "failed to locate endpoint clause in LHS");
+        assert!(matched_service, "failed to locate service clause in LHS");
+
+        for rhs_clause in clause.server {
+            match rhs_clause.flavor {
+                ClassFlavor::Service => {
+                    matched_service = true;
+                    rhs_clause
+                        .with
+                        .iter()
+                        .find(|a| a.to_string() == "endpoint.level:eight")
+                        .expect("level:eight tag missing from service clause");
+                }
+                _ => (),
+            }
+        }
+        assert!(matched_service, "failed to locate service clause in RHS");
+    }
 }
