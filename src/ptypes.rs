@@ -155,30 +155,26 @@ impl fmt::Display for Clause {
     }
 }
 
+// TODO could also use polio::Signal instead...not sure if that would cause problems
 #[derive(Clone, Debug)]
 pub struct Signal {
-    pub phrase: String,
-    pub endpoint: Class,
+    pub message: String,
+    pub service_class_name: String,
 }
 
 #[allow(dead_code)]
 impl Signal {
-    pub fn new(phrase: String, endpoint: Class) -> Self {
-        Signal { phrase, endpoint }
-    }
-
-    pub fn get_phrase(&self) -> String {
-        self.phrase.clone()
-    }
-
-    pub fn get_endpoint(&self) -> Class {
-        self.endpoint.clone()
+    pub fn new(message: String, service_class_name: String) -> Self {
+        Signal {
+            message,
+            service_class_name,
+        }
     }
 }
 
 impl fmt::Display for Signal {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} to {}", self.phrase, self.endpoint.name)
+        write!(f, "{} to {}", self.message, self.service_class_name)
     }
 }
 

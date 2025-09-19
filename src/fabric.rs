@@ -69,14 +69,11 @@ pub struct ClientPolicy {
 
     /// List of attributes that must be met by a service for the policy to apply
     pub svc_condition: Vec<Attribute>,
-    // TODO: withouts, constraints, etc.
-    //       Actually, withouts are just attributes, eg (role, ne, marketing)
 
-    // TODO still unsure if the whole Class is required for the destination,
-    //      especially at this point in the compiler...is just the name
-    //      sufficient...would it need the fabric_id too?
     /// Signal containing message and destination
     pub signal: Option<Signal>,
+    // TODO: withouts, constraints, etc.
+    //       Actually, withouts are just attributes, eg (role, ne, marketing)
 }
 
 fn plural(word: &str, count: usize) -> String {

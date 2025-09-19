@@ -78,19 +78,6 @@ impl Token {
     pub fn new(tt: TokenType, line: usize, col: usize) -> Token {
         Token { tt, line, col }
     }
-
-    pub fn get_string_from_literal(&self) -> Result<String, CompilationError> {
-        match &self.tt {
-            TokenType::Literal(phrase) => Ok(phrase.clone()),
-            ty => {
-                return Err(CompilationError::ParseError(
-                    format!("Expected a Literal, found: {:?}", ty),
-                    self.line,
-                    self.col,
-                ));
-            }
-        }
-    }
 }
 
 impl Default for Token {
