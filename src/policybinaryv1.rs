@@ -377,8 +377,8 @@ impl PolicyWriter for PolicyBinaryV1 {
         let is_signal = signal.is_some();
         let signal = match is_signal {
             true => Some(polio::Signal {
-                msg: signal.as_ref().unwrap().get_phrase(),
-                svc: signal.unwrap().get_endpoint().name,
+                msg: signal.clone().unwrap().message,
+                svc: signal.unwrap().service_class_name,
             }),
             false => None,
         };

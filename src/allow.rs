@@ -36,7 +36,7 @@ impl ParseAllowState {
                 .expect("endpoint clause not set"),
             user: self.user_clause.take().expect("user clause not set"),
             service: self.service_clause.take().expect("service clause not set"),
-            signal: self.signal_clause.clone(),
+            signal: self.signal_clause.take(),
         }
     }
 }
@@ -196,8 +196,8 @@ pub fn parse_allow(
         panic!("assertion fails - no endpoint clause");
     }
 
-    // The remaining tokens should start with "access ..." which we pass to the service class parser.
-    // It is also possible there is a signal clause
+    // The remaining tokens should start with "access ..." or "signal ..." which we pass to the service class parser.
+    // If there is a signal token at the end, only that token will remain after this function.
     parse_allow_service_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
 
     if let Some(_tok) = tokens.peek() {
@@ -273,10 +273,14 @@ where
     }
 }
 
-/// Parse the final bit of the allow statement which is the service clause.
-/// The passed tokens MUST start with "ACCESS".
+/// Parse service clause.
+/// The passed tokens MUST start with "ACCESS". There may be a "SIGNAL"
+/// token after the "ACCESS" tokens
 ///
 /// The service clause may have a trailing ON <endpoint-clause>.
+/// There may also be a signal clause after the service clause. If there is a
+/// signal clause, tokens will remain in the queue after this function, otherwise
+/// this function will process all the tokens.
 fn parse_allow_service_clause<'a, I>(
     pa_state: &mut ParseAllowState,
     tokens: &mut Peekable<I>,
@@ -311,7 +315,10 @@ where
     }
     let mut service_clause = ps.to_clause("service")?;
 
-    // If we read an ON then we need to parse an endpoint clause or a Signal clause.
+    // If there are tokens remaining, there are three valid possibilities: we have
+    // an ON token, we have a SIGNAL clause, or we have an ON followed by a SIGNAL.
+    // If we have an ON followed by a SIGNAL, the queue will match the first branch
+    // of the match, then exit the function with the signal still in the queue.
     if let Some(tok) = tokens.peek() {
         match tok.tt {
             TokenType::On => {
@@ -382,6 +389,9 @@ where
     Ok(())
 }
 
+// Expects a signal clause of the form SIGNAL <STRING> TO <SERVICE>
+// Since a signal clause is the final clause of the allow statement,
+// we expect the EOS token, thus the queue will be empty after execution.
 fn parse_allow_signal_clause<'a, I>(
     pa_state: &mut ParseAllowState,
     tokens: &mut Peekable<I>,
@@ -392,8 +402,6 @@ where
     I: Iterator<Item = &'a Token>,
 {
     // Pop off the SIGNAL token
-    // Checking for type is theoretically redundant...I don't think any starting token
-    // other than a SIGNAL could reach this point because it would error out in service clause func
     putil::require_tt(
         &pa_state.root_tok,
         tokens.next(),
@@ -402,12 +410,21 @@ where
         TokenType::Signal,
     )?;
 
-    let literal: String;
-    let endpoint: Class;
+    let message: String;
+    let target: String;
 
     // The first part of the signal clause should be a literal to signal
     if let Some(tok) = tokens.next() {
-        literal = tok.get_string_from_literal()?;
+        message = match &tok.tt {
+            TokenType::Literal(msg) => msg.clone(),
+            _ => {
+                return Err(CompilationError::ParseError(
+                    format!("Expected a Literal, found: {:?}", tok.tt),
+                    tok.line,
+                    tok.col,
+                ));
+            }
+        };
     } else {
         return Err(CompilationError::ParseError(
             format!("Signal clause requires a payload"),
@@ -417,47 +434,45 @@ where
     }
 
     // The next part should be the token TO
-    if let Some(tok) = tokens.next() {
-        if tok.tt != TokenType::To {
-            return Err(CompilationError::ParseError(
-                format!(
-                    "Signal clause requires 'TO' to declare service name, found: {:?}",
-                    tok
-                ),
-                tok.line,
-                tok.col, // TODO this will provide col 1, not the col where the signal is
-            ));
-        }
-    } else {
-        return Err(CompilationError::ParseError(
-            format!("Signal clause requires 'TO' to declare service name"),
-            pa_state.root_tok.line,
-            pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
-        ));
-    }
+    putil::require_tt(
+        &pa_state.root_tok,
+        tokens.next(),
+        "TO",
+        "allow",
+        TokenType::To,
+    )?;
 
     // The final portion of the signal clause should be an existing service class
     if let Some(tok) = tokens.next() {
-        let service_name = tok.get_string_from_literal()?;
-        let service_class = classes_map.get(&service_name);
-        if service_class.is_none() {
+        // The service does not share a name with a reserved keyword
+        if let TokenType::Literal(ref service_name) = tok.tt {
+            // We require the requested service to exist in the list of services
+            target = if let Some(service_class) = classes_map.get(service_name) {
+                if service_class.flavor != ClassFlavor::Service {
+                    return Err(CompilationError::ParseError(
+                        format!(
+                            "{service_name} is not a service, it is of type {:?}",
+                            service_class.flavor
+                        ),
+                        pa_state.root_tok.line,
+                        pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
+                    ));
+                }
+                service_class.name.clone()
+            } else {
+                return Err(CompilationError::ParseError(
+                    format!("Invalid service name: {service_name}"),
+                    pa_state.root_tok.line,
+                    pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
+                ));
+            };
+        } else {
             return Err(CompilationError::ParseError(
-                format!("Invalid service name: {service_name}"),
-                pa_state.root_tok.line,
-                pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
+                format!("Expected a Literal, found: {:?}", tok.tt),
+                tok.line,
+                tok.col,
             ));
         }
-        if service_class.unwrap().flavor != ClassFlavor::Service {
-            return Err(CompilationError::ParseError(
-                format!(
-                    "{service_name} is not a service, it is of type {:?}",
-                    service_class.unwrap().flavor
-                ),
-                pa_state.root_tok.line,
-                pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
-            ));
-        }
-        endpoint = service_class.unwrap().clone();
     } else {
         return Err(CompilationError::ParseError(
             format!("Signal clause requires a service"),
@@ -476,7 +491,7 @@ where
         ));
     }
 
-    pa_state.signal_clause = Some(Signal::new(literal, endpoint));
+    pa_state.signal_clause = Some(Signal::new(message, target));
     return Ok(());
 }
 
