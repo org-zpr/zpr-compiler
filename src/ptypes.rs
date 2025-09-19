@@ -2,6 +2,7 @@
 use ring::digest::Digest;
 use std::collections::HashMap;
 use std::fmt;
+use std::fmt::Display;
 
 use crate::errors::AttributeError;
 use crate::lex::Token;
@@ -43,20 +44,35 @@ impl From<&Token> for FPos {
 }
 
 /// A parsed "allow" statement.
+///
+/// Originally this was parsed into three clauses that mapped to a permission
+/// statement: and ENDPOINT cluase, a USER clause and a SERVICE clause.  The
+/// endpoint and user clauses were assumed to be on the LHS of the statment,
+/// and the service clause on the RHS. Think: users on endpoints can access services.
+///
+/// However, over time it has become clear that it is better to think in terms
+/// of CLIENTS and SERVERS.  Clients access services on servers.  Clients are LHS (left hand side) and
+/// serviers are RHS.  Both clients and servers can have attributes in any of the
+/// three classes (user, endpoint, service).  A client may also indicate that
+/// it is a service.
+///
+/// The server side (RHS) must always have at least a service clause.
+///
+/// Attributes of the classes may not always be in the domain of the class. For example, the
+/// service clause may have endpoint attributes in it.
 #[derive(Clone, Debug)]
 pub struct AllowClause {
     pub clause_id: usize, // Within a given zpl policy, each allow clause gets a unique id.
-    pub endpoint: Clause,
-    pub user: Clause,
-    pub service: Clause,
+    pub client: Vec<Clause>,
+    pub server: Vec<Clause>,
 }
 
 impl fmt::Display for AllowClause {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "[{}] ALLOW {}\n   WITH {}\n      TO ACCESS {}",
-            self.clause_id, self.endpoint, self.user, self.service
+            "[{}] ALLOW {:?}\n      TO ACCESS {:?}",
+            self.clause_id, self.client, self.server
         )
     }
 }
@@ -66,9 +82,18 @@ impl AllowClause {
     /// Use this debug stringer to get a NEVER thrown in to the output.
     pub fn to_string_never(&self) -> String {
         format!(
-            "[{}] NEVER ALLOW {}\n   WITH {}\n      TO ACCESS {}",
-            self.clause_id, self.endpoint, self.user, self.service
+            "[{}] NEVER ALLOW {:?}\n      TO ACCESS {:?}",
+            self.clause_id, self.client, self.server
         )
+    }
+
+    pub fn get_server_service_clause(&self) -> Option<Clause> {
+        for c in &self.server {
+            if c.flavor == ClassFlavor::Service {
+                return Some(c.clone());
+            }
+        }
+        None
     }
 }
 
@@ -78,6 +103,7 @@ impl AllowClause {
 #[derive(Default, Clone, Debug)]
 #[allow(dead_code)]
 pub struct Clause {
+    pub flavor: ClassFlavor,
     pub class: String,
     pub class_tok: Token,
     pub with: Vec<Attribute>,
@@ -85,8 +111,9 @@ pub struct Clause {
 }
 
 impl Clause {
-    pub fn new(class: &str, class_tok: Token) -> Self {
+    pub fn new(flavor: ClassFlavor, class: &str, class_tok: Token) -> Self {
         Clause {
+            flavor,
             class: class.to_string(),
             class_tok,
             with: vec![],
@@ -100,6 +127,8 @@ impl Clause {
 
     /// Given a clause (and classes map) return the number of "with" attributes that are
     /// required by the clause class (and parent classes if any).
+    ///
+    #[allow(dead_code)]
     pub fn with_attr_count(&self, classes_map: &HashMap<String, Class>) -> usize {
         let mut cur_class = &self.class;
         let mut with_count = self.with.len();
@@ -127,12 +156,24 @@ impl fmt::Display for Clause {
 }
 
 /// A defined class in ZPL has a type which we call "flavor".
-#[derive(Debug, Clone, PartialEq, Eq, Copy)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Default)]
 pub enum ClassFlavor {
+    #[default]
     Undefined, // they all start here
     Endpoint,
     User,
     Service,
+}
+
+impl Display for ClassFlavor {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ClassFlavor::Endpoint => write!(f, "endpoint"),
+            ClassFlavor::User => write!(f, "user"),
+            ClassFlavor::Service => write!(f, "service"),
+            ClassFlavor::Undefined => write!(f, "undefined"),
+        }
+    }
 }
 
 /// A class is created from a ZPL define statement.
@@ -388,6 +429,25 @@ impl Attribute {
         }
     }
 
+    /// Special constructor for ZPR internal attributes.
+    /// Panics if passed `name` must start with `zpr`.
+    pub fn zpr_internal_attr_mv(name: &str, value: &str) -> Self {
+        if let Some(name_without_domain) =
+            name.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_ZPR_INTERNAL))
+        {
+            return Attribute {
+                domain: AttrDomain::ZprInternal,
+                name: name_without_domain.to_string(),
+                value: Some(value.to_string()),
+                multi_valued: true,
+                tag: false,
+                optional: false,
+            };
+        } else {
+            panic!("zpr internal attribute must start with 'zpr.'");
+        }
+    }
+
     /// Create a tuple type attribute and will set domain unspecified if not present on the `name`.
     pub fn attr_domain_opt(name: &str, value: &str) -> Self {
         let (dom, rest) = Attribute::parse_domain(name)
@@ -400,6 +460,10 @@ impl Attribute {
             tag: false,
             optional: false,
         }
+    }
+
+    pub fn get_domain_ref(&self) -> &AttrDomain {
+        &self.domain
     }
 
     pub fn is_unspecified_domain(&self) -> bool {
