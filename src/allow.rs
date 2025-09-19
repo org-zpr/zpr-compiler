@@ -693,6 +693,9 @@ mod test {
             "allow blue users to access services on orange endpoints",
             "allow blue users to access services on orange, level:seven endpoints",
             "allow blue users on green endpoints to access services",
+            "allow blue users to access services and signal \"blue\" to service",
+            "allow blue users on green endpoints to access services and signal \"blue\" to service",
+            "allow blue users to access services on level:seven endpoints and signal \"blue\" to service",
         ];
 
         let mut classes: HashMap<String, Class> = HashMap::new();
