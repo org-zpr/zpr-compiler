@@ -411,7 +411,8 @@ impl Attribute {
     }
 
     /// Special constructor for ZPR internal attributes.
-    /// Panics if passed `name` must start with `zpr`.
+    /// ## Panics
+    /// - if passed `name` does not start with `zpr`.
     pub fn zpr_internal_attr(name: &str, value: &str) -> Self {
         if let Some(name_without_domain) =
             name.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_ZPR_INTERNAL))
@@ -430,7 +431,8 @@ impl Attribute {
     }
 
     /// Special constructor for ZPR internal attributes.
-    /// Panics if passed `name` must start with `zpr`.
+    /// ## Panics
+    /// - if passed `name` does not start with `zpr`.
     pub fn zpr_internal_attr_mv(name: &str, value: &str) -> Self {
         if let Some(name_without_domain) =
             name.strip_prefix(&format!("{}.", zpl::ATTR_DOMAIN_ZPR_INTERNAL))
