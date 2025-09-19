@@ -951,7 +951,6 @@ dependencies = [
 [[package]]
 name = "zpr-policy"
 version = "0.9.0"
-source = "git+https://github.com/org-zpr/zpr-policy-rs.git?tag=v0.8.1#f3a091d6f8ddc08c586ca1cfa71c3b641900f548"
 dependencies = [
  "capnp",
  "prost",

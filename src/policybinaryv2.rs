@@ -6,7 +6,7 @@ use crate::errors::CompilationError;
 use crate::fabric::ServiceType; // TODO: remove refs to fabric
 use crate::policywriter::{PFlags, PolicyContainer, PolicyWriter, TSType};
 use crate::protocols::{IcmpFlowType, Protocol};
-use crate::ptypes::Attribute; // TODO: remove refs to fabric
+use crate::ptypes::{Attribute, Signal}; // TODO: remove refs to fabric
 
 #[derive(Default)]
 pub struct PolicyBinaryV2 {
@@ -213,6 +213,7 @@ impl PolicyWriter for PolicyBinaryV2 {
         allow: bool,
         cli_conditions: &[Attribute],
         svc_conditions: &[Attribute],
+        _signal: Option<Signal>,
     ) {
         self.communication_policies.push(CommunicationPolicy {
             svc_id: svc_id.to_string(),
