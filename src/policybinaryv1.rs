@@ -467,7 +467,7 @@ impl PolicyWriter for PolicyBinaryV1 {
         );
     }
 
-    fn finalize(&mut self) -> Result<Vec<u8>, CompilationError> {
+    fn finalize(self) -> Result<Vec<u8>, CompilationError> {
         let mut buf = Vec::with_capacity(self.policy.encoded_len());
         self.policy.encode(&mut buf).map_err(|e| {
             CompilationError::EncodingError(format!("failed to encode policy: {}", e))

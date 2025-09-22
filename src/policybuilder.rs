@@ -62,7 +62,7 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
 
     /// Returns the built policy. This doesn't actually do anything except return the already built policy.
     /// you must call [PolicyBuilder::with_fabric] to do the real work before calling this.
-    pub fn build(&mut self) -> Result<Vec<u8>, CompilationError> {
+    pub fn build(self) -> Result<Vec<u8>, CompilationError> {
         self.policy_writer.finalize()
     }
 

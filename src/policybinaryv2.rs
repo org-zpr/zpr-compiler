@@ -243,7 +243,7 @@ impl PolicyWriter for PolicyBinaryV2 {
         );
     }
 
-    fn finalize(&mut self) -> Result<Vec<u8>, CompilationError> {
+    fn finalize(self) -> Result<Vec<u8>, CompilationError> {
         let mut policy_msg = ::capnp::message::Builder::new_default();
         let mut policy = policy_msg.init_root::<policy_capnp::policy::Builder>();
 

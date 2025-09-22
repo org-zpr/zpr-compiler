@@ -89,7 +89,7 @@ pub trait PolicyWriter {
         identity_attrs: Option<&Vec<String>>,
     );
 
-    fn finalize(&mut self) -> Result<Vec<u8>, CompilationError>;
+    fn finalize(self) -> Result<Vec<u8>, CompilationError>;
 }
 
 pub trait PolicyContainer {
