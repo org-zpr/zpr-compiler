@@ -5,7 +5,7 @@ use std::iter::Peekable;
 
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{AllowClause, AttrDomain, Attribute, Class, ClassFlavor, Clause, Signal};
+use crate::ptypes::{AllowClause, AttrDomain, Attribute, Class, ClassFlavor, Clause};
 use crate::putil;
 use crate::zpl;
 
@@ -16,7 +16,6 @@ struct ParseAllowState {
     client_user_clause: Option<Clause>,
     client_service_clause: Option<Clause>,
     service_clause: Option<Clause>,
-    signal_clause: Option<Signal>,
 }
 
 impl ParseAllowState {
@@ -111,7 +110,6 @@ impl ParseAllowState {
         }
         AllowClause {
             clause_id,
-            signal: self.signal_clause.take(),
             client: client_clauses,
             // TODO: Note that above we spend a lot of time to move the attributes on each
             // client class into the client class of the attribute domain. We do not to that (yet?)
@@ -125,7 +123,7 @@ impl ParseAllowState {
 ///
 /// Format of the allow statement is:
 ///
-/// allow (<user-clause>|<service-clause>) on <endpoint-clause> to access <service-clause> (,? and <signal-clause>)?
+/// allow (<user-clause>|<service-clause>) on <endpoint-clause> to access <service-clause>
 ///
 /// If there are both endpoint and user/service clauses they are separated by 'on'.
 /// You can omit either user or endpoint clauses:
@@ -287,13 +285,8 @@ pub fn parse_allow(
         panic!("assertion fails - no client clauses");
     }
 
-    // The remaining tokens should start with "access ..." or "signal ..." which we pass to the service class parser.
-    // If there is a signal token at the end, only that token will remain after this function.
+    // The remaining tokens should start with "access ..." which we pass to the service class parser.
     parse_allow_service_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
-
-    if let Some(_tok) = tokens.peek() {
-        parse_allow_signal_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
-    }
 
     let mut ac = parse_state.to_allow_clause(statement_id);
 
@@ -404,14 +397,10 @@ where
     }
 }
 
-/// Parse service clause.
-/// The passed tokens MUST start with "ACCESS". There may be a "SIGNAL"
-/// token after the "ACCESS" tokens
+/// Parse the final bit of the allow statement which is the service clause.
+/// The passed tokens MUST start with "ACCESS".
 ///
 /// The service clause may have a trailing ON <endpoint-clause>.
-/// There may also be a signal clause after the service clause. If there is a
-/// signal clause, tokens will remain in the queue after this function, otherwise
-/// this function will process all the tokens.
 fn parse_allow_service_clause<'a, I>(
     pa_state: &mut ParseAllowState,
     tokens: &mut Peekable<I>,
@@ -432,8 +421,7 @@ where
 
     // Need a service clause now -- parse to end of statement.
     let mut ps = PState::new(&pa_state.root_tok);
-    // Signal clause will always
-    let popts = ParseOpts::stop_at_any(&[TokenType::On, TokenType::Eos, TokenType::Signal]);
+    let popts = ParseOpts::stop_at_any(&[TokenType::On, TokenType::Eos]);
     ps.parse_tags_attrs_and_classname(tokens, classes_idx, &popts, "service clause")?;
 
     let cn = ps.class_name.as_ref().unwrap();
@@ -446,69 +434,50 @@ where
     }
     let mut service_clause = ps.to_clause(ClassFlavor::Service)?;
 
-    // If there are tokens remaining, there are three valid possibilities: we have
-    // an ON token, we have a SIGNAL clause, or we have an ON followed by a SIGNAL.
-    // If we have an ON followed by a SIGNAL, the queue will match the first branch
-    // of the match, then exit the function with the signal still in the queue.
-    if let Some(tok) = tokens.peek() {
-        match tok.tt {
-            TokenType::On => {
-                // Previously used tokens.next() above, changed to peek because if we read a
-                // Signal that should remain for error checking outside this function call
-                tokens.next();
+    // If we read an ON then we need to parse an endpoint clause.
+    if let Some(tok) = tokens.next() {
+        if tok.tt == TokenType::On {
+            let mut nested_ps = PState::new(&pa_state.root_tok);
 
-                let mut nested_ps = PState::new(&pa_state.root_tok);
+            nested_ps.parse_tags_attrs_and_classname(
+                tokens,
+                classes_idx,
+                &ParseOpts::default(),
+                "service endpoint clause",
+            )?;
 
-                nested_ps.parse_tags_attrs_and_classname(
-                    tokens,
-                    classes_idx,
-                    &ParseOpts::stop_at_any(&[TokenType::Eos, TokenType::Signal]),
-                    "service endpoint clause",
-                )?;
+            // This is a good parse if we actually got a endpoint flavor class.
+            let cn = nested_ps.class_name.as_ref().unwrap();
+            if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
+                let service_ec = nested_ps.to_clause(ClassFlavor::Endpoint)?;
 
-                // This is a good parse if we actually got a endpoint flavor class.
-                let cn = nested_ps.class_name.as_ref().unwrap();
-                if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
-                    let service_ec = nested_ps.to_clause(ClassFlavor::Endpoint)?;
+                // Since ZPL could use a defined class in the on clause we need to walk the tree and
+                // gather any attributes.
+                let mut all_endpoint_attrs = collect_all_attributes(&service_ec.class, classes_map);
+                all_endpoint_attrs.extend(service_ec.with);
 
-                    // Since ZPL could use a defined class in the on clause we need to walk the tree and
-                    // gather any attributes.
-                    let mut all_endpoint_attrs =
-                        collect_all_attributes(&service_ec.class, classes_map);
-                    all_endpoint_attrs.extend(service_ec.with);
-
-                    for ec_attr in &all_endpoint_attrs {
-                        let mut domained_attr = ec_attr.clone();
-                        if domained_attr.is_unspecified_domain() {
-                            domained_attr.set_domain(AttrDomain::Endpoint);
-                        } else if !domained_attr.is_domain(AttrDomain::Endpoint) {
-                            // This is not permitted. You can only talk about endpoints in the ON clause.
-                            return Err(CompilationError::AllowStmtParseError(
-                                format!(
-                                    "illegal non-endpoint attribute in service ON clause: '{domained_attr}'"
-                                ),
-                                pa_state.root_tok.line,
-                                pa_state.root_tok.col,
-                            ));
-                        }
-                        service_clause.with.push(domained_attr); // TODO: Are these already in endpoint domain?
+                for ec_attr in &all_endpoint_attrs {
+                    let mut domained_attr = ec_attr.clone();
+                    if domained_attr.is_unspecified_domain() {
+                        domained_attr.set_domain(AttrDomain::Endpoint);
+                    } else if !domained_attr.is_domain(AttrDomain::Endpoint) {
+                        // This is not permitted. You can only talk about endpoints in the ON clause.
+                        return Err(CompilationError::AllowStmtParseError(
+                            format!(
+                                "illegal non-endpoint attribute in service ON clause: '{domained_attr}'"
+                            ),
+                            pa_state.root_tok.line,
+                            pa_state.root_tok.col,
+                        ));
                     }
-                } else {
-                    return Err(CompilationError::AllowStmtParseError(
-                        format!(
-                            "expected an endpoint class in service ON clause, got: '{}'",
-                            cn
-                        ),
-                        pa_state.root_tok.line,
-                        pa_state.root_tok.col,
-                    ));
+                    service_clause.with.push(domained_attr); // TODO: Are these already in endpoint domain?
                 }
-            }
-            TokenType::Signal => { // Want to fall through
-            }
-            _ => {
+            } else {
                 return Err(CompilationError::AllowStmtParseError(
-                    format!("Expected 'on' or 'signal' not {:?}", tok.tt),
+                    format!(
+                        "expected an endpoint class in service ON clause, got: '{}'",
+                        cn
+                    ),
                     pa_state.root_tok.line,
                     pa_state.root_tok.col,
                 ));
@@ -518,112 +487,6 @@ where
 
     pa_state.service_clause = Some(service_clause);
     Ok(())
-}
-
-// Expects a signal clause of the form SIGNAL <STRING> TO <SERVICE>
-// Since a signal clause is the final clause of the allow statement,
-// we expect the EOS token, thus the queue will be empty after execution.
-fn parse_allow_signal_clause<'a, I>(
-    pa_state: &mut ParseAllowState,
-    tokens: &mut Peekable<I>,
-    _classes_idx: &HashMap<String, String>,
-    classes_map: &HashMap<String, Class>,
-) -> Result<(), CompilationError>
-where
-    I: Iterator<Item = &'a Token>,
-{
-    // Pop off the SIGNAL token
-    putil::require_tt(
-        &pa_state.root_tok,
-        tokens.next(),
-        "SIGNAL",
-        "allow",
-        TokenType::Signal,
-    )?;
-
-    let message: String;
-    let target: String;
-
-    // The first part of the signal clause should be a literal to signal
-    if let Some(tok) = tokens.next() {
-        message = match &tok.tt {
-            TokenType::Literal(msg) => msg.clone(),
-            _ => {
-                return Err(CompilationError::ParseError(
-                    format!("Expected a Literal, found: {:?}", tok.tt),
-                    tok.line,
-                    tok.col,
-                ));
-            }
-        };
-    } else {
-        return Err(CompilationError::ParseError(
-            format!("Signal clause requires a payload"),
-            pa_state.root_tok.line,
-            pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
-        ));
-    }
-
-    // The next part should be the token TO
-    putil::require_tt(
-        &pa_state.root_tok,
-        tokens.next(),
-        "TO",
-        "allow",
-        TokenType::To,
-    )?;
-
-    // The final portion of the signal clause should be an existing service class
-    if let Some(tok) = tokens.next() {
-        // The service does not share a name with a reserved keyword
-        if let TokenType::Literal(ref service_name) = tok.tt {
-            // We require the requested service to exist in the list of services
-            target = if let Some(service_class) = classes_map.get(service_name) {
-                if service_class.flavor != ClassFlavor::Service {
-                    return Err(CompilationError::ParseError(
-                        format!(
-                            "{service_name} is not a service, it is of type {:?}",
-                            service_class.flavor
-                        ),
-                        pa_state.root_tok.line,
-                        pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
-                    ));
-                }
-                service_class.name.clone()
-            } else {
-                return Err(CompilationError::ParseError(
-                    format!("Invalid service name: {service_name}"),
-                    pa_state.root_tok.line,
-                    pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
-                ));
-            };
-        } else {
-            return Err(CompilationError::ParseError(
-                format!("Expected a Literal, found: {:?}", tok.tt),
-                tok.line,
-                tok.col,
-            ));
-        }
-    } else {
-        return Err(CompilationError::ParseError(
-            format!("Signal clause requires a service"),
-            pa_state.root_tok.line,
-            pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
-        ));
-    }
-
-    // Nothing should follow the signal clause
-    // TODO allow for multiple signal clauses
-    if tokens.peek().is_some() {
-        return Err(CompilationError::ParseError(
-            format!("No data should follow a signal clause"),
-            pa_state.root_tok.line,
-            pa_state.root_tok.col, // TODO this will provide col 1, not the col where the signal is
-        ));
-    }
-
-    pa_state.signal_clause = Some(Signal::new(message, target));
-    return Ok(());
 }
 
 // Note that this does not check for duplicates.
@@ -828,9 +691,6 @@ mod test {
             "allow blue users to access services on orange endpoints",
             "allow blue users to access services on orange, level:seven endpoints",
             "allow blue users on green endpoints to access services",
-            "allow blue users to access services and signal \"blue\" to service",
-            "allow blue users on green endpoints to access services and signal \"blue\" to service",
-            "allow blue users to access services on level:seven endpoints and signal \"blue\" to service",
         ];
 
         let mut classes: HashMap<String, Class> = HashMap::new();
@@ -869,8 +729,6 @@ mod test {
             "allow blue users to access services on level:seven on endpoints",
             "allow on blue users to access services",
             "allow blue users to access services on orange",
-            "allow blue users to signal to services",
-            "allow signal to services",
         ];
 
         let mut classes: HashMap<String, Class> = HashMap::new();

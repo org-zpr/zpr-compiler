@@ -260,7 +260,6 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                     !policy.never_allow,
                     &policy.cli_condition,
                     &policy.svc_condition,
-                    policy.signal.clone(),
                 );
             }
         }

@@ -8,7 +8,6 @@ use crate::errors::CompilationError;
 use crate::fabric::ServiceType; // TODO: remove refs to fabric
 use crate::policywriter::{PFlags, PolicyContainer, PolicyWriter, TSType};
 use crate::protocols::{IcmpFlowType, Protocol};
-use crate::ptypes;
 use crate::ptypes::Attribute;
 use crate::zpl;
 
@@ -371,18 +370,8 @@ impl PolicyWriter for PolicyBinaryV1 {
         allow: bool,
         cli_conditions: &[Attribute],
         svc_conditions: &[Attribute],
-        signal: Option<ptypes::Signal>,
     ) {
         let pscope = self.scope_for_protocol(protocol);
-        let is_signal = signal.is_some();
-        let signal = match is_signal {
-            true => Some(polio::Signal {
-                msg: signal.clone().unwrap().message,
-                svc: signal.unwrap().service_class_name,
-            }),
-            false => None,
-        };
-
         let mut cpol = polio::CPolicy {
             service_id: svc_id.into(),
             id: svc_id.into(), // TODO: Not sure why we have both id and service_id.
@@ -391,10 +380,7 @@ impl PolicyWriter for PolicyBinaryV1 {
             svc_conditions: Vec::new(),
             constraints: Vec::new(), // TODO
             allow,
-            is_signal,
-            signal,
         };
-
         if !cli_conditions.is_empty() {
             let exprs = self.attr_list_to_attrexpr(cli_conditions);
             let cond = polio::Condition {
