@@ -415,7 +415,7 @@ impl Fabric {
     }
 
     /// Add a condition (aka policy aka rule) to an existing service specified by the
-    /// fabric service ID.
+    /// fabric service ID.  This adds client conditions.
     pub fn add_condition_to_service(
         &mut self,
         never_allow: bool,

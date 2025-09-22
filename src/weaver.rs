@@ -167,22 +167,39 @@ impl Weaver {
         // The admin permissions come from ZPL allow statements, not from configuration.
         let mut condition_count = 0;
         for ac in &policy.allows {
-            if ac.service.class != zpl::DEF_CLASS_VISA_SERVICE_NAME {
+            // Seeking a RHS service class that is the visa service.
+
+            let vs_rhs_count = ac
+                .server
+                .iter()
+                .filter(|c| {
+                    c.flavor == ClassFlavor::Service && c.class == zpl::DEF_CLASS_VISA_SERVICE_NAME
+                })
+                .count();
+            if vs_rhs_count < 1 {
                 continue;
             }
 
             // TODO: User may be able to shoot themselves in the foot here if they add
             // too many attributes to VisaService. May want to consider disallowing
             // any attributes on the service (but allow on user and endpoint).
-            let mut admin_access_attrs = ac.user.with.clone();
-            admin_access_attrs.extend_from_slice(&ac.endpoint.with);
-            admin_access_attrs.extend_from_slice(&ac.service.with);
 
-            admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.user.class));
-            admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.endpoint.class));
-            admin_access_attrs.extend_from_slice(&attrs_for_class(class_idx, &ac.service.class));
+            // The admin access attributes are all the attributes declared on the client side of
+            // the clause.
+            //
+            // TODO: Where do we add the service side attributes for visa service?
+            let mut admin_access_attrs = Vec::new();
 
-            let fp = FPos::from(&ac.endpoint.class_tok);
+            for lhs_clause in &ac.client {
+                // Add the attributes from this clause
+                admin_access_attrs.extend_from_slice(&lhs_clause.with);
+
+                // And add the attributes defined at class level
+                admin_access_attrs
+                    .extend_from_slice(&attrs_for_class(class_idx, &lhs_clause.class));
+            }
+
+            let fp = FPos::from(&ac.server[0].class_tok);
             let attr_map = squash_attributes(&admin_access_attrs, &fp)?;
             let resolved_attrs = self.resolve_attributes(
                 attr_map
@@ -336,6 +353,33 @@ impl Weaver {
         Ok(())
     }
 
+    /// This requires that `add_services` has already been run.
+    ///
+    /// Panics if
+    /// * `name` is not in the `class_idx`
+    /// * the class ID for `name` is not in the fabric services map.
+    fn service_clause_name_to_fabric_id(
+        &self,
+        class_idx: &HashMap<String, &Class>,
+        name: &str,
+    ) -> String {
+        let svc_id = match class_idx.get(name) {
+            Some(cls) => cls.class_id,
+            None => panic!("service class {} not found in class index", name),
+        };
+        let fab_svc_id = match self.allowid_to_fab_svc.get(&svc_id) {
+            Some(s) => s,
+            None => {
+                // programming error
+                panic!(
+                    "error - service {} with id {} not found in map",
+                    name, svc_id
+                );
+            }
+        };
+        fab_svc_id.clone()
+    }
+
     fn allow_clauses_to_services(
         &mut self,
         class_idx: &HashMap<String, &Class>,
@@ -343,31 +387,35 @@ impl Weaver {
         config: &ConfigApi,
     ) -> Result<(), CompilationError> {
         for ac in &policy.allows {
-            if ac.service.class == zpl::DEF_CLASS_SERVICE_NAME {
+            // Parser ensures that the allow clause has a server.service clause.
+            let server_service = ac.get_server_service_clause().unwrap();
+            if server_service.class == zpl::DEF_CLASS_SERVICE_NAME {
                 // ZPL that applies to ALL services does not generate additional
                 // connect rules.  But it will create access rules.
                 continue;
             }
-            if ac.service.class == zpl::DEF_CLASS_VISA_SERVICE_NAME {
+            if server_service.class == zpl::DEF_CLASS_VISA_SERVICE_NAME {
                 // Handled elswhere.
                 continue;
             }
 
-            let svc_id = match class_idx.get(&ac.service.class) {
+            let svc_id = match class_idx.get(&server_service.class) {
                 Some(cls) => cls.class_id,
                 None => panic!(
                     "service class {} not found in class index",
-                    ac.service.class
+                    server_service.class
                 ),
             };
 
-            let mut attrs = Vec::new();
+            // start with parent class attributes
+            let mut attrs = attrs_for_class(class_idx, &server_service.class);
 
-            let svc_class_attrs = attrs_for_class(class_idx, &ac.service.class);
-            attrs.extend_from_slice(&svc_class_attrs);
-            attrs.extend_from_slice(&ac.service.with);
+            // And include any additionaal server side attributes from the RHS clause.
+            for rhs_clause in &ac.server {
+                attrs.extend_from_slice(&rhs_clause.with);
+            }
             let svc_class = class_idx
-                .get(&ac.service.class)
+                .get(&server_service.class)
                 .expect("service class not found in class index");
             self.add_service(class_idx, svc_class, &attrs, svc_id, config)?;
         }
@@ -383,9 +431,6 @@ impl Weaver {
         attrs: &[Attribute],
         config: &ConfigApi,
     ) -> Result<Vec<Attribute>, CompilationError> {
-        // TODO: The trusted service support is no yet real, this is a hack to permit compilation of
-        //       ZPL files that use more than just the "cn" (default) attribute.
-
         let trusted_service_names = config.must_get_keys("/trusted_services");
 
         let mut resolved_attrs = Vec::new();
@@ -397,46 +442,62 @@ impl Weaver {
                     a,
                 )));
             }
-            if attr_name == zpl::KATTR_CN {
-                resolved_attrs.push(a.clone());
-                self.used_trusted_services
-                    .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
-            } else if attr_name == zpl::DEFAULT_ATTR {
-                resolved_attrs.push(a.clone_with_new_name(zpl::KATTR_CN));
-                self.used_trusted_services
-                    .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
-            } else {
-                // TODO: This should be cached
-                // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
-                let mut matched = false;
-                for ts_name in &trusted_service_names {
-                    let search_name = if a.tag {
-                        a.zpl_value().clone()
-                    } else {
-                        attr_name.clone()
-                    };
-                    let ts_attrs = if a.tag {
-                        config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name))
-                    } else {
-                        config.must_get_keys(&format!("/trusted_services/{}/attributes", ts_name))
-                    };
-                    if ts_attrs.contains(&search_name) {
-                        if matched {
-                            return Err(CompilationError::ConfigError(format!(
-                                "attribute {a} found in multiple trusted services"
-                            )));
+
+            match attr_name.as_str() {
+                zpl::KATTR_CN => {
+                    resolved_attrs.push(a.clone());
+                    self.used_trusted_services
+                        .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+                }
+                zpl::DEFAULT_ATTR => {
+                    resolved_attrs.push(a.clone_with_new_name(zpl::KATTR_CN));
+                    self.used_trusted_services
+                        .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+                }
+                zpl::KATTR_SERVICES => {
+                    resolved_attrs.push(a.clone());
+                    self.used_trusted_services
+                        .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+                }
+                _ => {
+                    // TODO: This should be cached
+                    // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
+                    let mut matched = false;
+                    for ts_name in &trusted_service_names {
+                        let search_name = if a.tag {
+                            a.zpl_value().clone()
+                        } else {
+                            attr_name.clone()
+                        };
+                        let ts_attrs = if a.tag {
+                            config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name))
+                        } else {
+                            config
+                                .must_get_keys(&format!("/trusted_services/{}/attributes", ts_name))
+                        };
+                        if ts_attrs.contains(&search_name) {
+                            if matched {
+                                return Err(CompilationError::ConfigError(format!(
+                                    "attribute {a} found in multiple trusted services"
+                                )));
+                            }
+                            let new_attr = a.clone();
+                            resolved_attrs.push(new_attr);
+                            self.used_trusted_services.insert(ts_name.clone());
+                            matched = true;
                         }
-                        let new_attr = a.clone();
-                        resolved_attrs.push(new_attr);
-                        self.used_trusted_services.insert(ts_name.clone());
-                        matched = true;
+                    }
+                    if !matched {
+                        return Err(CompilationError::ConfigError(format!(
+                            "attribute {a} not found in any trusted service"
+                        )));
                     }
                 }
-                if !matched {
-                    return Err(CompilationError::ConfigError(format!(
-                        "attribute {a} not found in any trusted service"
-                    )));
-                }
+            }
+
+            if attr_name == zpl::KATTR_CN {
+            } else if attr_name == zpl::DEFAULT_ATTR {
+            } else {
             }
         }
         Ok(resolved_attrs)
@@ -525,7 +586,8 @@ impl Weaver {
         config: &ConfigApi,
     ) -> Result<(), CompilationError> {
         for ac in allow_clause {
-            if ac.service.class == zpl::DEF_CLASS_VISA_SERVICE_NAME {
+            let server_service = ac.get_server_service_clause().unwrap();
+            if server_service.class == zpl::DEF_CLASS_VISA_SERVICE_NAME {
                 // Visa service is handled separately.
                 continue;
             }
@@ -533,46 +595,48 @@ impl Weaver {
             // Here we collect all attributes -- some will have no values.
             let mut attrs = Vec::new();
 
-            // Grab all the endpoint attributes
-            let ep_class_attrs = attrs_for_class(class_idx, &ac.endpoint.class);
-            attrs.extend_from_slice(&ep_class_attrs);
-            attrs.extend_from_slice(
-                &ac.endpoint
-                    .with
-                    .iter()
-                    .filter(|a| !a.optional)
-                    .cloned()
-                    .collect::<Vec<Attribute>>(),
-            );
+            // Grab the LHS endpoint, service and user attributes.
+            for lhs_class in &ac.client {
+                if lhs_class.flavor == ClassFlavor::Endpoint
+                    || lhs_class.flavor == ClassFlavor::User
+                    || lhs_class.flavor == ClassFlavor::Service
+                {
+                    // Add attributes from parent
+                    attrs.extend_from_slice(&attrs_for_class(class_idx, &lhs_class.class));
 
-            // Grab all the user attributes
-            let user_class_attrs = attrs_for_class(class_idx, &ac.user.class);
-            attrs.extend_from_slice(&user_class_attrs);
-            attrs.extend_from_slice(
-                &ac.user
-                    .with
-                    .iter()
-                    .filter(|a| !a.optional)
-                    .cloned()
-                    .collect::<Vec<Attribute>>(),
-            );
+                    // Add non-optional instance attributes
+                    attrs.extend(lhs_class.with.iter().filter(|a| !a.optional).cloned());
+
+                    // If there is a service clause on the LHS then we assert that the
+                    // connecting client is a provider of that service. Note, there may not
+                    // be a concrete service specified, in that case we just say client must be
+                    // a provider of ANY service.
+                    if lhs_class.flavor == ClassFlavor::Service {
+                        let svc_attr = if lhs_class.class == zpl::DEF_CLASS_SERVICE_NAME {
+                            Attribute::zpr_internal_attr(zpl::KATTR_SERVICES, "")
+                        } else {
+                            let fab_svc_name =
+                                self.service_clause_name_to_fabric_id(class_idx, &lhs_class.class);
+                            Attribute::zpr_internal_attr_mv(zpl::KATTR_SERVICES, &fab_svc_name)
+                        };
+                        attrs.push(svc_attr);
+                    }
+                }
+            }
 
             // Now we consolidate the attributes into a map, preferring attributes that have a value.
-            let fp = FPos::from(&ac.endpoint.class_tok);
+            let fp = FPos::from(server_service.class_tok);
             let attr_map = squash_attributes(&attrs, &fp)?;
             let required_attrs = self
                 .resolve_attributes(&attr_map.into_values().collect::<Vec<Attribute>>(), config)?;
 
+            // Now grab the RHS attributes (attributes for the server)
             let svc_required_attrs = {
-                let mut service_class_attrs = attrs_for_class(class_idx, &ac.service.class);
-                service_class_attrs.extend_from_slice(
-                    &ac.service
-                        .with
-                        .iter()
-                        .filter(|a| !a.optional)
-                        .cloned()
-                        .collect::<Vec<Attribute>>(),
-                );
+                let mut service_class_attrs = Vec::new();
+                for rhs_class in &ac.server {
+                    service_class_attrs
+                        .extend(rhs_class.with.iter().filter(|a| !a.optional).cloned());
+                }
                 let attr_map = squash_attributes(&service_class_attrs, &fp)?;
                 self.resolve_attributes(
                     &attr_map.into_values().collect::<Vec<Attribute>>(),
@@ -587,7 +651,7 @@ impl Weaver {
             // c) the base service, eg, "service" - "allow red users to access services" -- in which case this condition applied to
             //    all services.
 
-            if ac.service.class == zpl::DEF_CLASS_SERVICE_NAME {
+            if server_service.class == zpl::DEF_CLASS_SERVICE_NAME {
                 // Add to all services (not nodes or trusted services or visa service)
                 self.fabric.add_condition_to_all_services(
                     never_allow,
@@ -596,28 +660,13 @@ impl Weaver {
                     ac.signal.clone(),
                 )?;
             } else {
-                let svc_id = match class_idx.get(&ac.service.class) {
-                    Some(cls) => cls.class_id,
-                    None => panic!(
-                        "service class {} not found in class index",
-                        ac.service.class
-                    ),
-                };
-                let fab_svc_id = match self.allowid_to_fab_svc.get(&svc_id) {
-                    Some(s) => s,
-                    None => {
-                        // programming error
-                        panic!(
-                            "error - service {} with id {} not found in map, allow = {}",
-                            ac.service.class, svc_id, ac
-                        );
-                    }
-                };
+                let fab_svc_id =
+                    self.service_clause_name_to_fabric_id(class_idx, &server_service.class);
                 // Note we ignore any service attributes here. I think those are already handled in the
                 // service class definition.
                 self.fabric.add_condition_to_service(
                     never_allow,
-                    fab_svc_id,
+                    &fab_svc_id,
                     &required_attrs,
                     false,
                     ac.signal.clone(),
@@ -1106,9 +1155,11 @@ mod test {
         // Will only notice that the 'foo' service is referenced.
         let a_foo = AllowClause {
             clause_id: 1,
-            endpoint: Clause::new("endpoint", Token::default()),
-            user: Clause::new("user", Token::default()),
-            service: Clause::new("foo", Token::default()),
+            client: vec![
+                Clause::new(ClassFlavor::Endpoint, "endpoint", Token::default()),
+                Clause::new(ClassFlavor::User, "user", Token::default()),
+            ],
+            server: vec![Clause::new(ClassFlavor::Service, "foo", Token::default())],
             signal: None,
         };
         policy.allows.push(a_foo);
