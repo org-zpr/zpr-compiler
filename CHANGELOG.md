@@ -4,6 +4,12 @@
 
 - (empty)
 
+
+## [0.8.0] - 2025-09-22
+
+- Initial support for a v2 binary format.
+- Services can be on LHS of statements.
+
 ## [0.7.0] - 2025-09-05
 
 - Support for deny statements in the form of "never allow...".
@@ -75,6 +81,7 @@ repository.
 
 
 
+[0.8.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.8.0
 [0.7.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.7.0
 [0.6.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.6.0
 [0.5.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.5.0
