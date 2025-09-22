@@ -65,14 +65,15 @@ pub struct AllowClause {
     pub clause_id: usize, // Within a given zpl policy, each allow clause gets a unique id.
     pub client: Vec<Clause>,
     pub server: Vec<Clause>,
+    pub signal: Option<Signal>,
 }
 
 impl fmt::Display for AllowClause {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "[{}] ALLOW {:?}\n      TO ACCESS {:?}",
-            self.clause_id, self.client, self.server
+            "[{}] ALLOW {:?}\n      TO ACCESS {:?} \n         AND SIGNAL {:?}",
+            self.clause_id, self.client, self.server, self.signal
         )
     }
 }
@@ -155,6 +156,29 @@ impl fmt::Display for Clause {
     }
 }
 
+// TODO could also use polio::Signal instead...not sure if that would cause problems
+#[derive(Clone, Debug)]
+pub struct Signal {
+    pub message: String,
+    pub service_class_name: String,
+}
+
+#[allow(dead_code)]
+impl Signal {
+    pub fn new(message: String, service_class_name: String) -> Self {
+        Signal {
+            message,
+            service_class_name,
+        }
+    }
+}
+
+impl fmt::Display for Signal {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} to {}", self.message, self.service_class_name)
+    }
+}
+
 /// A defined class in ZPL has a type which we call "flavor".
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Default)]
 pub enum ClassFlavor {
@@ -178,7 +202,7 @@ impl Display for ClassFlavor {
 
 /// A class is created from a ZPL define statement.
 /// There are also three built in classes: user, service, and endpoint.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Class {
     pub flavor: ClassFlavor,
     pub parent: String,

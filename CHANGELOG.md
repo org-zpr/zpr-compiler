@@ -4,11 +4,12 @@
 
 - (empty)
 
-
 ## [0.8.0] - 2025-09-22
 
 - Initial support for a v2 binary format.
 - Services can be on LHS of statements.
+- Support for signal clause
+- Support for signal clause
 
 ## [0.7.0] - 2025-09-05
 
