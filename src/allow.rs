@@ -116,6 +116,7 @@ impl ParseAllowState {
             // client class into the client class of the attribute domain. We do not to that (yet?)
             // for the service clause.
             server: vec![self.service_clause.take().expect("service clause not set")],
+            signal: self.signal_clause.take(),
         }
     }
 }
@@ -468,7 +469,7 @@ where
                 // This is a good parse if we actually got a endpoint or signal flavor class.
                 let cn = nested_ps.class_name.as_ref().unwrap();
                 if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
-                    let service_ec = nested_ps.to_clause("endpoint")?;
+                    let service_ec = nested_ps.to_clause(ClassFlavor::Endpoint)?;
 
                     // Since ZPL could use a defined class in the on clause we need to walk the tree and
                     // gather any attributes.

@@ -1160,6 +1160,7 @@ mod test {
                 Clause::new(ClassFlavor::User, "user", Token::default()),
             ],
             server: vec![Clause::new(ClassFlavor::Service, "foo", Token::default())],
+            signal: None,
         };
         policy.allows.push(a_foo);
 
