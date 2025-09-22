@@ -2,7 +2,7 @@ use clap::Parser;
 use colored::Colorize;
 use std::path::PathBuf;
 
-use zplc::compilation::Compilation;
+use zplc::compilation::{Compilation, OutputFormat};
 use zplc::crypto::load_rsa_private_key;
 
 /// zlpc: the ZPL Compiler
@@ -29,7 +29,11 @@ struct Cli {
     #[arg(short = 'd', long = "outdir", value_name = "DIR")]
     outdir: Option<PathBuf>,
 
-    /// Write the binary policy to filed named NAME instead of the default (input file with extension switched to .bin)
+    /// Specify the output format: v1 (default) or v2.
+    #[arg(short = 'f', long = "outfmt", value_name = "OUTPUT_FORMAT")]
+    outfmt: Option<String>,
+
+    /// Write the binary policy to filed named NAME instead of the default (input file with extension switched to .bin or .bin2)
     #[arg(short = 'o', long, value_name = "NAME")]
     outfname: Option<String>,
 
@@ -64,6 +68,24 @@ fn main() {
     if let Some(outfname) = cli.outfname {
         cb = cb.output_filename(&outfname);
     }
+    if let Some(outfmt) = cli.outfmt {
+        match outfmt.as_str() {
+            "v1" => {
+                cb = cb.output_format(OutputFormat::V1);
+            }
+            "v2" => {
+                cb = cb.output_format(OutputFormat::V2);
+            }
+            _ => {
+                println!(
+                    "{}{} invalid output format: {}",
+                    "error".red().bold(),
+                    ":".bold(),
+                    outfmt
+                );
+            }
+        }
+    }
     if let Some(key) = cli.key {
         let key = match load_rsa_private_key(&key) {
             Ok(k) => k,
@@ -79,7 +101,7 @@ fn main() {
         };
         cb = cb.sign_with_key(key);
     }
-    let comp = cb.build();
+    let mut comp = cb.build();
     match comp.compile() {
         Ok(_) => (),
         Err(e) => {

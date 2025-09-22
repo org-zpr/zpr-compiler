@@ -1,10 +1,7 @@
-use ::polio;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
-
 use openssl::pkey::Private;
 use openssl::rsa::Rsa;
-use prost::Message;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::config_api::ConfigApi;
 use crate::context::CompilationCtx;
@@ -12,7 +9,10 @@ use crate::crypto::{sha256_of_file, sign_pkcs1v15_sha256};
 use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
+use crate::policybinaryv1::{PolicyBinaryV1, PolicyContainerV1};
+use crate::policybinaryv2::{PolicyBinaryV2, PolicyContainerV2};
 use crate::policybuilder::PolicyBuilder;
+use crate::policywriter::PolicyContainer;
 use crate::weaver::weave;
 
 /// Create one of these with the [CompilationBuilder].
@@ -24,27 +24,7 @@ pub struct Compilation {
     pub output_file: PathBuf,
     pub parse_only: bool,
     private_key: Option<Rsa<Private>>,
-}
-
-pub fn get_compiler_version() -> (u32, u32, u32) {
-    let version = env!("CARGO_PKG_VERSION");
-    let version_parts: Vec<&str> = version.split('.').collect();
-    let major = version_parts
-        .get(0)
-        .unwrap_or(&"0")
-        .parse::<u32>()
-        .unwrap_or(0);
-    let minor = version_parts
-        .get(1)
-        .unwrap_or(&"0")
-        .parse::<u32>()
-        .unwrap_or(0);
-    let patch = version_parts
-        .get(2)
-        .unwrap_or(&"0")
-        .parse::<u32>()
-        .unwrap_or(0);
-    (major, minor, patch)
+    output_format: OutputFormat,
 }
 
 impl Compilation {
@@ -55,21 +35,28 @@ impl Compilation {
     }
 
     /// Create/write a policy from the ZPL source and configuration.
-    pub fn compile(&self) -> Result<(), CompilationError> {
+    pub fn compile(&mut self) -> Result<(), CompilationError> {
         let cctx = CompilationCtx::new(self.verbose, self.werror);
         let pol = self.compile_to_policy(&cctx)?;
         cctx.info("build successful");
         if let Some(pol) = pol {
-            let pcontainer = self.contain_policy(&pol, &cctx)?;
-            self.write_container(&pcontainer, &self.output_file, &cctx)?;
+            let container_bytes = match self.output_format {
+                OutputFormat::V1 => {
+                    self.contain_policy(pol, &cctx, PolicyContainerV1::default())?
+                }
+                OutputFormat::V2 => {
+                    self.contain_policy(pol, &cctx, PolicyContainerV2::default())?
+                }
+            };
+            self.write_container(&container_bytes, &self.output_file, &cctx)?;
         }
         Ok(())
     }
 
     pub fn compile_to_policy(
-        &self,
+        &mut self,
         cctx: &CompilationCtx,
-    ) -> Result<Option<polio::Policy>, CompilationError> {
+    ) -> Result<Option<Vec<u8>>, CompilationError> {
         if self.verbose {
             println!(
                 "compiling {:?} with config {:?}",
@@ -108,28 +95,34 @@ impl Compilation {
             return Ok(None);
         }
 
-        let mut builder = PolicyBuilder::new(self.verbose);
-        builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
-
-        builder.with_fabric(&fabric, &cctx)?;
-
-        let pol = builder.build()?;
+        let policy_bytes = match self.output_format {
+            OutputFormat::V1 => {
+                let writer = PolicyBinaryV1::new();
+                let mut builder = PolicyBuilder::new(self.verbose, writer);
+                builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
+                builder.with_fabric(&fabric, &cctx)?;
+                builder.build()?
+            }
+            OutputFormat::V2 => {
+                let writer = PolicyBinaryV2::new();
+                let mut builder = PolicyBuilder::new(self.verbose, writer);
+                builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
+                builder.with_fabric(&fabric, &cctx)?;
+                builder.build()?
+            }
+        };
         cctx.info("build successful");
-        Ok(Some(pol))
+        Ok(Some(policy_bytes))
     }
 
     /// Write the policy container to the output file, serializing with protocol buffers.
     fn write_container(
         &self,
-        container: &polio::PolicyContainer,
+        container: &[u8],
         file: &Path,
         ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
-        let mut buf = Vec::with_capacity(container.encoded_len());
-        container.encode(&mut buf).map_err(|e| {
-            CompilationError::EncodingError(format!("failed to encode policy container: {}", e))
-        })?;
-        std::fs::write(file, &buf).map_err(|e| {
+        std::fs::write(file, container).map_err(|e| {
             CompilationError::FileError(format!(
                 "failed to write policy container to {:?}: {}",
                 file, e
@@ -139,43 +132,37 @@ impl Compilation {
         Ok(())
     }
 
-    /// Create the container struct and optionally sign the policy with the private key.
-    fn contain_policy(
+    /// Create the container struct, move policy into it and optionally sign the policy with the private key.
+    fn contain_policy<T>(
         &self,
-        pol: &polio::Policy,
+        pol_buf: Vec<u8>,
         ctx: &CompilationCtx,
-    ) -> Result<polio::PolicyContainer, CompilationError> {
-        let mut buf = Vec::with_capacity(pol.encoded_len());
-        pol.encode(&mut buf).map_err(|e| {
-            CompilationError::EncodingError(format!("failed to encode policy: {}", e))
-        })?;
-
-        let signature: Vec<u8> = match self.private_key {
-            Some(ref key) => sign_pkcs1v15_sha256(key, &buf)?,
+        container: T,
+    ) -> Result<Vec<u8>, CompilationError>
+    where
+        T: PolicyContainer,
+    {
+        let signature = match self.private_key {
+            Some(ref key) => {
+                let sig = sign_pkcs1v15_sha256(key, &pol_buf)?;
+                Some(sig)
+            }
             None => {
                 ctx.warn(
                     "policy not signed, use `--key <pemfile>` to specify a private key for signing",
                 )?;
-                Vec::new()
+                None
             }
         };
-
-        let (major, minor, patch) = get_compiler_version();
-
-        let container = polio::PolicyContainer {
-            version_major: major,
-            version_minor: minor,
-            version_patch: patch,
-            policy_date: pol.policy_date.clone(),
-            policy_version: pol.policy_version,
-            policy_revision: pol.policy_revision.clone(),
-            policy_metadata: pol.policy_metadata.clone(),
-            policy: buf,
-            signature,
-        };
-
-        Ok(container)
+        container.contain_policy(pol_buf, signature)
     }
+}
+
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
+pub enum OutputFormat {
+    #[default]
+    V1,
+    V2,
 }
 
 /// The entry point for the compilation process, this builder is used to configure
@@ -190,6 +177,7 @@ pub struct CompilationBuilder {
     parse_only: bool,
     output_directory: Option<PathBuf>,
     out_filename: Option<String>,
+    output_format: OutputFormat,
 }
 
 impl CompilationBuilder {
@@ -243,6 +231,11 @@ impl CompilationBuilder {
         self
     }
 
+    pub fn output_format(mut self, format: OutputFormat) -> Self {
+        self.output_format = format;
+        self
+    }
+
     /// Create the [Compilation] object with the settings configured.
     pub fn build(self) -> Compilation {
         // Default config is same name as source replace .zpl extension with .zplc extension
@@ -255,6 +248,11 @@ impl CompilationBuilder {
             }
         };
 
+        let default_extension = match self.output_format {
+            OutputFormat::V1 => "bin",
+            OutputFormat::V2 => "bin2",
+        };
+
         let mut output_file = match self.output_directory {
             Some(outdir) => {
                 if !outdir.is_dir() {
@@ -263,10 +261,10 @@ impl CompilationBuilder {
                         outdir
                     );
                 }
-                let ofile = self.source_zpl.with_extension("bin");
+                let ofile = self.source_zpl.with_extension(default_extension);
                 outdir.join(ofile.file_name().unwrap())
             }
-            None => self.source_zpl.with_extension("bin"),
+            None => self.source_zpl.with_extension(default_extension),
         };
 
         // If user has selected an alternate output file, substitute that in now.
@@ -283,6 +281,7 @@ impl CompilationBuilder {
             output_file,
             private_key: self.private_key,
             parse_only: self.parse_only,
+            output_format: self.output_format,
         }
     }
 }
@@ -291,6 +290,8 @@ impl CompilationBuilder {
 mod test {
     use super::*;
 
+    use polio::polio;
+    use prost::Message;
     use std::env;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -397,7 +398,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -425,7 +426,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -478,7 +479,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, zplc).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -505,7 +506,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -534,7 +535,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -563,7 +564,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -594,7 +595,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BAS_CONFIG).expect("failed to write config file");
 
-        let compilation = Compilation::builder(zpl_file)
+        let mut compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -603,7 +604,9 @@ mod test {
         let result = compilation.compile_to_policy(&ctx);
         match result {
             Ok(pol) => {
-                let pol = pol.unwrap();
+                let pol_bin = pol.unwrap();
+                let pol: polio::Policy = polio::Policy::decode(pol_bin.as_slice())
+                    .expect("failed to decode binary policy file");
 
                 let mut pcount = 0;
 
