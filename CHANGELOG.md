@@ -8,8 +8,6 @@
 
 - Support for signal clause
 
-## [0.8.0] - MK - v2bin
-
 ## [0.7.0] - 2025-09-05
 
 - Support for deny statements in the form of "never allow...".
