@@ -29,6 +29,7 @@ pub enum TokenType {
     Tuple((String, String)),
     Period,
     Eos, // means "end of statement" but is never actually created
+    Signal,
 }
 
 #[allow(dead_code)]
@@ -68,6 +69,7 @@ impl Token {
             "optional" => TokenType::Optional,
             "multiple" => TokenType::Multiple,
             "." => TokenType::Period,
+            "signal" => TokenType::Signal,
             _ => TokenType::Literal(s.as_atom()),
         };
         Token::new(tok, line, col)
@@ -602,5 +604,27 @@ mod test {
         assert_eq!(tokens.len(), 9);
         let nevtok = &tokens[0];
         assert_eq!(nevtok.tt, super::TokenType::Never);
+    }
+
+    #[test]
+    fn test_keyword_signal() {
+        let zpl =
+            "allow users on green endpoints to access services and signal \"sig\" to database";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        println!("{:?}", tokens);
+        assert_eq!(tokens.len(), 13);
+        let sigtok = &tokens[9];
+        let litsigtok = &tokens[10];
+        let totok = &tokens[11];
+        let litdbtok: &crate::lex::Token = &tokens[12];
+
+        assert_eq!(sigtok.tt, super::TokenType::Signal);
+        assert_eq!(litsigtok.tt, super::TokenType::Literal("sig".to_string()));
+        assert_eq!(totok.tt, super::TokenType::To);
+        assert_eq!(
+            litdbtok.tt,
+            super::TokenType::Literal("database".to_string())
+        );
     }
 }

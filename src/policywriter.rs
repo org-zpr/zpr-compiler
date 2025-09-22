@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::errors::CompilationError;
 use crate::fabric::ServiceType;
 use crate::protocols::Protocol;
-use crate::ptypes::Attribute; // TODO: remove refs to fabric
+use crate::ptypes::{Attribute, Signal}; // TODO: remove refs to fabric
 
 /// In V1 These flags are used to set the type of service in the PROC.
 /// TODO: Maybe switch to using the protocol buffer type directly?
@@ -70,6 +70,7 @@ pub trait PolicyWriter {
         allow: bool,
         cli_conditions: &[Attribute],
         svc_conditions: &[Attribute],
+        signal: Option<Signal>,
     );
 
     // This one is just to support V1 lookup tables.

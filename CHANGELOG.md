@@ -4,6 +4,10 @@
 
 - (empty)
 
+## [0.8.1] - 2025-09-16
+
+- Support for signal clause
+
 ## [0.7.0] - 2025-09-05
 
 - Support for deny statements in the form of "never allow...".

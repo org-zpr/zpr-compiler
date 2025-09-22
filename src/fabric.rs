@@ -10,7 +10,7 @@ use crate::config_api::{ConfigApi, ConfigItem};
 use crate::errors::CompilationError;
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
 use crate::protocols::{IanaProtocol, Protocol};
-use crate::ptypes::{Attribute, FPos};
+use crate::ptypes::{Attribute, FPos, Signal};
 use crate::zpl;
 
 /// A service oriented view of the network.
@@ -64,11 +64,14 @@ pub struct ClientPolicy {
     /// If true, this policy is only for access, not for setting up a connection
     pub access_only: bool,
 
-    /// List of attributes that must be met by a clien for the policy to apply
+    /// List of attributes that must be met by a client for the policy to apply
     pub cli_condition: Vec<Attribute>,
 
     /// List of attributes that must be met by a service for the policy to apply
     pub svc_condition: Vec<Attribute>,
+
+    /// Signal containing message and destination
+    pub signal: Option<Signal>,
     // TODO: withouts, constraints, etc.
     //       Actually, withouts are just attributes, eg (role, ne, marketing)
 }
@@ -149,6 +152,9 @@ impl fmt::Display for Fabric {
                         .collect::<Vec<String>>()
                         .join(", ")
                 )?;
+                if cp.signal.is_some() {
+                    writeln!(f, "      {}.signal) {}", i + 1, cp.signal.as_ref().unwrap())?;
+                }
             }
         }
         for n in &self.nodes {
@@ -404,7 +410,7 @@ impl Fabric {
             format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT),
         );
         let vss_id = self.add_builtin_service(&svc_name, &vss_prot, &provider_attrs)?;
-        self.add_condition_to_service(false, &vss_id, &vs_provider_attrs, false)?;
+        self.add_condition_to_service(false, &vss_id, &vs_provider_attrs, false, None)?;
         Ok(())
     }
 
@@ -416,6 +422,7 @@ impl Fabric {
         service_id: &str,
         attrs: &[Attribute],
         access_only: bool,
+        signal: Option<Signal>,
     ) -> Result<(), CompilationError> {
         let svc = self.services.iter_mut().find(|s| s.fabric_id == service_id);
         if svc.is_none() {
@@ -425,12 +432,15 @@ impl Fabric {
                 service_id
             );
         }
+
+        // TODO check that service signal wants to signal to exists?
         let svc = svc.unwrap();
         svc.client_policies.push(ClientPolicy {
             never_allow: never_allow,
             cli_condition: attrs.to_vec(),
             svc_condition: Vec::new(),
             access_only,
+            signal,
         });
         Ok(())
     }
@@ -441,6 +451,7 @@ impl Fabric {
         never_allow: bool,
         cli_attrs: &[Attribute],
         svc_attrs: &[Attribute],
+        signal: Option<Signal>,
     ) -> Result<(), CompilationError> {
         for svc in &mut self.services {
             if svc.service_type == ServiceType::Regular {
@@ -456,6 +467,7 @@ impl Fabric {
                     access_only: false, // TODO: this is a guess
                     cli_condition: cli_attrs.to_vec(),
                     svc_condition: unique_svc_attrs.to_vec(),
+                    signal: signal.clone(),
                 });
             }
         }
