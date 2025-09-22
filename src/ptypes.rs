@@ -65,7 +65,7 @@ pub struct AllowClause {
     pub clause_id: usize, // Within a given zpl policy, each allow clause gets a unique id.
     pub client: Vec<Clause>,
     pub server: Vec<Clause>,
-    pub signal: Option<Signal>,`
+    pub signal: Option<Signal>,
 }
 
 impl fmt::Display for AllowClause {

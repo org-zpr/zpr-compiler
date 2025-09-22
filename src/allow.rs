@@ -457,13 +457,12 @@ where
                 // Signal that should remain for error checking outside this function call
                 tokens.next();
 
-                
                 let mut nested_ps = PState::new(&pa_state.root_tok);
 
                 nested_ps.parse_tags_attrs_and_classname(
                     tokens,
                     classes_idx,
-                    &ParseOpts::default(),
+                    &ParseOpts::stop_at_any(&[TokenType::Eos, TokenType::Signal]),
                     "service endpoint clause",
                 )?;
 
@@ -474,7 +473,8 @@ where
 
                     // Since ZPL could use a defined class in the on clause we need to walk the tree and
                     // gather any attributes.
-                    let mut all_endpoint_attrs = collect_all_attributes(&service_ec.class, classes_map);
+                    let mut all_endpoint_attrs =
+                        collect_all_attributes(&service_ec.class, classes_map);
                     all_endpoint_attrs.extend(service_ec.with);
 
                     for ec_attr in &all_endpoint_attrs {
@@ -490,7 +490,9 @@ where
                                 pa_state.root_tok.line,
                                 pa_state.root_tok.col,
                             ));
-                      }
+                        }
+                        service_clause.with.push(domained_attr); // TODO: Are these already in endpoint domain?
+                    }
                 } else {
                     return Err(CompilationError::AllowStmtParseError(
                         format!(
