@@ -4,11 +4,11 @@
 
 - (empty)
 
-## [0.7.1] - 2025-09-16
+## [0.8.1] - 2025-09-16
 
 - Support for signal clause
-- Maybe requires a full version increase (0.8.0) because the format of the 
-  output is going to change, thus old versions will not be compatible
+
+## [0.8.0] - MK - v2bin
 
 ## [0.7.0] - 2025-09-05
 
