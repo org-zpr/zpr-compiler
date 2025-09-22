@@ -4,7 +4,6 @@
 
 - (empty)
 
-
 ## [0.8.0] - 2025-09-22
 
 - Initial support for a v2 binary format.
