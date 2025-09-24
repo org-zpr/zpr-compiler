@@ -302,3 +302,30 @@ impl Protocol {
         s
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_iana_parse() {
+        assert_eq!(IanaProtocol::parse("iana.icmp"), Some(IanaProtocol::ICMP));
+        assert_eq!(IanaProtocol::parse("icmp"), Some(IanaProtocol::ICMP));
+        assert_eq!(IanaProtocol::parse("iana.tcp"), Some(IanaProtocol::TCP));
+        assert_eq!(IanaProtocol::parse("iana.TCP"), Some(IanaProtocol::TCP));
+        assert_eq!(IanaProtocol::parse("tcp"), Some(IanaProtocol::TCP));
+        assert_eq!(IanaProtocol::parse("iana.udp"), Some(IanaProtocol::UDP));
+        assert_eq!(IanaProtocol::parse("udp"), Some(IanaProtocol::UDP));
+        assert_eq!(
+            IanaProtocol::parse("iana.icmpv6"),
+            Some(IanaProtocol::ICMPv6)
+        );
+        assert_eq!(IanaProtocol::parse("icmpv6"), Some(IanaProtocol::ICMPv6));
+        assert_eq!(IanaProtocol::parse("iana.icmp4"), Some(IanaProtocol::ICMP));
+        assert_eq!(IanaProtocol::parse("icmp4"), Some(IanaProtocol::ICMP));
+        assert_eq!(IanaProtocol::parse("iana.icmpv4"), Some(IanaProtocol::ICMP));
+        assert_eq!(IanaProtocol::parse("icmpv4"), Some(IanaProtocol::ICMP));
+        assert_eq!(IanaProtocol::parse("iana.foo"), None);
+        assert_eq!(IanaProtocol::parse("foo"), None);
+    }
+}

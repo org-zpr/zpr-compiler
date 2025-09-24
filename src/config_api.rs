@@ -619,7 +619,6 @@ impl ConfigApi {
         }
         let key = key_path[2];
         match key {
-            "key" => Some(ConfigItem::StrVal(node.key.clone())),
             "provider" => Some(ConfigItem::AttrList(node.provider.clone())),
             "zpr_addr" => self
                 .resolve_hostname(&node.zpr_address)
@@ -697,11 +696,6 @@ mod test {
         };
         assert_eq!(nkeys.len(), 1);
         assert_eq!(nkeys[0], "n0");
-
-        assert_eq!(
-            api.get("zpr/nodes/n0/key").unwrap(),
-            ConfigItem::StrVal("none".to_string())
-        );
 
         // Note returns the node address post running through the resolver.
         assert_eq!(

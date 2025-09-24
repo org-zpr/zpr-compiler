@@ -10,25 +10,19 @@ order = ["hosts", "dns"]
 "my.service" = "fd5a:5052:1::8080"
 
 [nodes."node.zpr.org"]
-key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
 provider = [ ["endpoint.zpr.adapter.cn", "node.zpr.org"]]
 zpr_address = "node0.zpr"
-interfaces = ["in1"]
-in1.netaddr = "node0.overlay:5000"
 
 [trusted_services.default] # note that "default" is special
 cert_path = "ca-cert.pem"
 
-[visa_service] # Only one visa service support at the moment.
-dock_node = "node.zpr.org"
-
 [protocols.ping]
-l4protocol = "iana.ICMP6"
+l4protocol = "ICMP6"
 icmp_type = "request-response"
 icmp_codes = [ 128, 129 ]
 
 [protocols.http]
-l4protocol = "iana.TCP"
+l4protocol = "TCP"
 port = 80
 
 [services.ZServicePingable]

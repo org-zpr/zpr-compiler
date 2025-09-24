@@ -98,7 +98,6 @@ impl Default for Resolver {
 #[derive(Debug, Clone)]
 pub struct Node {
     pub id: String,
-    pub key: String,
     pub provider: Vec<(String, String)>,
     pub zpr_address: String,
     pub interfaces: Vec<Interface>,
@@ -176,7 +175,23 @@ impl ConfigParse {
     fn parse(&mut self, ctx: &CompilationCtx) -> Result<Config, CompilationError> {
         let resolver = self.parse_resolver(ctx)?;
         let nodes = self.parse_nodes(ctx)?;
-        let visa_service = self.parse_visa_service(ctx)?;
+
+        let visa_service = match self.parse_visa_service(ctx)? {
+            Some(vs) => vs,
+            None => {
+                // There can only be one node.
+                if nodes.len() != 1 {
+                    return Err(err_config!(
+                        "visa_service section missing and there is not exactly one node"
+                    ));
+                }
+                let one_node = nodes.values().next().unwrap();
+                VisaService {
+                    dock_node_id: one_node.id.clone(),
+                }
+            }
+        };
+
         let bootstrap = self.parse_bootstrap(ctx)?;
         let trusted_services = self.parse_trusted_services(ctx)?;
         let mut protocols = self.parse_protocols(ctx)?;
@@ -299,12 +314,16 @@ impl ConfigParse {
     }
 
     /// Parse the very basic visa_service section.
+    ///
+    /// The only thing in here is dock_node with the node ID.
+    /// As we currently only support one node user can just skip
+    /// this and we will fill it in automatically.
     fn parse_visa_service(
         &mut self,
         ctx: &CompilationCtx,
-    ) -> Result<VisaService, CompilationError> {
+    ) -> Result<Option<VisaService>, CompilationError> {
         if !self.ctoml.contains_key("visa_service") {
-            return Err(err_config!("missing section: visa_service"));
+            return Ok(None);
         }
         let vs = self.ctoml["visa_service"]
             .as_table()
@@ -325,7 +344,7 @@ impl ConfigParse {
             .ok_or(err_config!("visa_service missing dock_node"))?
             .to_string();
 
-        Ok(VisaService { dock_node_id })
+        Ok(Some(VisaService { dock_node_id }))
     }
 
     // Parse optional boostrap section. Each entry in the table is of the form: `<CN> = <KEYFILE>`.
@@ -371,6 +390,7 @@ impl ConfigParse {
             .as_table()
             .ok_or(err_config!("error reading trusted_services section"))?;
         let mut trusted_services = Vec::new();
+        let mut default_creates = 0;
         for (ts_id, v) in ts {
             let ts = parse_trusted_service(
                 ts_id,
@@ -378,6 +398,25 @@ impl ConfigParse {
                     .ok_or(err_config!("trusted_service {} is not a table", ts_id))?,
                 ctx,
             )?;
+            if ts.id == zpl::DEFAULT_TRUSTED_SERVICE_ID {
+                default_creates += 1;
+                if default_creates > 1 {
+                    return Err(err_config!("only one default trusted_service allowed"));
+                }
+            }
+            trusted_services.push(ts);
+        }
+        if default_creates == 0 {
+            let ts = TrustedService {
+                id: zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string(),
+                api: zpl::DEFAULT_TRUSTED_SERVICE_API.to_string(),
+                cert_path: None,
+                returns_attrs: vec![Attribute::attr_name_only(zpl::KATTR_CN).unwrap()],
+                identity_attrs: vec![Attribute::attr_name_only(zpl::KATTR_CN).unwrap()],
+                provider: None,
+                client: None,
+                service: None,
+            };
             trusted_services.push(ts);
         }
         Ok(trusted_services)
@@ -468,54 +507,50 @@ fn require_key(ctx: &str, table: &Table, key: &str) -> Result<(), CompilationErr
 /// Parse a single node table.
 fn parse_node(node_id: &str, node: &Table, ctx: &CompilationCtx) -> Result<Node, CompilationError> {
     warn_unknown_node_property(node, ctx)?;
-    require_key(&format!("nodes.{}", node_id), node, "key")?;
-    let key = node["key"]
-        .as_str()
-        .ok_or(err_config!("node {} missing key", node_id))?
-        .to_string();
     require_key(&format!("nodes.{}", node_id), node, "zpr_address")?;
     let zpr_address = node["zpr_address"]
         .as_str()
         .ok_or(err_config!("node {} invalid zpr_address", node_id))?
         .to_string();
 
-    let mut interfaces = Vec::new();
-
     // In order to parse the interfaces, we need the interface names.
-    require_key(&format!("node {}", node_id), node, "interfaces")?;
-    let ifnames = node["interfaces"]
-        .as_array()
-        .ok_or(err_config!("node {} missing interfaces", node_id))?;
-    for ifname in ifnames {
-        let ifname = ifname.as_str().ok_or(err_config!(
-            "node {} interface name is not a string",
-            node_id
-        ))?;
+    // TODO: Interfaces are not required and will only be useful later for
+    //       creating lans and bridges and also for adding interface properties.
+    let mut interfaces = Vec::new();
+    if node.contains_key("interfaces") {
+        let ifnames = node["interfaces"]
+            .as_array()
+            .ok_or(err_config!("node {} missing interfaces", node_id))?;
+        for ifname in ifnames {
+            let ifname = ifname.as_str().ok_or(err_config!(
+                "node {} interface name is not a string",
+                node_id
+            ))?;
 
-        // The node contains a table entry for each interface name.
-        if !node.contains_key(ifname) {
-            return Err(err_config!(
-                "node {} missing entry for interface {}",
-                node_id,
-                ifname
-            ));
+            // The node contains a table entry for each interface name.
+            if !node.contains_key(ifname) {
+                return Err(err_config!(
+                    "node {} missing entry for interface {}",
+                    node_id,
+                    ifname
+                ));
+            }
+            let iface = parse_interface(
+                ifname,
+                node[ifname].as_table().ok_or(err_config!(
+                    "node {} interface {} is not a table",
+                    node_id,
+                    ifname
+                ))?,
+            )?;
+            interfaces.push(iface);
         }
-        let iface = parse_interface(
-            ifname,
-            node[ifname].as_table().ok_or(err_config!(
-                "node {} interface {} is not a table",
-                node_id,
-                ifname
-            ))?,
-        )?;
-        interfaces.push(iface);
     }
 
     let provider = parse_provider(&format!("node {}", node_id), node)?;
 
     Ok(Node {
         id: node_id.to_string(),
-        key,
         zpr_address,
         interfaces,
         provider,
@@ -525,7 +560,6 @@ fn parse_node(node_id: &str, node: &Table, ctx: &CompilationCtx) -> Result<Node,
 fn warn_unknown_node_property(node: &Table, ctx: &CompilationCtx) -> Result<(), CompilationError> {
     for elem in node.keys() {
         match elem.as_str() {
-            "key" => (),
             "provider" => (),
             "zpr_address" => (),
             "interfaces" => (),
@@ -653,7 +687,8 @@ fn parse_trusted_service(
         )?))
     } else if is_default {
         // The path is the only thing required for the default section.
-        return Err(err_config!("default trusted_service requires cert_path"));
+        ctx.warn("no cert_path for default trusted_service, certificate checking disabled")?;
+        None
     } else {
         None
     };
@@ -761,6 +796,7 @@ fn warn_unknown_ts_property(ts: &Table, ctx: &CompilationCtx) -> Result<(), Comp
             "cert_path" => (),
             "api" => (),
             "client" => (),
+            "service" => (),
             "returns_attributes" => (),
             "provider" => (),
             "prefix" => (),
@@ -1155,7 +1191,6 @@ mod test {
         let tstr = r#"
         [nodes]
         [nodes.n0]
-        key = "somekey"
         zpr_address = "foo.zpr"
         provider = [["zpr.foo", "bar"], ["baz", 99]]
         interfaces = ["eth0", "eth1"]
@@ -1169,7 +1204,6 @@ mod test {
         assert_eq!(nodes.len(), 1);
         let n0 = nodes.get("n0").unwrap();
         assert_eq!(n0.id, "n0");
-        assert_eq!(n0.key, "somekey");
         assert_eq!(n0.zpr_address, "foo.zpr");
         assert_eq!(n0.interfaces.len(), 2);
         for iface in &n0.interfaces {
@@ -1223,7 +1257,7 @@ mod test {
         let vs = cparser.parse_visa_service(&ctx);
         assert!(vs.is_ok());
         let vs = vs.unwrap();
-        assert_eq!(vs.dock_node_id, "n0");
+        assert_eq!(vs.unwrap().dock_node_id, "n0");
     }
 
     #[test]
@@ -1291,7 +1325,7 @@ mod test {
         }
         assert!(services.is_ok());
         let services = services.unwrap();
-        assert_eq!(services.len(), 1);
+        assert_eq!(services.len(), 2);
         let ts = services.get(0).unwrap();
         assert_eq!(ts.id, "other");
         assert_eq!(ts.api, "validation/2");
@@ -1356,7 +1390,7 @@ mod test {
         }
         assert!(services.is_ok());
         let services = services.unwrap();
-        assert_eq!(services.len(), 1);
+        assert_eq!(services.len(), 2);
         let ts = services.get(0).unwrap();
         assert_eq!(ts.id, "other");
         assert_eq!(ts.api, "validation/2");
@@ -1394,7 +1428,7 @@ mod test {
         let services = cparser.parse_trusted_services(&ctx);
         assert!(services.is_ok());
         let services = services.unwrap();
-        assert_eq!(services.len(), 1);
+        assert_eq!(services.len(), 2);
         let ts = services.get(0).unwrap();
         assert_eq!(ts.id, "bas");
         assert_eq!(ts.api, "validation/2");
