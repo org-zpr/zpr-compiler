@@ -21,7 +21,7 @@ Only one node is supported currently in a ZPRnet.  Syntax:
 
 ```toml
 [nodes.<NODEID>]
-provider = [["<KEY>", "<VALUE>"], ..]
+provider = [["<KEY>", "<VALUE>"]]
 zpr_address = "fd5a..."
 ```
 * `provider` - The set of attributes required in order to provide the node "service". These
