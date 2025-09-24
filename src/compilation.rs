@@ -15,7 +15,7 @@ use crate::policybinaryv1::{PolicyBinaryV1, PolicyContainerV1};
 use crate::policybinaryv2::{PolicyBinaryV2, PolicyContainerV2};
 use crate::policybuilder::PolicyBuilder;
 use crate::policywriter::PolicyContainer;
-use crate::ptypes::AllowClause;
+use crate::ptypes::{AllowClause, Policy};
 use crate::weaver::weave;
 
 /// Create one of these with the [CompilationBuilder].
@@ -184,6 +184,39 @@ impl Compilation {
         Ok(zpl)
     }
 
+    /// Get and store the ZPL lines that correspond to the permission satements in policy.
+    fn copy_zpl_from_permissions(&mut self, policy: &Policy) -> Result<(), CompilationError> {
+        self.set_statement_zpl(false, &policy.allows)?;
+        self.set_statement_zpl(true, &policy.nevers)?;
+        Ok(())
+    }
+
+    /// Store the ZPL lines that correspond to the permission statements in policy.
+    /// If the statements list is empty, clear any previously stored statements.
+    /// This either updates the "allow" zpl or the "never allow" zpl depending on
+    /// the `never` boolean.
+    fn set_statement_zpl(
+        &mut self,
+        never: bool,
+        statements: &[AllowClause],
+    ) -> Result<(), CompilationError> {
+        if !statements.is_empty() {
+            let zpl = self.copy_permission_statements(statements)?;
+            if never {
+                self.copied_never_allow_statements = Some(zpl);
+            } else {
+                self.copied_allow_statements = Some(zpl);
+            }
+        } else {
+            if never {
+                self.copied_never_allow_statements = None;
+            } else {
+                self.copied_allow_statements = None;
+            }
+        }
+        Ok(())
+    }
+
     pub fn compile_to_policy(
         &mut self,
         cctx: &CompilationCtx,
@@ -213,14 +246,7 @@ impl Compilation {
         let pr = parse(tz.tokens, &cctx)?;
         let mut policy = pr.policy;
 
-        let allow_zpl = self.copy_permission_statements(&policy.allows)?;
-        if !allow_zpl.is_empty() {
-            self.copied_allow_statements = Some(allow_zpl);
-        }
-        let never_allow_zpl = self.copy_permission_statements(&policy.nevers)?;
-        if !never_allow_zpl.is_empty() {
-            self.copied_never_allow_statements = Some(never_allow_zpl);
-        }
+        self.copy_zpl_from_permissions(&policy)?;
 
         let policy_digest = sha256_of_file(&self.source_zpl)?;
         policy.digest = Some(policy_digest);
