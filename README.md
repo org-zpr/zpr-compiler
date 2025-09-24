@@ -27,19 +27,11 @@ and another for the Visa Service to be able to implement the policy.
 
 Here are syntax bits that are not yet supported by the compiler:
 
-- Keyword `on` for referencing endpoint class. (Issue: [#30][1] )
-- Quoting in AKA names or defined class names. (Issue: [#31][2] )
-- Set values for attributes.  Eg, `allow color:{red, blue} users to access ...` (Issue: [#32][3])
-- Deny statements: `never allow...` (Issue: [#33][4] )
-- Signal clause: `... and signal ...` (Issue: [#34][5])
+- Set values for attributes.  Eg, `allow color:{red, blue} users to access ...` (Issue: [#32][1])
 - Limits.
 - Conditions.
 - Through clause.
 
 
-[1]: https://github.com/org-zpr/zpr-compiler/issues/30
-[2]: https://github.com/org-zpr/zpr-compiler/issues/31
-[3]: https://github.com/org-zpr/zpr-compiler/issues/32
-[4]: https://github.com/org-zpr/zpr-compiler/issues/33
-[5]: https://github.com/org-zpr/zpr-compiler/issues/34
+[1]: https://github.com/org-zpr/zpr-compiler/issues/32
 
