@@ -42,12 +42,13 @@ pub struct Token {
     pub tt: TokenType,
     pub line: usize,
     pub col: usize,
+    pub size: usize,
 }
 
 impl Token {
     pub fn new_from_str(s: &ZPLStr, line: usize, col: usize) -> Token {
         if s.is_tuple() {
-            return Token::new(TokenType::Tuple(s.as_tuple()), line, col);
+            return Token::new(TokenType::Tuple(s.as_tuple()), line, col, s.len());
         }
         let ls = s.as_atom().to_lowercase();
         let tok = match ls.as_str() {
@@ -72,11 +73,16 @@ impl Token {
             "signal" => TokenType::Signal,
             _ => TokenType::Literal(s.as_atom()),
         };
-        Token::new(tok, line, col)
+        Token::new(tok, line, col, s.len())
     }
 
-    pub fn new(tt: TokenType, line: usize, col: usize) -> Token {
-        Token { tt, line, col }
+    pub fn new(tt: TokenType, line: usize, col: usize, sz: usize) -> Token {
+        Token {
+            tt,
+            line,
+            col,
+            size: sz,
+        }
     }
 }
 
@@ -86,6 +92,7 @@ impl Default for Token {
             tt: TokenType::Undefined,
             line: 0,
             col: 0,
+            size: 0,
         }
     }
 }
@@ -214,10 +221,10 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             ));
                         }
                         current_word.clear();
-                        tokens.push(Token::new(TokenType::Comma, line, col));
+                        tokens.push(Token::new(TokenType::Comma, line, col, 1));
                     }
                 } else {
-                    tokens.push(Token::new(TokenType::Comma, line, col));
+                    tokens.push(Token::new(TokenType::Comma, line, col, 1));
                 }
                 col += 1;
             }
@@ -241,7 +248,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             ));
                         }
                         current_word.clear();
-                        tokens.push(Token::new(TokenType::Period, line, col));
+                        tokens.push(Token::new(TokenType::Period, line, col, 1));
                     } else {
                         current_word.push(c, quoting.is_quoting(), line, col)?;
                         // Special case: if we see that there is another period following this one we warn the user.
@@ -255,7 +262,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                         }
                     }
                 } else if followed_by_whitespace {
-                    tokens.push(Token::new(TokenType::Period, line, col));
+                    tokens.push(Token::new(TokenType::Period, line, col, 1));
                 } else {
                     current_word.push(c, quoting.is_quoting(), line, col)?; // I guess it is allowed to start a "word" with a period?
                 }

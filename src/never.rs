@@ -32,10 +32,13 @@ pub fn parse_never(
             never_statement[1].col,
         ));
     }
-    parse_allow(
+    let mut allow_clause = parse_allow(
         &never_statement[1..],
         statement_id,
         classes_idx,
         classes_map,
-    )
+    )?;
+    // Since we started with never, we update the span.
+    allow_clause.span.0 = never_statement[0].clone().into();
+    Ok(allow_clause)
 }

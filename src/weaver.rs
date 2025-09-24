@@ -8,7 +8,7 @@ use crate::config_api::{ConfigApi, ConfigItem};
 use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
-use crate::fabric::{Fabric, ServiceType};
+use crate::fabric::{Fabric, PLine, ServiceType};
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
 use crate::protocols::{IanaProtocol, Protocol, ZPR_OAUTH_RSA, ZPR_VALIDATION_2};
 use crate::ptypes::{AllowClause, Attribute, Class, ClassFlavor, FPos, Policy};
@@ -26,7 +26,7 @@ pub struct Weaver {
 
 /// Weave produces the fabric from the ZPL and Configuration data structures,
 pub fn weave(
-    _comp: &Compilation,
+    comp: &Compilation,
     config: &ConfigApi,
     policy: &Policy,
     ctx: &CompilationCtx,
@@ -64,10 +64,10 @@ pub fn weave(
         class_idx.insert(cl.name.clone(), cl);
     }
 
-    weaver.init_services(&class_idx, policy, config, ctx)?;
+    weaver.init_services(comp, &class_idx, policy, config, ctx)?;
     weaver.init_nodes(config)?;
-    weaver.add_client_deny_policies(&class_idx, policy, config)?;
-    weaver.add_client_allow_policies(&class_idx, policy, config)?;
+    weaver.add_client_deny_policies(comp, &class_idx, policy, config)?;
+    weaver.add_client_allow_policies(comp, &class_idx, policy, config)?;
     // By the time we get here, we have resolved all attributes and so know which trusted
     // services are in play.
     weaver.add_trusted_services(config, ctx)?;
@@ -103,6 +103,7 @@ impl Weaver {
     /// the configuration but we only want the ones that are refefenced in the ZPL.
     fn init_services(
         &mut self,
+        comp: &Compilation,
         class_idx: &HashMap<String, &Class>,
         policy: &Policy,
         config: &ConfigApi,
@@ -110,7 +111,7 @@ impl Weaver {
     ) -> Result<(), CompilationError> {
         self.defines_to_services(class_idx, policy, config)?;
         self.allow_clauses_to_services(class_idx, policy, config)?;
-        self.visa_services_to_services(class_idx, policy, config, ctx)?;
+        self.visa_services_to_services(comp, class_idx, policy, config, ctx)?;
 
         Ok(())
     }
@@ -121,6 +122,7 @@ impl Weaver {
     /// admin HTTPS API.
     fn visa_services_to_services(
         &mut self,
+        comp: &Compilation,
         class_idx: &HashMap<String, &Class>,
         policy: &Policy,
         config: &ConfigApi,
@@ -146,9 +148,17 @@ impl Weaver {
 
         // Visa service has policy that allows nodes to access it.  We use a node role attribute so
         // we don't care about individual node names.
+        let pline = PLine::new_builtin("allow node access to visa service");
         let vs_access_attrs = vec![Attribute::zpr_internal_attr(zpl::KATTR_ROLE, "node")];
-        self.fabric
-            .add_condition_to_service(false, &fab_svc_id, &vs_access_attrs, true, None)?;
+        self.fabric.add_condition_to_service(
+            false,
+            &fab_svc_id,
+            &vs_access_attrs,
+            &[],
+            true,
+            None,
+            &pline,
+        )?;
 
         // Now add a service for the admin HTTPS API.
         let admin_api_protocol = Protocol::new_l4_with_port(
@@ -166,7 +176,7 @@ impl Weaver {
 
         // The admin permissions come from ZPL allow statements, not from configuration.
         let mut condition_count = 0;
-        for ac in &policy.allows {
+        for (plcy_idx, ac) in policy.allows.iter().enumerate() {
             // Seeking a RHS service class that is the visa service.
 
             let vs_rhs_count = ac
@@ -208,13 +218,16 @@ impl Weaver {
                     .as_slice(),
                 config,
             )?;
+            let pline = PLine::new(ac.span.0.line, &comp.zpl_for_allow_statement(plcy_idx));
             if !resolved_attrs.is_empty() {
                 self.fabric.add_condition_to_service(
                     false,
                     &fab_admin_svc_id,
                     &resolved_attrs,
+                    &[], // TODO: Should we consider RHS attributes?
                     false,
                     None,
+                    &pline,
                 )?;
                 condition_count += 1;
             }
@@ -558,34 +571,37 @@ impl Weaver {
     /// Must be done after initializing the services.
     fn add_client_allow_policies(
         &mut self,
+        comp: &Compilation,
         class_idx: &HashMap<String, &Class>,
         policy: &Policy,
         config: &ConfigApi,
     ) -> Result<(), CompilationError> {
         // Every allow is an access condition (aka rule, aka policy).
         // We need the attributes from the user and device clauses.
-        self.add_client_policies_allow_or_deny(&policy.allows, false, class_idx, config)
+        self.add_client_policies_allow_or_deny(comp, &policy.allows, false, class_idx, config)
     }
 
     fn add_client_deny_policies(
         &mut self,
+        comp: &Compilation,
         class_idx: &HashMap<String, &Class>,
         policy: &Policy,
         config: &ConfigApi,
     ) -> Result<(), CompilationError> {
         // Every allow is an access condition (aka rule, aka policy).
         // We need the attributes from the user and device clauses.
-        self.add_client_policies_allow_or_deny(&policy.nevers, true, class_idx, config)
+        self.add_client_policies_allow_or_deny(comp, &policy.nevers, true, class_idx, config)
     }
 
     fn add_client_policies_allow_or_deny(
         &mut self,
+        comp: &Compilation,
         allow_clause: &[AllowClause],
         never_allow: bool,
         class_idx: &HashMap<String, &Class>,
         config: &ConfigApi,
     ) -> Result<(), CompilationError> {
-        for ac in allow_clause {
+        for (i, ac) in allow_clause.iter().enumerate() {
             let server_service = ac.get_server_service_clause().unwrap();
             if server_service.class == zpl::DEF_CLASS_VISA_SERVICE_NAME {
                 // Visa service is handled separately.
@@ -651,6 +667,15 @@ impl Weaver {
             // c) the base service, eg, "service" - "allow red users to access services" -- in which case this condition applied to
             //    all services.
 
+            let pline = PLine {
+                lineno: ac.span.0.line,
+                zpl: if never_allow {
+                    comp.zpl_for_never_allow_statement(i)
+                } else {
+                    comp.zpl_for_allow_statement(i)
+                },
+            };
+
             if server_service.class == zpl::DEF_CLASS_SERVICE_NAME {
                 // Add to all services (not nodes or trusted services or visa service)
                 self.fabric.add_condition_to_all_services(
@@ -658,18 +683,19 @@ impl Weaver {
                     &required_attrs,
                     &svc_required_attrs,
                     ac.signal.clone(),
+                    &pline,
                 )?;
             } else {
                 let fab_svc_id =
                     self.service_clause_name_to_fabric_id(class_idx, &server_service.class);
-                // Note we ignore any service attributes here. I think those are already handled in the
-                // service class definition.
                 self.fabric.add_condition_to_service(
                     never_allow,
                     &fab_svc_id,
                     &required_attrs,
+                    &svc_required_attrs,
                     false,
                     ac.signal.clone(),
+                    &pline,
                 )?;
             }
         }
@@ -868,8 +894,19 @@ impl Weaver {
                 zpl::KATTR_CN,
                 zpl::VISA_SERVICE_CN,
             )];
-            self.fabric
-                .add_condition_to_service(false, &ts_name, &vs_access_attrs, true, None)?;
+            let pline = PLine::new_builtin(&format!(
+                "allow visa service access to trusted service {}",
+                ts_name
+            ));
+            self.fabric.add_condition_to_service(
+                false,
+                &ts_name,
+                &vs_access_attrs,
+                &[],
+                true,
+                None,
+                &pline,
+            )?;
         }
         Ok(())
     }
@@ -1053,6 +1090,7 @@ mod test {
     use crate::lex::Token;
     use crate::ptypes::{AllowClause, ClassFlavor, Clause, FPos};
     use std::env;
+    use std::path::PathBuf;
 
     #[test]
     fn test_init_services_minimal() {
@@ -1074,8 +1112,15 @@ mod test {
         let config =
             ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), &CompilationCtx::default())
                 .expect("failed to parse config");
+        let comp = Compilation::builder(PathBuf::default()).build();
 
-        let res = w.init_services(&class_idx, &policy, &config, &CompilationCtx::default());
+        let res = w.init_services(
+            &comp,
+            &class_idx,
+            &policy,
+            &config,
+            &CompilationCtx::default(),
+        );
         assert!(res.is_ok());
 
         // Should create two services: visa-service and visa-service-admin
@@ -1126,10 +1171,12 @@ mod test {
         let ctx = CompilationCtx::default();
         let config = ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), &ctx)
             .expect("failed to parse config");
+        let comp = Compilation::builder(PathBuf::default()).build();
 
         {
             let mut w = Weaver::new();
-            let res = w.init_services(&class_idx, &policy, &config, &ctx);
+
+            let res = w.init_services(&comp, &class_idx, &policy, &config, &ctx);
             assert!(res.is_ok(), "init_services failed: {}", res.unwrap_err());
 
             // Should create two services: visa-service and visa-service-admin.
@@ -1155,6 +1202,7 @@ mod test {
         // Will only notice that the 'foo' service is referenced.
         let a_foo = AllowClause {
             clause_id: 1,
+            span: (FPos::default(), FPos::default()),
             client: vec![
                 Clause::new(ClassFlavor::Endpoint, "endpoint", Token::default()),
                 Clause::new(ClassFlavor::User, "user", Token::default()),
@@ -1183,7 +1231,7 @@ mod test {
 
         {
             let mut w = Weaver::new();
-            let res = w.init_services(&class_idx, &policy, &config, &ctx);
+            let res = w.init_services(&comp, &class_idx, &policy, &config, &ctx);
             println!("{:?}", res);
             assert!(res.is_ok(), "init_services failed: {}", res.unwrap_err());
             assert_eq!(w.fabric.services.len(), 3);

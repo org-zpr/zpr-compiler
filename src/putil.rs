@@ -8,11 +8,11 @@ pub fn require_tt(
     expect: &str,
     statement_type: &str,
     expect_tt: TokenType,
-) -> Result<(), CompilationError> {
+) -> Result<Token, CompilationError> {
     match next_tok {
         Some(tok) => {
             if tok.tt == expect_tt {
-                Ok(())
+                Ok(tok.clone())
             } else {
                 Err(CompilationError::ParseError(
                     format!("expected {expect}, found {:?}", tok.tt),

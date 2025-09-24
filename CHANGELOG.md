@@ -2,7 +2,9 @@
 
 ## pending
 
-- (empty)
+- Now puts ZPL text into v2 binary output.
+- Fixed a possible bug where service side attrs were not getting
+  encoded into access policy.
 
 ## [0.8.0] - 2025-09-22
 

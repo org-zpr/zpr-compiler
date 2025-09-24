@@ -2,7 +2,7 @@
 use ring::digest::Digest;
 use std::collections::HashMap;
 use std::fmt;
-use std::fmt::Display;
+use std::fmt::{Display, Write};
 
 use crate::errors::AttributeError;
 use crate::lex::Token;
@@ -25,6 +25,12 @@ pub struct FPos {
     pub col: usize,
 }
 
+impl FPos {
+    pub fn new(line: usize, col: usize) -> Self {
+        FPos { line, col }
+    }
+}
+
 impl From<Token> for FPos {
     fn from(tok: Token) -> Self {
         FPos {
@@ -40,6 +46,12 @@ impl From<&Token> for FPos {
             line: tok.line,
             col: tok.col,
         }
+    }
+}
+
+impl fmt::Display for FPos {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "line:{}, col:{}", self.line, self.col)
     }
 }
 
@@ -63,6 +75,7 @@ impl From<&Token> for FPos {
 #[derive(Clone, Debug)]
 pub struct AllowClause {
     pub clause_id: usize, // Within a given zpl policy, each allow clause gets a unique id.
+    pub span: (FPos, FPos),
     pub client: Vec<Clause>,
     pub server: Vec<Clause>,
     pub signal: Option<Signal>,
@@ -72,9 +85,20 @@ impl fmt::Display for AllowClause {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "[{}] ALLOW {:?}\n      TO ACCESS {:?} \n         AND SIGNAL {:?}",
-            self.clause_id, self.client, self.server, self.signal
-        )
+            "[{}] ALLOW  <{} -> {}>\n",
+            self.clause_id, self.span.0, self.span.1
+        )?;
+        for c in &self.client {
+            write!(f, "      {:?}\n", c)?;
+        }
+        write!(f, "    TO ACCESS\n")?;
+        for c in &self.server {
+            write!(f, "     {:?}\n", c)?;
+        }
+        if let Some(sig) = &self.signal {
+            write!(f, "    AND SIGNAL\n      {:?}\n", sig)?;
+        }
+        Ok(())
     }
 }
 
@@ -82,10 +106,19 @@ impl AllowClause {
     /// Default `fmt` for allow assumes the allow is just a normal allow.
     /// Use this debug stringer to get a NEVER thrown in to the output.
     pub fn to_string_never(&self) -> String {
-        format!(
-            "[{}] NEVER ALLOW {:?}\n      TO ACCESS {:?}",
-            self.clause_id, self.client, self.server
-        )
+        let mut f = String::new();
+        write!(f, "[{}] NEVER ALLOW\n", self.clause_id).unwrap();
+        for c in &self.client {
+            write!(f, "      {:?}\n", c).unwrap();
+        }
+        write!(f, "    TO ACCESS\n").unwrap();
+        for c in &self.server {
+            write!(f, "     {:?}\n", c).unwrap();
+        }
+        if let Some(sig) = &self.signal {
+            write!(f, "    AND SIGNAL\n      {:?}\n", sig).unwrap();
+        }
+        f
     }
 
     pub fn get_server_service_clause(&self) -> Option<Clause> {

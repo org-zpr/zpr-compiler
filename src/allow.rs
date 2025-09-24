@@ -5,13 +5,14 @@ use std::iter::Peekable;
 
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{AllowClause, AttrDomain, Attribute, Class, ClassFlavor, Clause, Signal};
+use crate::ptypes::{AllowClause, AttrDomain, Attribute, Class, ClassFlavor, Clause, FPos, Signal};
 use crate::putil;
 use crate::zpl;
 
 #[derive(Debug, Default)]
 struct ParseAllowState {
     root_tok: Token,
+    last_tok: Token,
     client_endpoint_clause: Option<Clause>,
     client_user_clause: Option<Clause>,
     client_service_clause: Option<Clause>,
@@ -22,9 +23,17 @@ struct ParseAllowState {
 impl ParseAllowState {
     fn new(root_tok: Token) -> ParseAllowState {
         ParseAllowState {
-            root_tok,
+            root_tok: root_tok.clone(),
+            last_tok: root_tok,
             ..Default::default()
         }
+    }
+
+    /// Update this as tokens are parsed. When the allow statement is fully parsed
+    /// the `last_tok`` should be the last token of the statement. We use this later
+    /// to extract the ZPL permission statement from the policy text.
+    fn update_last_tok(&mut self, tok: &Token) {
+        self.last_tok = tok.clone();
     }
 
     /// True when we have none of the client clauses set.
@@ -111,6 +120,13 @@ impl ParseAllowState {
         }
         AllowClause {
             clause_id,
+            span: (
+                self.root_tok.clone().into(),
+                FPos::new(
+                    self.last_tok.line,
+                    self.last_tok.col + self.last_tok.size - 1,
+                ),
+            ),
             client: client_clauses,
             // TODO: Note that above we spend a lot of time to move the attributes on each
             // client class into the client class of the attribute domain. We do not to that (yet?)
@@ -161,6 +177,7 @@ pub fn parse_allow(
         &ParseOpts::stop_at_any(&[TokenType::To, TokenType::On]),
         "client (LHS) clause",
     )?;
+    parse_state.update_last_tok(&ps.last_tok);
 
     match tokens.peek() {
         Some(tok) => {
@@ -241,6 +258,8 @@ pub fn parse_allow(
     // If it's a ON then we expect an endpoint clause next.
     // If it's a TO then we expect a RHS service clause next.
     let tok = tokens.next().unwrap();
+    parse_state.update_last_tok(tok);
+
     match tok.tt {
         TokenType::On => {
             if parse_state.client_clauses_is_none() {
@@ -268,13 +287,14 @@ pub fn parse_allow(
                 ));
             }
             // pop the TO off, leaving the 'access'.
-            putil::require_tt(
+            let totok = putil::require_tt(
                 &parse_state.root_tok,
                 tokens.next(),
                 "TO",
                 "allow",
                 TokenType::To,
             )?;
+            parse_state.update_last_tok(&totok);
         }
         TokenType::To => { /* continue to parse service clause */ }
         _ => {
@@ -392,6 +412,7 @@ where
         &ParseOpts::stop_at(TokenType::To),
         "endpoint clause",
     )?;
+    pa_state.update_last_tok(&ps.last_tok);
 
     // This is a good parse if we actually got a endpoint flavor class.
     let cn = ps.class_name.as_ref().unwrap();
@@ -422,19 +443,21 @@ where
     I: Iterator<Item = &'a Token>,
 {
     // Pop off the "ACCESS" token...
-    putil::require_tt(
+    let atok = putil::require_tt(
         &pa_state.root_tok,
         tokens.next(),
         "ACCESS",
         "allow",
         TokenType::Access,
     )?;
+    pa_state.update_last_tok(&atok);
 
     // Need a service clause now -- parse to end of statement.
     let mut ps = PState::new(&pa_state.root_tok);
     // Signal clause will always
     let popts = ParseOpts::stop_at_any(&[TokenType::On, TokenType::Eos, TokenType::Signal]);
     ps.parse_tags_attrs_and_classname(tokens, classes_idx, &popts, "service clause")?;
+    pa_state.update_last_tok(&ps.last_tok);
 
     let cn = ps.class_name.as_ref().unwrap();
     if classes_map.get(cn).unwrap().flavor != ClassFlavor::Service {
@@ -455,7 +478,7 @@ where
             TokenType::On => {
                 // Previously used tokens.next() above, changed to peek because if we read a
                 // Signal that should remain for error checking outside this function call
-                tokens.next();
+                pa_state.update_last_tok(tokens.next().unwrap());
 
                 let mut nested_ps = PState::new(&pa_state.root_tok);
 
@@ -465,6 +488,7 @@ where
                     &ParseOpts::stop_at_any(&[TokenType::Eos, TokenType::Signal]),
                     "service endpoint clause",
                 )?;
+                pa_state.update_last_tok(&nested_ps.last_tok);
 
                 // This is a good parse if we actually got a endpoint or signal flavor class.
                 let cn = nested_ps.class_name.as_ref().unwrap();
@@ -533,19 +557,21 @@ where
     I: Iterator<Item = &'a Token>,
 {
     // Pop off the SIGNAL token
-    putil::require_tt(
+    let sigtok = putil::require_tt(
         &pa_state.root_tok,
         tokens.next(),
         "SIGNAL",
         "allow",
         TokenType::Signal,
     )?;
+    pa_state.update_last_tok(&sigtok);
 
     let message: String;
     let target: String;
 
     // The first part of the signal clause should be a literal to signal
     if let Some(tok) = tokens.next() {
+        pa_state.update_last_tok(&tok);
         message = match &tok.tt {
             TokenType::Literal(msg) => msg.clone(),
             _ => {
@@ -565,16 +591,18 @@ where
     }
 
     // The next part should be the token TO
-    putil::require_tt(
+    let totok = putil::require_tt(
         &pa_state.root_tok,
         tokens.next(),
         "TO",
         "allow",
         TokenType::To,
     )?;
+    pa_state.update_last_tok(&totok);
 
     // The final portion of the signal clause should be an existing service class
     if let Some(tok) = tokens.next() {
+        pa_state.update_last_tok(&tok);
         // The service does not share a name with a reserved keyword
         if let TokenType::Literal(ref service_name) = tok.tt {
             // We require the requested service to exist in the list of services
@@ -652,6 +680,7 @@ fn collect_all_attributes(
 
 struct PState {
     root_tok: Token,
+    last_tok: Token,
     /// The parsed class name
     class_name: Option<String>,
     class_name_token: Option<Token>,
@@ -698,10 +727,15 @@ impl PState {
     fn new(root_tok: &Token) -> PState {
         PState {
             root_tok: root_tok.clone(),
+            last_tok: root_tok.clone(),
             class_name: None,
             class_name_token: None,
             attrs: Vec::new(),
         }
+    }
+
+    fn update_last_tok(&mut self, tok: &Token) {
+        self.last_tok = tok.clone();
     }
 
     fn to_clause(&self, flavor: ClassFlavor) -> Result<Clause, CompilationError> {
@@ -744,13 +778,13 @@ impl PState {
             match &tokref.tt {
                 TokenType::And | TokenType::Comma => {
                     // These are delimiter tokens.
-                    tokens.next();
+                    self.update_last_tok(tokens.next().unwrap());
                 }
                 TokenType::Tuple((name, value)) => {
                     // This is an attribute.
                     let attr = Attribute::attr_domain_opt(name, value);
                     self.attrs.push(attr);
-                    tokens.next();
+                    self.update_last_tok(tokens.next().unwrap());
                 }
                 TokenType::Literal(s) => {
                     // This could be a class name or a tag name.
@@ -758,6 +792,7 @@ impl PState {
                         if self.class_name.is_some() {
                             // We already have a class name.
                             let tok = tokens.next().unwrap();
+                            self.update_last_tok(tok);
                             return Err(CompilationError::MultipleClassNames(
                                 format!("found class '{class}' but class already set: {context}"),
                                 tok.line,
@@ -767,15 +802,17 @@ impl PState {
                         self.class_name = Some(class.clone());
                         let tok = tokens.next().unwrap();
                         self.class_name_token = Some(tok.clone());
+                        self.update_last_tok(tok);
                     } else {
                         self.attrs.push(Attribute::tag_domain_opt(s));
-                        tokens.next();
+                        self.update_last_tok(tokens.next().unwrap());
                     }
                 }
                 TokenType::With => {
                     // We used to support a postfix form of attributes but no longer.
                     // If we see this we report an error to help people covert old ZPL.
                     let tok = tokens.next().unwrap();
+                    self.update_last_tok(tok);
                     return Err(CompilationError::AllowStmtParseError(
                         format!(
                             "postfix attribute form using WITH no longer supported: {}",
@@ -787,6 +824,7 @@ impl PState {
                 }
                 _ => {
                     let tok = tokens.next().unwrap();
+                    self.update_last_tok(tok);
                     return Err(CompilationError::SyntaxError(
                         format!("{} ({:?})", context, tok.tt),
                         tok.line,
