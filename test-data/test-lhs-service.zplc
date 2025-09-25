@@ -7,7 +7,13 @@ zpr_address = "fd5a:5052:90de::1"
 [trusted_services.foo]
 prefix = "foo"
 api = "validation/2"
-returns_attributes = ["#service.red", "#service.blue", "#service.brown", "#user.green", "#endpoint.yellow", "#endpoint.orange" ]
+returns_attributes = [
+  "red -> #service.red", 
+  "blue -> #service.blue", 
+  "brown -> #service.brown", 
+  "green -> #user.green", 
+  "yellow -> #endpoint.yellow", 
+  "orange -> #endpoint.orange" ]
 provider = [["endpoint.zpr.adapter.cn", "foo"]]
 
 [protocols.http]

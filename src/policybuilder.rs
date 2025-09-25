@@ -172,13 +172,18 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                 );
             }
 
+            println!("XXX policybuilder - writing trusted service is BROKEN");
+            // TODO: This is writing the old format of just DOMAIN.KEY.  We
+            //       need to now keep the mapping in the policy.
+            // TODO: Also the "identity attrs" is now using the service names, not the zpl names.
             if let Some((l7p, port)) = svc.get_l7protocol_and_port() {
                 self.policy_writer.write_trusted_service(
                     &canonical_svc_id,
                     TSType::VsAuth,
                     None,                                       // query uri
                     Some(&format!("{}://[::1]:{}", l7p, port)), // validate uri
-                    svc.returns_attrs.as_ref(),
+                    //svc.returns_attrs.as_ref(),
+                    None,
                     svc.identity_attrs.as_ref(),
                 );
             } else {

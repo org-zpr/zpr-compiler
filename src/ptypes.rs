@@ -2,7 +2,7 @@
 use ring::digest::Digest;
 use std::collections::HashMap;
 use std::fmt;
-use std::fmt::Display;
+use std::fmt::{Display, Write};
 
 use crate::errors::AttributeError;
 use crate::lex::Token;
@@ -323,7 +323,7 @@ impl AttrDomain {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Attribute {
     domain: AttrDomain,
-    name: String,
+    name: String, // For a tag this is the tag name, else this is the attribute name.
     pub value: Option<String>,
     pub multi_valued: bool,
     pub tag: bool,
@@ -338,13 +338,13 @@ impl fmt::Display for Attribute {
         } else if self.tag {
             write!(f, "#{}", key)?
         } else {
-            write!(f, "{}", key)?
-        }
-        if self.multi_valued {
-            write!(f, "+")?
-        }
-        if self.optional {
-            return write!(f, "?");
+            write!(f, "{}", key)?;
+            if self.multi_valued {
+                write!(f, "{}", "{}")?;
+            }
+            if self.optional {
+                write!(f, "?")?;
+            }
         }
         Ok(())
     }
@@ -513,6 +513,19 @@ impl Attribute {
         })
     }
 
+    /// Create required, tuple-type, multi-values attribute without specifying a value.
+    pub fn attr_name_only_multi(name: &str) -> Result<Self, AttributeError> {
+        let (dom, rest) = Attribute::parse_domain(name)?;
+        Ok(Attribute {
+            domain: dom,
+            name: rest,
+            value: None,
+            multi_valued: true,
+            tag: false,
+            optional: false,
+        })
+    }
+
     /// Create and return a new attribute with the same characteristics of this one but with the new name provided.
     /// If `new_name` includes a valid domain prefix, the returned attribute will have that domain.
     pub fn clone_with_new_name(&self, new_name: &str) -> Self {
@@ -532,7 +545,7 @@ impl Attribute {
     }
 
     /// The the ZPL name for the key of this attribute. The key is just the attribute name
-    /// unless this is a tag, in which case the key is "<domain>.zpr.tag".
+    /// unless this is a tag, in which case the key is "\<domain\>.zpr.tag".
     pub fn zpl_key(&self) -> String {
         if self.tag {
             format!("{}.zpr.tag", self.domain)
@@ -550,6 +563,27 @@ impl Attribute {
         } else {
             "".to_string()
         }
+    }
+
+    /// Write an attribute key name as it might appear in zplc.
+    /// Value of the attribute is ignored.
+    /// - tags look like `#domain.name`
+    /// - regular tuples look like `domain.name`
+    /// - multi-valued attributes look like `domain.name{}`
+    pub fn zplc_key(&self) -> String {
+        let mut f = String::new();
+        let key = format!("{}.{}", self.domain, self.name);
+        if self.tag {
+            write!(f, "#").unwrap();
+        }
+        write!(f, "{}", key).unwrap();
+        if self.multi_valued {
+            write!(f, "{}", "{}").unwrap();
+        }
+        if self.optional {
+            write!(f, "?").unwrap();
+        }
+        f
     }
 }
 
@@ -597,5 +631,72 @@ mod test {
         assert_eq!("zpr.role:admin", a.to_string());
         assert_eq!("zpr.role", a.zpl_key());
         assert_eq!("admin", a.zpl_value());
+    }
+
+    #[test]
+    fn test_zplc_key_regular_attribute() {
+        let a = Attribute::attr("user.role", "admin").unwrap();
+        assert_eq!("user.role", a.zplc_key());
+    }
+
+    #[test]
+    fn test_zplc_key_tag_attribute() {
+        let a = Attribute::tag("endpoint.hardened").unwrap();
+        assert_eq!("#endpoint.hardened", a.zplc_key());
+    }
+
+    #[test]
+    fn test_zplc_key_multi_valued_attribute() {
+        let a = Attribute::attr_name_only_multi("user.groups").unwrap();
+        assert_eq!("user.groups{}", a.zplc_key());
+    }
+
+    #[test]
+    fn test_zplc_key_optional_attribute() {
+        let mut a = Attribute::attr_name_only("service.role").unwrap();
+        a.optional = true;
+        assert_eq!("service.role?", a.zplc_key());
+    }
+
+    #[test]
+    fn test_zplc_key_optional_tag() {
+        let mut a = Attribute::tag("endpoint.secure").unwrap();
+        a.optional = true;
+        assert_eq!("#endpoint.secure?", a.zplc_key());
+    }
+
+    #[test]
+    fn test_zplc_key_optional_multi_valued() {
+        let mut a = Attribute::attr_name_only_multi("user.permissions").unwrap();
+        a.optional = true;
+        assert_eq!("user.permissions{}?", a.zplc_key());
+    }
+
+    #[test]
+    fn test_zplc_key_zpr_internal_attribute() {
+        let a = Attribute::zpr_internal_attr("zpr.adapter.cn", "test");
+        assert_eq!("zpr.adapter.cn", a.zplc_key());
+    }
+
+    #[test]
+    fn test_zplc_key_zpr_internal_multi_valued() {
+        let a = Attribute::zpr_internal_attr_mv("zpr.roles", "admin");
+        assert_eq!("zpr.roles{}", a.zplc_key());
+    }
+
+    #[test]
+    fn test_zplc_key_all_domains() {
+        // Test each domain type
+        let user_attr = Attribute::attr("user.name", "alice").unwrap();
+        assert_eq!("user.name", user_attr.zplc_key());
+
+        let service_attr = Attribute::attr("service.type", "web").unwrap();
+        assert_eq!("service.type", service_attr.zplc_key());
+
+        let endpoint_attr = Attribute::attr("endpoint.ip", "192.168.1.1").unwrap();
+        assert_eq!("endpoint.ip", endpoint_attr.zplc_key());
+
+        let zpr_attr = Attribute::zpr_internal_attr("zpr.test", "value");
+        assert_eq!("zpr.test", zpr_attr.zplc_key());
     }
 }

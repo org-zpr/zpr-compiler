@@ -365,8 +365,8 @@ mod test {
     api = "validation/2"
     client = "AuthService"
     cert_path = ""
-    returns_attributes = [ "user.color", "service.content", "user.bas_id" ]
-    identity_attributes = [ "user.bas_id" ]
+    returns_attributes = [ "color -> user.color", "content -> service.content", "bas_id -> user.bas_id" ]
+    identity_attributes = [ "bas_id" ]
     provider = [[ "endpoint.zpr.adapter.cn", "bas.zpr.org" ]]
 
 
