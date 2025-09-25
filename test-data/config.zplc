@@ -1,17 +1,8 @@
 # minimal config so that we can test parsing the RFC zpl
 
 [nodes.n0]
-key = "none"
 provider = [["endpoint.zpr.adapter.cn", "fee"]]
 zpr_address = "fd5a:5052:90de::1"
-interfaces = [ "in1" ]
-in1.netaddr = "1.2.3.4:5000"
-
-[visa_service]
-dock_node = "n0"
-
-[trusted_services.default]
-cert_path = ""
 
 [trusted_services.foo]
 prefix = "foo" # maybe prefix should default to <service-name> ?
@@ -20,7 +11,7 @@ returns_attributes = [ "#user.government", "#user.cleared", "user.clearance", "#
 provider = [["endpoint.zpr.adapter.cn", "foo"]]
 
 [protocols.http]
-l4protocol = "iana.TCP"
+l4protocol = "TCP"
 port = 80
 
 [services.foo-client]

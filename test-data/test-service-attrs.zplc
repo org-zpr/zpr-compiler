@@ -1,24 +1,10 @@
 # minimal config so that we can test parsing the RFC zpl
 
 [nodes.n0]
-key = "none"
 provider = [["endpoint.zpr.adapter.cn", "node.zpr.org"]]
 zpr_address = "fd5a:5052:90de::1"
-interfaces = [ "in1" ]
-in1.netaddr = "1.2.3.4:5000"
 
 
-# Some special properties of visa_service
-# - Required address of fd5a:5052::1
-# - Required endpoint.zpr.adapter.cn value of "vs.zpr"
-# - The admin service for the visa service can be referened in
-#   ZPL as "VisaService".  Access to the admin interface 
-#   is done in ZPL not here.
-[visa_service]
-dock_node = "n0"
-
-[trusted_services.default]
-cert_path = ""
 
 [trusted_services.bas]
 api = "validation/2"
@@ -39,8 +25,7 @@ provider = [[ "endpoint.zpr.adapter.cn", "bas.zpr.org" ]]
 # zpr-authrsa
 
 [protocols.http]
-l4protocol = "iana.TCP"
-l7protocol = "http"
+l4protocol = "TCP"
 port = 80
 
 [services.server]

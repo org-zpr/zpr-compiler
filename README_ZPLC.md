@@ -3,6 +3,35 @@
 ZPLC uses TOML syntax.  Work in progress.
 
 
+
+## Layout
+
+Suggest layout within the TOML file:
+
+* nodes
+* trusted_services
+* bootstrap
+* protocols
+* services
+
+
+## Nodes
+
+Only one node is supported currently in a ZPRnet.  Syntax:
+
+```toml
+[nodes.<NODEID>]
+provider = [["<KEY>", "<VALUE>"]]
+zpr_address = "fd5a..."
+```
+* `provider` - The set of attributes required in order to provide the node "service". These
+attributes cannot come from an external service they must be "built in".  Typically the
+only attribute you can use here is `endpoint.zpr.adapter.cn` which is the `CN` value from
+the nodes Noise certificate.
+* `zpr_address` - IPv6 ZPRnet address for the node. Node must be preconfigured with this
+same address.
+
+
 ## Trusted Services
 
 The trusted services block contains details about the API to use to talk to it, as
@@ -12,7 +41,7 @@ Syntax:
 
 ```toml
   [trusted_service.<TSNAME>]
-  api = ""
+  api = "validation/2"
   service = ""
   client = ""
   cert_path = ""
@@ -25,6 +54,14 @@ The **TSNAME** of `default` is special and is used to check the adapter CN value
 It is responsible for the property: `endpoint.zpr.adapter.cn`.  The default
 service requires a `cert_path` which should be set to the certificate of the
 authority which has signed the NOISE certs given to the adapters.
+
+```toml
+[trusted_services.default]
+cert_path = "path/to/ca/cert.pem"
+```
+
+
+If you omit `trusted_services.default` then certificates will not be checked.
 
 For non default trusted services, the field meanings are:
 
@@ -46,8 +83,6 @@ For non default trusted services, the field meanings are:
 * `provider` - Attribute key/value tuples of the actor (or actors) that provide this service.
 
 
-### Services
-
 A trusted service for validation is really two services: the service that the visa service
 talks to to confirm authentication and retrieve attributes, and the service that an actor
 talks to to perform authentication.  These services use varying protocols and ports like
@@ -62,22 +97,20 @@ Implementation are:
 
 * `zpr-oauthrsa` - An actor OAuth-derived HTTPS protocol used by an adapter to authenicate its
   actor using an RSA key.
-* `zpr-validation/2`- A visa service HTTPS OAuth protocol which allows the visa service to
+* `zpr-validation2`- A visa service HTTPS OAuth protocol which allows the visa service to
   request an authentication token based on an identifier.
 
 Example:
 
 ```toml
 [services.foo-vs]
-protocol = "zpr-validation/2"
+protocol = "zpr-validation2"
 port = 4444
 
 [services.foo-client]
 protocol = "zpr-oauthrsa"
 port = 1234
 ```
-
-
 
 ### Attributes
 
@@ -101,31 +134,52 @@ the attribute is set as:
 
 
 
-## Protocols
 
-Each service defined in the coniguration uses a protocol for communication. The protocols
-are defined seperately in a `protocols` block.  Syntax:
+
+
+## Bootstrap
+
+The boostrap section maps a `CN` value (from noise keys) to a cooresponding public
+RSA key file.  When adapters connect with these `CN` values, they can perform "self authentication"
+which ends up having the visa service check that the adapter is using the correct private
+key.
+
+Bootstrap is required for services that need to connect before there are trusted services
+connected.
+
+Syntax:
 
 ```toml
-[protocol.<NAME>]
-l4protocol = ""
-l7protocol = ""
-port = N
-icmp_type = ""
-icmp_codes = []
+[boostrap]
+"some.cn.value.here" = "path-to-rsa-pub-key.pem"
 ```
 
-The `<NAME>` field must be unique and is referenced by configuraiton `service` blocks.
 
-Meanings:
-* `l4protocol` - Supports values like, `iana.ICMP6` or `iana.TCP`.
-* `l7protocol` - Optional and may be used as a hint to the visa service when setting up rules.
-  Example, `http`.
-* `port` - Required if the `l4protocol` requires a port number (as it does for TCP and UDP).
-* `icmp_type` - Required for the ICMP familty of protocols, possible values are:
-  `request-response` or `oneshot`.
+## Protocols
+
+Use protocols blocks to define protocols that are needed to access your services.
+
+Syntax:
+```toml
+[protocols.<NAME>]
+l4protocol = "TCP"
+port = 80
+
+# or if using ICMP
+[protocols.ping]
+l4protocol = "ICMP4"
+icmp_type = "request-response"
+icmp_codes = [0, 8]
+```
+
+* `protocols.<NAME>` - The NAME here is used later in `services` blocks to reference
+the protocol.
+* `l4protocol` - Layer 4 protocol name. One of 'TCP', 'UDP', 'ICMPV6', or 'ICMP' (or 'ICMP4').
+* `port` - Port number. Currently only supports a single port number.
+* `icmp_type` - Required for the ICMP familty of protocols, possible values are: `request-response` or `oneshot`.
 * `icmp_codes` - Is a list of integers.  For `request-response` this is a tuple of
-  (request-code, response-code).  For `oneshot` this is one or more allowed ICMP codes.
+(request-code, response-code).  For `oneshot` this is one or more allowed ICMP codes.
+
 
 
 ## Services
@@ -147,12 +201,14 @@ the service definition, for example:
 
 ```toml
 [protocol.webtls]
-l4protocl = "iana.TCP"
-l7protocol = "https"
+l4protocl = "TCP"
 port = 443
 
 [service.WebService]
 protocol = webtls
 port = 3030
 ```
+
+
+
 

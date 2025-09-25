@@ -11,12 +11,8 @@ order = ["hosts", "dns"]
 
 
 [nodes."node.zpr.org"]
-key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
 provider = [ ["zpr.adapter.cn", "node.zpr.org"]]
 zpr_address = "node0.zpr"
-interfaces = ["in1"]
-in1.netaddr = "node0.overlay:5000"
-# netaddr is really only needed for topology I think, can we remove for M3?
 
 [bootstrap]
 "bas.zpr.org" = "rsa-pub-key.pem"
@@ -26,17 +22,13 @@ in1.netaddr = "node0.overlay:5000"
 cert_path = "ca-cert.pem"
 
 
-[visa_service] # Only one visa service support at the moment.
-dock_node = "node.zpr.org"
-
-
 [protocols.ping]
-protocol = "iana.ICMP6"
+protocol = "ICMP6"
 icmp_type = "request-response"
 icmp_codes = [ 128, 129 ]
 
 [protocols.http]
-protocol = "iana.TCP"
+protocol = "TCP"
 port = 80
 
 
