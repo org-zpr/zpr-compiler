@@ -816,6 +816,24 @@ fn parse_attribute_mapping(mapping: &str) -> Result<(String, Attribute), Compila
         Attribute::attr_name_only(attr_spec)?
     };
 
+    // In theory we can support any attribute names if they are quoted.
+    // But until we support that on VS we will not permit some characters
+    // here.
+    let valid_chars: HashSet<char> =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-./"
+            .chars()
+            .collect();
+    for c in zpr_attr.zpl_key().chars() {
+        if !valid_chars.contains(&c) {
+            return Err(err_config!(
+                "invalid attribute name '{}' in mapping '{}', contains invalid character '{}'",
+                zpr_attr.zpl_key(),
+                mapping,
+                c
+            ));
+        }
+    }
+
     Ok((service_key_name, zpr_attr))
 }
 

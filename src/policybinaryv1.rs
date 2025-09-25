@@ -429,7 +429,7 @@ impl PolicyWriter for PolicyBinaryV1 {
         ts_type: TSType,
         query_uri: Option<&str>,
         validate_uri: Option<&str>,
-        returns_attrs: Option<&Vec<String>>,
+        returns_attrs: Option<&HashMap<String, Attribute>>,
         identity_attrs: Option<&Vec<String>>,
     ) {
         let query_uri = match query_uri {
@@ -442,9 +442,15 @@ impl PolicyWriter for PolicyBinaryV1 {
             None => "",
         };
 
-        let attrs = match returns_attrs {
-            Some(a) => a.clone(),
-            None => Vec::new(),
+        let ret_attrs = match returns_attrs {
+            Some(a) => {
+                let mut ra = HashMap::new();
+                for (ts_attr, zattr) in a {
+                    ra.insert(ts_attr.clone(), zattr.zplc_key());
+                }
+                ra
+            }
+            None => HashMap::new(),
         };
 
         let id_attrs = match identity_attrs {
@@ -464,7 +470,7 @@ impl PolicyWriter for PolicyBinaryV1 {
             domain: String::new(),
             query_uri: query_uri.into(),
             validate_uri: validate_uri.into(),
-            attrs: attrs,
+            attr_map: ret_attrs,
             id_attrs: id_attrs,
         };
         self.policy.services.push(trusted_svc);
