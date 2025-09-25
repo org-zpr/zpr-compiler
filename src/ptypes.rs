@@ -580,9 +580,6 @@ impl Attribute {
         if self.multi_valued {
             write!(f, "{}", "{}").unwrap();
         }
-        if self.optional {
-            write!(f, "?").unwrap();
-        }
         f
     }
 }
@@ -651,25 +648,18 @@ mod test {
         assert_eq!("user.groups{}", a.zplc_key());
     }
 
+    // ZPLC does not use "?" notation.
     #[test]
-    fn test_zplc_key_optional_attribute() {
+    fn test_zplc_key_optional() {
         let mut a = Attribute::attr_name_only("service.role").unwrap();
         a.optional = true;
-        assert_eq!("service.role?", a.zplc_key());
-    }
-
-    #[test]
-    fn test_zplc_key_optional_tag() {
+        assert_eq!("service.role", a.zplc_key());
         let mut a = Attribute::tag("endpoint.secure").unwrap();
         a.optional = true;
-        assert_eq!("#endpoint.secure?", a.zplc_key());
-    }
-
-    #[test]
-    fn test_zplc_key_optional_multi_valued() {
+        assert_eq!("#endpoint.secure", a.zplc_key());
         let mut a = Attribute::attr_name_only_multi("user.permissions").unwrap();
         a.optional = true;
-        assert_eq!("user.permissions{}?", a.zplc_key());
+        assert_eq!("user.permissions{}", a.zplc_key());
     }
 
     #[test]

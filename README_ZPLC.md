@@ -78,7 +78,8 @@ For non default trusted services, the field meanings are:
   the compiler expects to find a service block named `<TSNAME>-client`.
 * `cert_path` - Used to pass a TLS certificate to the visa service which is used to
   verify the service connection.
-* `returns_attributes` - List of attribute keys returned by the service.
+* `returns_attributes` - List of attribute keys returned by the service mapped to 
+  ZPL attribute names.
 * `identity_attributes` - Subset of the `returns_attributes` that denote identity.
 * `provider` - Attribute key/value tuples of the actor (or actors) that provide this service.
 
@@ -129,12 +130,28 @@ Attributes from services may be single value, multi value, or tags.  An attribut
 the attribute is set as:
 
 * **Single Value** - Just a plain string, eg `"user.clearance"`.
-* **Multi Value** - *TODO*
+* **Multi Value** - Add a '{}' to the end, eg `"user.role{}"`.
 * **Tag** - Prefixed with a hash mark (`#`), eg `"#endpoint.secure`.
 
+When specifying the `returns_attributes` use a map format with an arrow '->':
 
 
+```toml
+returns_attributes = [
+  "tint -> endpoint.tint",
+  "color -> user.color",
+  "govt -> #user.government",
+  "bas_id -> user.id",
+  "roles -> user.role{}"
+]
+```
 
+And then for `identity_attributes` make sure to use the service name (not the 
+ZPL name).  For example, given the above returns attributes:
+
+```toml
+identity_attributes = [ "bas_id" ]
+```
 
 
 ## Bootstrap

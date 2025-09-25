@@ -797,6 +797,7 @@ fn parse_trusted_service(
 ///   - #<class-name>.<attribute-name> for a tag attribute.
 ///   - <class-name>.<attribute-name>{} for a multi-valued attribute.
 ///
+/// Note that we never use "optional" flag in ZPLC.
 fn parse_attribute_mapping(mapping: &str) -> Result<(String, Attribute), CompilationError> {
     let parts: Vec<&str> = mapping.split("->").collect();
     if parts.len() != 2 {
