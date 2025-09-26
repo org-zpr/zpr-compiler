@@ -1,6 +1,12 @@
 # The ZPR ZPL Compiler Changelog
 
+
 ## pending
+
+- empty
+
+
+## [0.8.1] - 2025-09-26 
 
 - Now puts ZPL text into v2 binary output.
 - Fixed a possible bug where service side attrs were not getting
@@ -84,6 +90,7 @@ repository.
 
 
 
+[0.8.1]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.8.1
 [0.8.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.8.0
 [0.7.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.7.0
 [0.6.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.6.0
