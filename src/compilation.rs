@@ -103,7 +103,7 @@ impl Compilation {
             lineno += 1;
 
             // We are either gathering chars until we get to the end
-            // or skipping until we get to the start.  If cur_chink is empty
+            // or skipping until we get to the start.  If cur_chunk is empty
             // we are looking for the start.
 
             if cur_chunk.is_empty() {
