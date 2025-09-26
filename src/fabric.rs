@@ -104,7 +104,7 @@ pub struct ClientPolicy {
     /// Signal containing message and destination
     pub signal: Option<Signal>,
 
-    /// ZPL causing this policy (line_number, line_text)
+    /// ZPL causing this policy
     pub zpl_line: PLine,
 }
 
