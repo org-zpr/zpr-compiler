@@ -59,6 +59,14 @@ impl ZPLStr {
         }
         self.name.clone()
     }
+
+    pub fn len(&self) -> usize {
+        self.name.len()
+            + match &self.value {
+                Some(v) => v.len() + 1,
+                None => 0,
+            }
+    }
 }
 
 impl Default for ZPLStr {

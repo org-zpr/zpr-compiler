@@ -372,6 +372,7 @@ impl PolicyWriter for PolicyBinaryV1 {
         cli_conditions: &[Attribute],
         svc_conditions: &[Attribute],
         signal: Option<ptypes::Signal>,
+        _pline: &str,
     ) {
         let pscope = self.scope_for_protocol(protocol);
         let is_signal = signal.is_some();

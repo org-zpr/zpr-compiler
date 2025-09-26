@@ -71,6 +71,7 @@ pub trait PolicyWriter {
         cli_conditions: &[Attribute],
         svc_conditions: &[Attribute],
         signal: Option<Signal>,
+        pline: &str,
     );
 
     // This one is just to support V1 lookup tables.

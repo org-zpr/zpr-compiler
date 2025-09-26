@@ -57,6 +57,37 @@ pub struct FabricNode {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct PLine {
+    pub lineno: usize,
+    pub zpl: String,
+}
+
+impl PLine {
+    pub fn new(lineno: usize, zpl: &str) -> PLine {
+        PLine {
+            lineno,
+            zpl: zpl.into(),
+        }
+    }
+    pub fn new_builtin(zpl: &str) -> PLine {
+        PLine {
+            lineno: 0,
+            zpl: zpl.into(),
+        }
+    }
+}
+
+impl fmt::Display for PLine {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.lineno == 0 {
+            write!(f, "(builtin) {}", self.zpl)
+        } else {
+            write!(f, "(line {}) {}", self.lineno, self.zpl)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct ClientPolicy {
     /// If true, this policy denies access
     pub never_allow: bool,
@@ -72,8 +103,9 @@ pub struct ClientPolicy {
 
     /// Signal containing message and destination
     pub signal: Option<Signal>,
-    // TODO: withouts, constraints, etc.
-    //       Actually, withouts are just attributes, eg (role, ne, marketing)
+
+    /// ZPL causing this policy
+    pub zpl_line: PLine,
 }
 
 fn plural(word: &str, count: usize) -> String {
@@ -410,7 +442,16 @@ impl Fabric {
             format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT),
         );
         let vss_id = self.add_builtin_service(&svc_name, &vss_prot, &provider_attrs)?;
-        self.add_condition_to_service(false, &vss_id, &vs_provider_attrs, false, None)?;
+        let pline = PLine::new_builtin("allow visa service to access node visa support");
+        self.add_condition_to_service(
+            false,
+            &vss_id,
+            &vs_provider_attrs,
+            &[],
+            false,
+            None,
+            &pline,
+        )?;
         Ok(())
     }
 
@@ -420,9 +461,11 @@ impl Fabric {
         &mut self,
         never_allow: bool,
         service_id: &str,
-        attrs: &[Attribute],
+        cli_attrs: &[Attribute],
+        svc_attrs: &[Attribute],
         access_only: bool,
         signal: Option<Signal>,
+        pline: &PLine,
     ) -> Result<(), CompilationError> {
         let svc = self.services.iter_mut().find(|s| s.fabric_id == service_id);
         if svc.is_none() {
@@ -437,10 +480,11 @@ impl Fabric {
         let svc = svc.unwrap();
         svc.client_policies.push(ClientPolicy {
             never_allow: never_allow,
-            cli_condition: attrs.to_vec(),
-            svc_condition: Vec::new(),
+            cli_condition: cli_attrs.to_vec(),
+            svc_condition: svc_attrs.to_vec(),
             access_only,
             signal,
+            zpl_line: pline.clone(),
         });
         Ok(())
     }
@@ -452,6 +496,7 @@ impl Fabric {
         cli_attrs: &[Attribute],
         svc_attrs: &[Attribute],
         signal: Option<Signal>,
+        pline: &PLine,
     ) -> Result<(), CompilationError> {
         for svc in &mut self.services {
             if svc.service_type == ServiceType::Regular {
@@ -468,6 +513,7 @@ impl Fabric {
                     cli_condition: cli_attrs.to_vec(),
                     svc_condition: unique_svc_attrs.to_vec(),
                     signal: signal.clone(),
+                    zpl_line: pline.clone(),
                 });
             }
         }

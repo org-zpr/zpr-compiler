@@ -261,6 +261,7 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                     &policy.cli_condition,
                     &policy.svc_condition,
                     policy.signal.clone(),
+                    &policy.zpl_line.to_string(),
                 );
             }
         }
