@@ -1,5 +1,5 @@
 // Extracted from ZRFC 15.4
-// Not included: 'through', conditions and limits
+// Not included: conditions and limits
 
 <zpl-policy> ::= <statement>*
 

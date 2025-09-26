@@ -469,6 +469,11 @@ fn dump_v2(fname: &str, encoded_buf: Bytes) {
         print_section_hdr("COMMUNICATION POLICIES");
         for (i, cp) in policy.get_com_policies().unwrap().iter().enumerate() {
             print!("policy {}", format!("{}", i + 1).yellow());
+            if cp.has_zpl() {
+                print!("  {}", cp.get_zpl().unwrap().to_str().unwrap().green());
+            } else {
+                print!("  {}", "(zpl missing)".red());
+            }
             if !cp.get_allow() {
                 print!(" {}", "DENY".red().bold());
             }

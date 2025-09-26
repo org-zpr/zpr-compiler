@@ -1,5 +1,7 @@
 use openssl::pkey::Private;
 use openssl::rsa::Rsa;
+use std::fs::File;
+use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -13,6 +15,7 @@ use crate::policybinaryv1::{PolicyBinaryV1, PolicyContainerV1};
 use crate::policybinaryv2::{PolicyBinaryV2, PolicyContainerV2};
 use crate::policybuilder::PolicyBuilder;
 use crate::policywriter::PolicyContainer;
+use crate::ptypes::{AllowClause, Policy};
 use crate::weaver::weave;
 
 /// Create one of these with the [CompilationBuilder].
@@ -23,6 +26,8 @@ pub struct Compilation {
     pub source_config: PathBuf,
     pub output_file: PathBuf,
     pub parse_only: bool,
+    copied_allow_statements: Option<Vec<String>>,
+    copied_never_allow_statements: Option<Vec<String>>,
     private_key: Option<Rsa<Private>>,
     output_format: OutputFormat,
 }
@@ -32,6 +37,23 @@ impl Compilation {
     /// reasonable defaults.
     pub fn builder(source: PathBuf) -> CompilationBuilder {
         CompilationBuilder::new(source)
+    }
+
+    pub fn zpl_for_allow_statement(&self, index: usize) -> String {
+        self.zpl_for_statement(&self.copied_allow_statements, index)
+    }
+
+    pub fn zpl_for_never_allow_statement(&self, index: usize) -> String {
+        self.zpl_for_statement(&self.copied_never_allow_statements, index)
+    }
+
+    fn zpl_for_statement(&self, statements: &Option<Vec<String>>, index: usize) -> String {
+        if let Some(stmts) = statements {
+            if index < stmts.len() {
+                return stmts[index].clone();
+            }
+        }
+        format!("no ZPL statement found at index {}", index)
     }
 
     /// Create/write a policy from the ZPL source and configuration.
@@ -49,6 +71,148 @@ impl Compilation {
                 }
             };
             self.write_container(&container_bytes, &self.output_file, &cctx)?;
+        }
+        Ok(())
+    }
+
+    /// Each allow or never-allow statement has a "span" with it that indicates where in the
+    /// source ZPL file it is found.  We use that span here to copy out the statement text
+    /// from the ZPL.  Statements are processed in order and assumed to be in file order.
+    /// The n'th statement in the input list will correspond to the n'th string in the result.
+    fn copy_permission_statements(
+        &self,
+        statements: &[AllowClause],
+    ) -> Result<Vec<String>, CompilationError> {
+        let mut zpl = Vec::new();
+
+        let source = File::open(&self.source_zpl)?;
+        let reader = io::BufReader::new(source);
+        let mut lineno = 0;
+
+        let mut stmt_itr = statements.iter();
+        let cur_stmt = stmt_itr.next();
+        if cur_stmt.is_none() {
+            return Ok(zpl);
+        }
+
+        let mut cur_span = cur_stmt.unwrap().span.clone();
+        let mut cur_chunk = String::new();
+
+        for read_res in reader.lines() {
+            let source_line = read_res?;
+            lineno += 1;
+
+            // We are either gathering chars until we get to the end
+            // or skipping until we get to the start.  If cur_chunk is empty
+            // we are looking for the start.
+
+            if cur_chunk.is_empty() {
+                if lineno < cur_span.0.line {
+                    // Not yet at start so keep reading file.
+                    continue;
+                }
+                // We are on the start line ... are we also on the ending line?
+                if cur_span.1.line == lineno {
+                    // Yes, the entire source for this statement is on this one line.
+                    let first_col_idx = if (cur_span.0.col - 1) < source_line.len() {
+                        0
+                    } else {
+                        cur_span.0.col - 1
+                    };
+                    let last_col_idx = if cur_span.1.col > source_line.len() {
+                        source_line.len()
+                    } else {
+                        cur_span.1.col
+                    };
+                    cur_chunk.push_str(&source_line[first_col_idx..last_col_idx]);
+
+                // And we are done with this span (fall through...)
+                } else {
+                    // The end position is further along in the file. So lets start with what we need on this line.
+                    let first_col_idx = if (cur_span.0.col - 1) < source_line.len() {
+                        0
+                    } else {
+                        cur_span.0.col - 1
+                    };
+                    cur_chunk.push_str(&source_line[first_col_idx..]);
+                    continue;
+                }
+            } else {
+                // We have data in our cur_chunk which means we are seeking the ending position.
+                if lineno < cur_span.1.line {
+                    // Can consume the entire line...
+                    cur_chunk.push_str(" ");
+                    cur_chunk.push_str(&source_line);
+                    continue;
+                } else {
+                    // We are on the ending line (and by they way, ZPL statements always start on a new line).
+                    let last_col_idx = if cur_span.1.col > source_line.len() {
+                        source_line.len()
+                    } else {
+                        cur_span.1.col
+                    };
+                    cur_chunk.push_str(&source_line[..last_col_idx]);
+
+                    // And we are done with current span (fall through...)
+                }
+            }
+
+            // If we get here we are done with current span.
+            zpl.push(cur_chunk);
+            cur_chunk = String::new();
+            if let Some(stmt) = stmt_itr.next() {
+                cur_span = stmt.span.clone();
+            } else {
+                // We are at end of statements.
+                break;
+            }
+        }
+        if !cur_chunk.is_empty() {
+            // Ran into a problem.. did not find the end of the last statement.
+            return Err(CompilationError::FileError(format!(
+                "ran out of file while copying ZPL permission statements"
+            )));
+        }
+        if zpl.len() != statements.len() {
+            return Err(CompilationError::FileError(format!(
+                "did not find all permission statements in ZPL source (found {}, expected {})",
+                zpl.len(),
+                statements.len()
+            )));
+        }
+
+        Ok(zpl)
+    }
+
+    /// Get and store the ZPL lines that correspond to the permission satements in policy.
+    fn copy_zpl_from_permissions(&mut self, policy: &Policy) -> Result<(), CompilationError> {
+        self.set_statement_zpl(false, &policy.allows)?;
+        self.set_statement_zpl(true, &policy.nevers)?;
+        Ok(())
+    }
+
+    /// Store the ZPL lines that correspond to the permission statements in policy.
+    /// If the statements list is empty, clear any previously stored statements.
+    /// This either updates the "allow" zpl or the "never allow" zpl depending on
+    /// the `never` boolean.
+    fn set_statement_zpl(
+        &mut self,
+        never: bool,
+        statements: &[AllowClause],
+    ) -> Result<(), CompilationError> {
+        if !statements.is_empty() {
+            let zpl = self.copy_permission_statements(statements)?;
+            if never {
+                self.copied_never_allow_statements = Some(zpl);
+            } else {
+                self.copied_allow_statements = Some(zpl);
+            }
+        } else {
+            if never {
+                self.copied_never_allow_statements = None;
+            } else {
+                self.copied_allow_statements = None;
+            }
         }
         Ok(())
     }
@@ -81,6 +245,9 @@ impl Compilation {
 
         let pr = parse(tz.tokens, &cctx)?;
         let mut policy = pr.policy;
+
+        self.copy_zpl_from_permissions(&policy)?;
+
         let policy_digest = sha256_of_file(&self.source_zpl)?;
         policy.digest = Some(policy_digest);
 
@@ -282,6 +449,8 @@ impl CompilationBuilder {
             private_key: self.private_key,
             parse_only: self.parse_only,
             output_format: self.output_format,
+            copied_allow_statements: None,
+            copied_never_allow_statements: None,
         }
     }
 }

@@ -1,6 +1,11 @@
 # The ZPR ZPL Compiler Changelog
 
+
 ## pending
+
+- empty
+
+## [0.9.0] - 2025-09-26
 
 - Return attributes from trusted services has new syntax.
 
@@ -10,7 +15,12 @@
 - The new syntax allows you to map any returned attribute to any ZPL
   attribute in any domain.
 - The `identity_attributes` array uses the service attribute names not
-  the ZPL names.
+
+## [0.8.1] - 2025-09-26 
+
+- Now puts ZPL text into v2 binary output.
+- Fixed a possible bug where service side attrs were not getting
+  encoded into access policy.
 
 ## [0.8.0] - 2025-09-22
 
@@ -90,6 +100,7 @@ repository.
 
 
 
+[0.8.1]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.8.1
 [0.8.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.8.0
 [0.7.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.7.0
 [0.6.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.6.0
