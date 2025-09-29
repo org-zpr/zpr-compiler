@@ -215,13 +215,27 @@ fn dump_v1(fname: &str, encoded_buf: Bytes) {
             }
             // auth type services have attributes.
             if service.r#type == polio::SvcT::SvctAuth as i32 {
-                if service.attrs.is_empty() {
+                if service.attr_map.is_empty() {
                     println!("         attrs: {}", "none".red());
                 } else {
                     println!(
                         "         attrs: {}",
-                        array_to_string(&service.attrs).yellow()
+                        if service.attr_map.is_empty() {
+                            "[]".yellow()
+                        } else {
+                            "[".yellow()
+                        }
                     );
+                    for (ts_attr, zattr) in &service.attr_map {
+                        println!(
+                            "                  {} -> {}",
+                            ts_attr.yellow(),
+                            zattr.white()
+                        );
+                    }
+                    if !service.attr_map.is_empty() {
+                        println!("                {}", "]".yellow());
+                    }
                 }
                 if service.id_attrs.is_empty() {
                     println!("      id_attrs: {}", "none".red());

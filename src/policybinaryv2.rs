@@ -234,7 +234,7 @@ impl PolicyWriter for PolicyBinaryV2 {
         _ts_type: TSType,
         _query_uri: Option<&str>,
         _validate_uri: Option<&str>,
-        _returns_attrs: Option<&Vec<String>>,
+        _returns_attrs: Option<&HashMap<String, Attribute>>,
         _identity_attrs: Option<&Vec<String>>,
     ) {
         // nop

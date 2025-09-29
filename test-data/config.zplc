@@ -7,7 +7,18 @@ zpr_address = "fd5a:5052:90de::1"
 [trusted_services.foo]
 prefix = "foo" # maybe prefix should default to <service-name> ?
 api = "validation/2"
-returns_attributes = [ "#user.government", "#user.cleared", "user.clearance", "#endpoint.managed", "#service.classified", "#service.database", "service.svc-id", "service.service", "endpoint.mach-type", "service.external-network-connection", "service.machine-id"]
+returns_attributes = [ 
+  "government -> #user.government",
+  "cleared -> #user.cleared", 
+  "clearance -> user.clearance", 
+  "managed -> #endpoint.managed", 
+  "classified -> #service.classified", 
+  "database -> #service.database", 
+  "svc-id -> service.svc-id", 
+  "service -> service.service", 
+  "mach-type -> endpoint.mach-type", 
+  "extnet -> service.external-network-connection", 
+  "mach-id -> service.machine-id"]
 provider = [["endpoint.zpr.adapter.cn", "foo"]]
 
 [protocols.http]

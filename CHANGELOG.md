@@ -5,6 +5,16 @@
 
 - empty
 
+## [0.9.0] - 2025-09-26
+
+- Return attributes from trusted services has new syntax.
+
+  OLD: `returns_attributes = ["endpoint.tint"]`
+  NEW: `returns_attributes = ["tint -> endpoint.tint"]`
+
+- The new syntax allows you to map any returned attribute to any ZPL
+  attribute in any domain.
+- The `identity_attributes` array uses the service attribute names not
 
 ## [0.8.1] - 2025-09-26 
 

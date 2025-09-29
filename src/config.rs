@@ -134,8 +134,8 @@ pub struct TrustedService {
     pub service: Option<String>, // Name of service for VS operations
     pub client: Option<String>,  // Name of service for client operations
     pub cert_path: Option<PathBuf>,
-    pub returns_attrs: Vec<Attribute>,
-    pub identity_attrs: Vec<Attribute>,
+    pub returns_attrs: HashMap<String, Attribute>,
+    pub identity_attrs: Vec<String>,
     pub provider: Option<Vec<(String, String)>>, // required for non-default
 }
 
@@ -407,12 +407,16 @@ impl ConfigParse {
             trusted_services.push(ts);
         }
         if default_creates == 0 {
+            let returns = HashMap::from([(
+                zpl::KATTR_CN.to_string(),
+                Attribute::attr_name_only(zpl::KATTR_CN).unwrap(),
+            )]);
             let ts = TrustedService {
                 id: zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string(),
                 api: zpl::DEFAULT_TRUSTED_SERVICE_API.to_string(),
                 cert_path: None,
-                returns_attrs: vec![Attribute::attr_name_only(zpl::KATTR_CN).unwrap()],
-                identity_attrs: vec![Attribute::attr_name_only(zpl::KATTR_CN).unwrap()],
+                returns_attrs: returns,
+                identity_attrs: vec![zpl::KATTR_CN.to_string()],
                 provider: None,
                 client: None,
                 service: None,
@@ -700,18 +704,7 @@ fn parse_trusted_service(
     if !is_default {
         returns_attrs = parse_string_array(ts, "returns_attributes", "trusted_service")?;
         identity_attrs = parse_string_array(ts, "identity_attributes", "trusted_service")?;
-        check_attr_keys_domain_and_uniqueness(ts_id, &returns_attrs, &identity_attrs)?;
 
-        // Identity attributes (if any) must be listed in returns attributes
-        for ia in &identity_attrs {
-            if !returns_attrs.contains(ia) {
-                return Err(err_config!(
-                    "trusted_service {} identity attribute '{}' not in returns_attributes",
-                    ts_id,
-                    ia
-                ));
-            }
-        }
         if ts.contains_key("client") {
             client_svc = Some(
                 ts["client"]
@@ -743,30 +736,38 @@ fn parse_trusted_service(
                 "default trusted_service does not allow custom identity_attributes"
             ));
         }
-        returns_attrs = vec![String::from(zpl::KATTR_CN)];
+        returns_attrs = vec![format!("{} -> {}", zpl::KATTR_CN, zpl::KATTR_CN)];
         identity_attrs = vec![String::from(zpl::KATTR_CN)];
         client_svc = None;
         service_svc = None;
     }
 
-    // We have a simple way to specify tags in the config toml: prefix name with hash '#'.
     // TODO: Need a notation for multi-valued attributes.
 
-    let mut returns = Vec::new();
+    let mut returns = HashMap::new();
     for ra in &returns_attrs {
-        if let Some(stripped) = ra.strip_prefix("#") {
-            returns.push(Attribute::tag(stripped)?);
-        } else {
-            returns.push(Attribute::attr_name_only(ra)?);
+        let (service_key_name, zpr_attr) = parse_attribute_mapping(ra)?;
+        if returns.contains_key(&service_key_name) {
+            return Err(err_config!(
+                "trusted_service {} contains duplicate service attribute name '{}'",
+                ts_id,
+                service_key_name
+            ));
         }
+        returns.insert(service_key_name, zpr_attr);
     }
 
     let mut idents = Vec::new();
     for ra in &identity_attrs {
-        if ra.starts_with("#") {
-            return Err(err_config!("identity attribute cannot be a tag: '{}'", ra));
+        // The ident attribute (for now) must exist in the returns attributes.
+        if !returns.contains_key(ra) {
+            return Err(err_config!(
+                "trusted_service {} identity attribute '{}' not in returns_attributes",
+                ts_id,
+                ra
+            ));
         }
-        idents.push(Attribute::attr_name_only(ra)?);
+        idents.push(ra.to_string());
     }
 
     let provider = if ts.contains_key("provider") {
@@ -788,6 +789,53 @@ fn parse_trusted_service(
         client: client_svc,
         service: service_svc,
     })
+}
+
+/// The mapping string format is "<service-key-name> -> <attribute-spec>" where attribute
+/// spec is:
+///   - <class-name>.<attribute-name> for a regular single value attribute.
+///   - #<class-name>.<attribute-name> for a tag attribute.
+///   - <class-name>.<attribute-name>{} for a multi-valued attribute.
+///
+/// Note that we never use "optional" flag in ZPLC.
+fn parse_attribute_mapping(mapping: &str) -> Result<(String, Attribute), CompilationError> {
+    let parts: Vec<&str> = mapping.split("->").collect();
+    if parts.len() != 2 {
+        return Err(err_config!(
+            "invalid attribute mapping '{}', must be of the form '<service-key-name> -> <attribute-spec>'",
+            mapping
+        ));
+    }
+    let service_key_name = parts[0].trim().to_string();
+    let attr_spec = parts[1].trim();
+
+    let zpr_attr = if let Some(stripped) = attr_spec.strip_prefix("#") {
+        Attribute::tag(stripped)?
+    } else if let Some(stripped) = attr_spec.strip_suffix("{}") {
+        Attribute::attr_name_only_multi(stripped)?
+    } else {
+        Attribute::attr_name_only(attr_spec)?
+    };
+
+    // In theory we can support any attribute names if they are quoted.
+    // But until we support that on VS we will not permit some characters
+    // here.
+    let valid_chars: HashSet<char> =
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-./"
+            .chars()
+            .collect();
+    for c in zpr_attr.zpl_key().chars() {
+        if !valid_chars.contains(&c) {
+            return Err(err_config!(
+                "invalid attribute name '{}' in mapping '{}', contains invalid character '{}'",
+                zpr_attr.zpl_key(),
+                mapping,
+                c
+            ));
+        }
+    }
+
+    Ok((service_key_name, zpr_attr))
 }
 
 fn warn_unknown_ts_property(ts: &Table, ctx: &CompilationCtx) -> Result<(), CompilationError> {
@@ -826,58 +874,6 @@ fn parse_string_array(ts: &Table, key: &str, ctx: &str) -> Result<Vec<String>, C
         );
     }
     Ok(ret)
-}
-
-/// Every attribute needs to be in a domain which is indicated the the ZPL configuration.
-/// When we talk to trusted services we only get back the key parts without any domain.
-/// So in order to map the returned keys to the correct domain we require that all the keys
-/// are unique.  So you cannot have attributes in different domains with the same key.
-/// For exmaple this is not allowed: ["endpoint.id", "user.id"].
-fn check_attr_keys_domain_and_uniqueness(
-    ts_id: &str,
-    returns_attrs: &[String],
-    identity_attrs: &[String],
-) -> Result<(), CompilationError> {
-    // Gather all the attributes without regard to wehether they are in the returns or identity attributes.
-    let mut uniq_attrs = HashSet::<&str>::new();
-    for attr_list in [returns_attrs, identity_attrs] {
-        for attr in attr_list {
-            uniq_attrs.insert(attr);
-        }
-    }
-
-    let mut uniq_keys = HashSet::<String>::new();
-
-    for attr in &uniq_attrs {
-        // The attrs in a config may have a special char '#' on the front to indicate a tag.
-        // We strip that off.
-        let attr = if attr.starts_with('#') {
-            &attr[1..]
-        } else {
-            attr
-        };
-        match Attribute::parse_domain(attr) {
-            Ok((_domain, key)) => {
-                if uniq_keys.contains(&key) {
-                    return Err(err_config!(
-                        "trusted_service {} attribute '{}' uses key '{}' which is not unique",
-                        ts_id,
-                        attr,
-                        key
-                    ));
-                }
-                uniq_keys.insert(key);
-            }
-            Err(_) => {
-                return Err(err_config!(
-                    "trusted_service {} attribute '{}' is not in a valid domain",
-                    ts_id,
-                    attr,
-                ));
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Parse an individual protocol table.
@@ -1281,9 +1277,12 @@ mod test {
         assert_eq!(ts.api, zpl::DEFAULT_TRUSTED_SERVICE_API);
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
         assert_eq!(ts.returns_attrs.len(), 1);
-        assert_eq!(ts.returns_attrs[0].zpl_key(), "endpoint.zpr.adapter.cn");
+        assert_eq!(
+            ts.returns_attrs[zpl::KATTR_CN].zpl_key(),
+            "endpoint.zpr.adapter.cn"
+        );
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert_eq!(ts.identity_attrs[0].zpl_key(), "endpoint.zpr.adapter.cn");
+        assert_eq!(ts.identity_attrs[0], "endpoint.zpr.adapter.cn");
     }
 
     #[test]
@@ -1313,8 +1312,8 @@ mod test {
         api = "validation/2"
         cert_path = "foo.pem"
         prefix = "bar.hop"
-        returns_attributes = ["user.a", "user.c"]
-        identity_attributes = ["user.c"]
+        returns_attributes = ["a -> user.a", "c -> user.c"]
+        identity_attributes = ["c"]
         provider = [["foo", "bar"]]
         "#;
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
@@ -1331,17 +1330,10 @@ mod test {
         assert_eq!(ts.api, "validation/2");
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
         assert_eq!(ts.returns_attrs.len(), 2);
-        {
-            let attr_names = ts
-                .returns_attrs
-                .iter()
-                .map(|a| a.zpl_key())
-                .collect::<Vec<String>>();
-            assert!(attr_names.contains(&"user.a".to_string()));
-            assert!(attr_names.contains(&"user.c".to_string()));
-        }
+        assert_eq!(ts.returns_attrs["a"].zpl_key(), "user.a");
+        assert_eq!(ts.returns_attrs["c"].zpl_key(), "user.c");
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert!(ts.identity_attrs[0].zpl_key() == "user.c");
+        assert!(ts.identity_attrs[0] == "c");
     }
 
     #[test]
@@ -1352,8 +1344,8 @@ mod test {
         api = "validation/2"
         cert_path = "foo.pem"
         prefix = "bar.hop"
-        returns_attributes = ["user.foo", "user.fee", "#endpoint.foo"]
-        identity_attributes = ["user.foo"]
+        returns_attributes = ["foo -> user.foo", "fee -> user.fee", "foo -> #endpoint.foo"]
+        identity_attributes = ["foo"]
         provider = [["foo", "bar"]]
         "##;
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
@@ -1363,7 +1355,7 @@ mod test {
         // check that error message contains the duplicate key
         if let Err(e) = services {
             assert!(
-                e.to_string().contains("which is not unique"),
+                e.to_string().contains("duplicate"),
                 "expected error about non-unique key, got: {}",
                 e
             );
@@ -1378,8 +1370,8 @@ mod test {
         [trusted_services.other]
         api = "validation/2"
         cert_path = "foo.pem"
-        returns_attributes = ["user.a", "user.c"]
-        identity_attributes = ["user.c"]
+        returns_attributes = ["a -> user.a", "c -> user.c"]
+        identity_attributes = ["c"]
         provider = [["foo", "bar"]]
         "#;
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
@@ -1396,17 +1388,7 @@ mod test {
         assert_eq!(ts.api, "validation/2");
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
         assert_eq!(ts.returns_attrs.len(), 2);
-        {
-            let attr_names = ts
-                .returns_attrs
-                .iter()
-                .map(|a| a.zpl_key())
-                .collect::<Vec<String>>();
-            assert!(attr_names.contains(&"user.a".to_string()));
-            assert!(attr_names.contains(&"user.c".to_string()));
-        }
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert!(ts.identity_attrs[0].zpl_key() == "user.c");
         assert_eq!(ts.client, Some("other-client".to_string()));
         assert_eq!(ts.service, Some("other-vs".to_string()));
     }
@@ -1417,8 +1399,8 @@ mod test {
         [trusted_services.bas]
         api = "validation/2"
         cert_path = "foo.crt"
-        returns_attributes = ["user.a", "user.c"]
-        identity_attributes = ["user.c"]
+        returns_attributes = ["a -> user.a", "c -> user.c"]
+        identity_attributes = ["c"]
         provider = [["foo", "bar"]]
         client = "bas-client-interface"
         service = "bas-vs-interface"
@@ -1426,7 +1408,7 @@ mod test {
         let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let ctx = CompilationCtx::default();
         let services = cparser.parse_trusted_services(&ctx);
-        assert!(services.is_ok());
+        assert!(services.is_ok(), "{:?}", services.unwrap_err());
         let services = services.unwrap();
         assert_eq!(services.len(), 2);
         let ts = services.get(0).unwrap();
@@ -1438,17 +1420,7 @@ mod test {
         assert_eq!(provider.len(), 1);
         assert!(provider.contains(&("foo".to_string(), "bar".to_string())));
         assert_eq!(ts.returns_attrs.len(), 2);
-        {
-            let attr_names = ts
-                .returns_attrs
-                .iter()
-                .map(|a| a.zpl_key())
-                .collect::<Vec<String>>();
-            assert!(attr_names.contains(&"user.a".to_string()));
-            assert!(attr_names.contains(&"user.c".to_string()));
-        }
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert!(ts.identity_attrs[0].zpl_key() == "user.c");
         assert_eq!(ts.client, Some("bas-client-interface".to_string()));
         assert_eq!(ts.service, Some("bas-vs-interface".to_string()));
     }
@@ -1585,5 +1557,100 @@ mod test {
             bs.bootstraps.get("another.cn.here").unwrap(),
             &PathBuf::from("other.keyfile.pem")
         );
+    }
+
+    #[test]
+    fn test_parse_attribute_mapping_tag() {
+        let mapping = "service_key -> #endpoint.tag";
+        let result = parse_attribute_mapping(mapping);
+
+        assert!(result.is_ok());
+        let (service_key_name, attr) = result.unwrap();
+
+        assert_eq!(service_key_name, "service_key");
+        assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::Endpoint);
+        assert_eq!(attr.zpl_value(), "endpoint.tag");
+        assert_eq!(attr.value, None);
+        assert_eq!(attr.multi_valued, false);
+        assert_eq!(attr.tag, true);
+        assert_eq!(attr.optional, false);
+    }
+
+    #[test]
+    fn test_parse_attribute_mapping_multi_valued() {
+        let mapping = "service_key -> user.groups{}";
+        let result = parse_attribute_mapping(mapping);
+
+        assert!(result.is_ok());
+        let (service_key_name, attr) = result.unwrap();
+
+        assert_eq!(service_key_name, "service_key");
+        assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::User);
+        assert_eq!(attr.zpl_key(), "user.groups");
+        assert_eq!(attr.value, None);
+        assert_eq!(attr.multi_valued, true);
+        assert_eq!(attr.tag, false);
+        assert_eq!(attr.optional, false);
+    }
+
+    #[test]
+    fn test_parse_attribute_mapping_single_valued() {
+        let mapping = "service_key -> service.role";
+        let result = parse_attribute_mapping(mapping);
+
+        assert!(result.is_ok());
+        let (service_key_name, attr) = result.unwrap();
+
+        assert_eq!(service_key_name, "service_key");
+        assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::Service);
+        assert_eq!(attr.zpl_key(), "service.role");
+        assert_eq!(attr.value, None);
+        assert_eq!(attr.multi_valued, false);
+        assert_eq!(attr.tag, false);
+        assert_eq!(attr.optional, false);
+    }
+
+    #[test]
+    fn test_parse_attribute_mapping_invalid_format() {
+        let mapping = "invalid_format";
+        let result = parse_attribute_mapping(mapping);
+
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("invalid attribute mapping"));
+            assert!(msg.contains("must be of the form"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_attribute_mapping_whitespace_handling() {
+        let mapping = "  service_key  ->  user.name  ";
+        let result = parse_attribute_mapping(mapping);
+
+        assert!(result.is_ok());
+        let (service_key_name, attr) = result.unwrap();
+
+        assert_eq!(service_key_name, "service_key");
+        assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::User);
+        assert_eq!(attr.zpl_key(), "user.name");
+        assert_eq!(attr.value, None);
+        assert_eq!(attr.multi_valued, false);
+        assert_eq!(attr.tag, false);
+        assert_eq!(attr.optional, false);
+    }
+
+    #[test]
+    fn test_parse_attribute_mapping_too_many_arrows() {
+        let mapping = "key -> attr -> extra";
+        let result = parse_attribute_mapping(mapping);
+
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("invalid attribute mapping"));
+        } else {
+            panic!("Expected ConfigError");
+        }
     }
 }

@@ -5,6 +5,7 @@
 use base64::prelude::*;
 use colored::Colorize;
 use core::fmt;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::config::{self, Config};
@@ -12,6 +13,7 @@ use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, load_asn1data_from_pem, load_rsa_public_key};
 use crate::errors::CompilationError;
 use crate::protocols::{IanaProtocol, IcmpFlowType, Protocol};
+use crate::ptypes::Attribute;
 
 /// ConfigApi wraps a pseudo RESTFUL api around the config data.
 /// Access is visa the [ConfigApi::get] method.
@@ -56,6 +58,8 @@ pub enum ConfigItem {
     /// A set of key values (eg, a set of node IDs)
     KeySet(Vec<String>),
 
+    AttributeMap(HashMap<String, Attribute>),
+
     /// A set of attributes as key value pairs
     AttrList(Vec<(String, String)>),
 
@@ -81,6 +85,19 @@ impl fmt::Display for ConfigItem {
                         write!(f, ", ")?;
                     }
                     write!(f, "{}", key)?;
+                }
+                write!(f, "]")
+            }
+            ConfigItem::AttributeMap(attrs) => {
+                let mut first = true;
+                write!(f, "[")?;
+                for (k, v) in attrs {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", k, v)?;
                 }
                 write!(f, "]")
             }
@@ -231,9 +248,8 @@ impl ConfigApi {
     // - /trusted_services/<foo>/client_service -> the client service "service" name
     // - /trusted_services/<foo>/certificate -> returns certificate (if any)
     // - /trusted_services/<foo>/provider -> k/v tuples
-    // - /trusted_services/<foo>/attributes -> list of attribute names (probably also need type)
-    // - /trusted_services/<foo>/tags -> list of attribute names (probably also need type)
-    // - /trusted_services/<foo>/id_attributes -> list of attribute names (probably also need type)
+    // - /trusted_services/<foo>/attributes -> HashMap of attribute mappings
+    // - /trusted_services/<foo>/id_attributes -> list of service attribute names
     //
     //
     // Caller will want to get the service that provides attr FOO.
@@ -304,6 +320,13 @@ impl ConfigApi {
         match self.must_get(key) {
             ConfigItem::KeySet(keys) => keys,
             _ => panic!("not a KeySet"),
+        }
+    }
+
+    pub fn must_get_attr_map(&self, key: &str) -> HashMap<String, Attribute> {
+        match self.must_get(key) {
+            ConfigItem::AttributeMap(map) => map,
+            _ => panic!("not an AttributeMap"),
         }
     }
 
@@ -512,23 +535,8 @@ impl ConfigApi {
             // TODO: Just like when parsing config, we need a notation to express the attribute properties.
             // Eg, multi-value or tag, required or optional.
             // For now we assume all attributes are tuple-type.
-            "attributes" => Some(ConfigItem::KeySet(
-                svc.returns_attrs
-                    .iter()
-                    .filter(|a| !a.tag)
-                    .map(|a| a.zpl_key())
-                    .collect(),
-            )),
-            "tags" => Some(ConfigItem::KeySet(
-                svc.returns_attrs
-                    .iter()
-                    .filter(|a| a.tag)
-                    .map(|a| a.zpl_value())
-                    .collect(),
-            )),
-            "id_attributes" => Some(ConfigItem::KeySet(
-                svc.identity_attrs.iter().map(|a| a.zpl_key()).collect(),
-            )),
+            "attributes" => Some(ConfigItem::AttributeMap(svc.returns_attrs.clone())),
+            "id_attributes" => Some(ConfigItem::KeySet(svc.identity_attrs.clone())),
             _ => panic!("unknown key {}", key),
         }
     }

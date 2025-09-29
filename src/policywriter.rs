@@ -87,7 +87,7 @@ pub trait PolicyWriter {
         ts_type: TSType,
         query_uri: Option<&str>,
         validate_uri: Option<&str>,
-        returns_attrs: Option<&Vec<String>>,
+        returns_attrs: Option<&HashMap<String, Attribute>>,
         identity_attrs: Option<&Vec<String>>,
     );
 

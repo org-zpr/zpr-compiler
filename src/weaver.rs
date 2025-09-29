@@ -477,18 +477,27 @@ impl Weaver {
                     // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
                     let mut matched = false;
                     for ts_name in &trusted_service_names {
+                        /*
                         let search_name = if a.tag {
                             a.zpl_value().clone()
                         } else {
                             attr_name.clone()
                         };
-                        let ts_attrs = if a.tag {
-                            config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name))
-                        } else {
-                            config
-                                .must_get_keys(&format!("/trusted_services/{}/attributes", ts_name))
-                        };
-                        if ts_attrs.contains(&search_name) {
+                        */
+
+                        let ts_attrs = config.must_get_attr_map(&format!(
+                            "/trusted_services/{}/attributes",
+                            ts_name
+                        ));
+
+                        // "a" is the attribute referenced in the ZPL, so this will turn up on the RIGHT side of the map.
+                        // The left side (the strings) are the names of the raw attributes returned by the service.
+
+                        let search_str = a.zplc_key();
+                        let found = ts_attrs.iter().find(|(_k, v)| v.zplc_key() == search_str);
+
+                        //if ts_attrs.contains(&search_name) {
+                        if found.is_some() {
                             if matched {
                                 return Err(CompilationError::ConfigError(format!(
                                     "attribute {a} found in multiple trusted services"
@@ -854,7 +863,7 @@ impl Weaver {
             // The trusted service must return some attributes, and may return some identity attributes.
             let ts_returns_attrs =
                 match config.get(&format!("/trusted_services/{ts_name}/attributes")) {
-                    Some(ConfigItem::KeySet(attrs)) => attrs,
+                    Some(ConfigItem::AttributeMap(map)) => map,
                     _ => {
                         return Err(CompilationError::ConfigError(format!(
                             "trusted service {} missing return attributes",
@@ -1256,8 +1265,8 @@ mod test {
         [trusted_services.bas]
         api = "validation/2"
         provider = [["endpoint.zpr.adapter.cn", "fee"]]
-        returns_attributes = ["user.id", "user.email"]
-        identity_attributes = ["user.id"]
+        returns_attributes = ["id -> user.id", "email -> user.email"]
+        identity_attributes = ["id"]
 
         [services.bas-vs]
         protocol = "zpr-validation2"
@@ -1289,10 +1298,10 @@ mod test {
         assert_eq!(fsvc.fabric_id, "bas");
         let return_attrs = fsvc.returns_attrs.as_ref().unwrap();
         assert_eq!(return_attrs.len(), 2);
-        assert!(return_attrs.contains(&String::from("user.id")));
-        assert!(return_attrs.contains(&String::from("user.email")));
+        assert!(return_attrs["id"].to_string() == "user.id");
+        assert!(return_attrs["email"].to_string() == "user.email");
         let id_attrs = fsvc.identity_attrs.as_ref().unwrap();
         assert_eq!(id_attrs.len(), 1);
-        assert!(id_attrs.contains(&String::from("user.id")));
+        assert!(id_attrs.contains(&String::from("id")));
     }
 }

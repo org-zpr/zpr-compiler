@@ -34,7 +34,7 @@ pub struct FabricService {
     pub service_type: ServiceType,
     pub certificate: Option<Vec<u8>>, // Certificate for this (trusted) service
     pub client_service_name: Option<String>, // For an AUTH service, the name of the optional client service.
-    pub returns_attrs: Option<Vec<String>>, // list of attribute keys (with domains) -- only for trusted services
+    pub returns_attrs: Option<HashMap<String, Attribute>>, // list of attribute keys (with domains) -- only for trusted services
     pub identity_attrs: Option<Vec<String>>, // list of attribute keys (with domains) -- only for trusted services
 }
 
@@ -210,7 +210,7 @@ impl Fabric {
         provider_attrs: &[Attribute],
         certificate: Option<Vec<u8>>,
         client_service_name: &str,
-        returns_attrs: Option<Vec<String>>,
+        returns_attrs: Option<HashMap<String, Attribute>>,
         identity_attrs: Option<Vec<String>>,
     ) -> Result<(), CompilationError> {
         for s in &self.services {
