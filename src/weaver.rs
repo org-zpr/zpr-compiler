@@ -477,14 +477,6 @@ impl Weaver {
                     // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
                     let mut matched = false;
                     for ts_name in &trusted_service_names {
-                        /*
-                        let search_name = if a.tag {
-                            a.zpl_value().clone()
-                        } else {
-                            attr_name.clone()
-                        };
-                        */
-
                         let ts_attrs = config.must_get_attr_map(&format!(
                             "/trusted_services/{}/attributes",
                             ts_name
@@ -493,8 +485,20 @@ impl Weaver {
                         // "a" is the attribute referenced in the ZPL, so this will turn up on the RIGHT side of the map.
                         // The left side (the strings) are the names of the raw attributes returned by the service.
 
+                        // As we search we need to consider that a tuple type attribute could match
+                        // either the service plain key eg, "user.role" or the service multi-value key, eg, "user.role{}".
                         let search_str = a.zplc_key();
-                        let found = ts_attrs.iter().find(|(_k, v)| v.zplc_key() == search_str);
+                        let alt_search_str = if !a.tag && !a.multi_valued {
+                            Some(format!("{}{{}}", search_str))
+                        } else {
+                            None
+                        };
+
+                        let found = ts_attrs.iter().find(|(_k, v)| {
+                            v.zplc_key() == search_str
+                                || alt_search_str.is_some()
+                                    && &v.zplc_key() == alt_search_str.as_ref().unwrap()
+                        });
 
                         //if ts_attrs.contains(&search_name) {
                         if found.is_some() {

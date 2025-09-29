@@ -31,6 +31,15 @@ pub enum CompilationError {
     #[error("illegal character for unquoted name literal at line {1}, column {2}: {0}")]
     IllegalNameLiteralChar(char, usize, usize),
 
+    #[error("illegal set start '{{' at line {0}, column {1}")]
+    IllegalSetStart(usize, usize),
+
+    #[error("unterminated set at line {0}, column {1}")]
+    UnterminatedSet(usize, usize),
+
+    #[error("illegal set end '}}' at line {0}, column {1}")]
+    IllegalSetEnd(usize, usize),
+
     #[error("redefinition of {0} at line {1}, column {2}")]
     Redefinition(String, usize, usize),
 

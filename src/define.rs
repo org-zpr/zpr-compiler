@@ -242,7 +242,7 @@ where
                     AttrDomain::from_flavor(class.flavor),
                     &name,
                     Some(value.clone()),
-                    multiple,
+                    multiple || value.len() > 1,
                     false,
                     optional,
                 );

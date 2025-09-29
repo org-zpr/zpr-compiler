@@ -1566,7 +1566,7 @@ mod test {
         assert_eq!(service_key_name, "service_key");
         assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::Endpoint);
         assert_eq!(attr.zpl_value(), "endpoint.tag");
-        assert_eq!(attr.value, None);
+        assert_eq!(attr.values, None);
         assert_eq!(attr.multi_valued, false);
         assert_eq!(attr.tag, true);
         assert_eq!(attr.optional, false);
@@ -1583,7 +1583,7 @@ mod test {
         assert_eq!(service_key_name, "service_key");
         assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::User);
         assert_eq!(attr.zpl_key(), "user.groups");
-        assert_eq!(attr.value, None);
+        assert_eq!(attr.values, None);
         assert_eq!(attr.multi_valued, true);
         assert_eq!(attr.tag, false);
         assert_eq!(attr.optional, false);
@@ -1600,7 +1600,7 @@ mod test {
         assert_eq!(service_key_name, "service_key");
         assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::Service);
         assert_eq!(attr.zpl_key(), "service.role");
-        assert_eq!(attr.value, None);
+        assert_eq!(attr.values, None);
         assert_eq!(attr.multi_valued, false);
         assert_eq!(attr.tag, false);
         assert_eq!(attr.optional, false);
@@ -1631,7 +1631,7 @@ mod test {
         assert_eq!(service_key_name, "service_key");
         assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::User);
         assert_eq!(attr.zpl_key(), "user.name");
-        assert_eq!(attr.value, None);
+        assert_eq!(attr.values, None);
         assert_eq!(attr.multi_valued, false);
         assert_eq!(attr.tag, false);
         assert_eq!(attr.optional, false);

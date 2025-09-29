@@ -1163,4 +1163,72 @@ mod test {
         }
         assert!(matched_service, "failed to locate service clause in RHS");
     }
+
+    #[test]
+    fn test_multi_value_attrs() {
+        let statement = "allow colors:{blue, red} users on levels:{1, 2} endpoints to access services on levels:{9, 10} endpoints";
+
+        let mut classes: HashMap<String, Class> = HashMap::new();
+        for defclass in Class::defaults() {
+            classes.insert(defclass.name.clone(), defclass);
+        }
+        let mut class_index: HashMap<String, String> = HashMap::new();
+        for (name, class) in classes.iter() {
+            class_index.insert(name.clone(), name.clone());
+            class_index.insert(class.aka.clone(), name.clone());
+        }
+
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        let tokens = tz.tokens;
+        let clause = parse_allow(&tokens, 1, &class_index, &classes).unwrap();
+
+        assert_eq!(2, clause.client.len()); // users, endpoints
+        assert_eq!(1, clause.server.len()); // services
+
+        let mut matched_user = false;
+        let mut matched_endpoint = false;
+        let mut matched_service = false;
+
+        for lhs_clause in clause.client {
+            match lhs_clause.flavor {
+                ClassFlavor::User => {
+                    // Blue tag goes on user.
+                    matched_user = true;
+                    lhs_clause
+                        .with
+                        .iter()
+                        .find(|a| a.to_string() == "user.colors:{blue, red}")
+                        .expect("blue tag missing from user clause");
+                }
+                ClassFlavor::Endpoint => {
+                    // level:seven attr goes in as an endpoint attribute
+                    matched_endpoint = true;
+                    lhs_clause
+                        .with
+                        .iter()
+                        .find(|a| a.to_string() == "endpoint.levels:{1, 2}")
+                        .expect("level:seven tag missing from endpoint clause");
+                }
+                _ => (),
+            }
+        }
+        assert!(matched_user, "failed to locate user clause in LHS");
+        assert!(matched_endpoint, "failed to locate endpoint clause in LHS");
+
+        for rhs_clause in clause.server {
+            match rhs_clause.flavor {
+                ClassFlavor::Service => {
+                    matched_service = true;
+                    rhs_clause
+                        .with
+                        .iter()
+                        .find(|a| a.to_string() == "endpoint.levels:{9, 10}")
+                        .expect("level:eight tag missing from service clause");
+                }
+                _ => (),
+            }
+        }
+        assert!(matched_service, "failed to locate service clause in RHS");
+    }
 }

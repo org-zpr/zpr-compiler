@@ -104,20 +104,22 @@ impl PolicyBinaryV2 {
         attrs: &[Attribute],
         conds: &mut capnp::struct_list::Builder<'_, polio::policy_capnp::attr_expr::Owned>,
     ) {
-        for (j, clicond) in attrs.iter().enumerate() {
+        for (j, attr) in attrs.iter().enumerate() {
             let mut ccond = conds.reborrow().get(j as u32);
             // foo:fee    (foo, eq, fee)
             // foo:       (foo, has, "")
-            ccond.set_key(&clicond.zpl_key());
-            let val = clicond.zpl_value();
-            if val.is_empty() {
+            ccond.set_key(&attr.zpl_key());
+            let vals = attr.zpl_values();
+
+            if vals.is_empty() || vals[0].is_empty() || attr.multi_valued {
                 ccond.set_op(policy_capnp::AttrOp::Has);
             } else {
                 ccond.set_op(policy_capnp::AttrOp::Eq);
             }
-            // The v2 policy is prepared for multi-valued attrs but we don't use that yet.
-            let mut vals = ccond.init_value(1);
-            vals.set(0, &val);
+            let mut cvals = ccond.init_value(vals.len() as u32);
+            for (i, val) in vals.iter().enumerate() {
+                cvals.set(i as u32, val);
+            }
         }
     }
 }
