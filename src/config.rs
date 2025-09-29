@@ -124,8 +124,6 @@ pub struct Bootstrap {
 }
 
 /// Trusted Service table ("trusted_services")
-// TODO: Will these attribute descriptions need to be made more expressive so we can tell if they are optional, multi-valued, etc?
-// TODO: Ports? Protocols?
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct TrustedService {
@@ -741,8 +739,6 @@ fn parse_trusted_service(
         client_svc = None;
         service_svc = None;
     }
-
-    // TODO: Need a notation for multi-valued attributes.
 
     let mut returns = HashMap::new();
     for ra in &returns_attrs {
