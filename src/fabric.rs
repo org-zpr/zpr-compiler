@@ -407,7 +407,7 @@ impl Fabric {
                 )));
             }
         };
-        node_attrs.push(Attribute::zpr_internal_attr(
+        node_attrs.push(Attribute::must_zpr_internal_attr(
             zpl::KATTR_ADDR,
             &naddr.to_string(),
         ));

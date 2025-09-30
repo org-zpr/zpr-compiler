@@ -111,7 +111,7 @@ impl PolicyBinaryV2 {
             ccond.set_key(&attr.zpl_key());
             let vals = attr.zpl_values();
 
-            if vals.is_empty() || vals[0].is_empty() || attr.multi_valued {
+            if vals.is_empty() || vals[0].is_empty() || attr.is_multi_valued() {
                 ccond.set_op(policy_capnp::AttrOp::Has);
             } else {
                 ccond.set_op(policy_capnp::AttrOp::Eq);

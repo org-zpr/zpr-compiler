@@ -806,7 +806,7 @@ fn parse_attribute_mapping(mapping: &str) -> Result<(String, Attribute), Compila
     let attr_spec = parts[1].trim();
 
     let zpr_attr = if let Some(stripped) = attr_spec.strip_prefix("#") {
-        Attribute::tag(stripped)?
+        Attribute::new_tag(stripped)?
     } else if let Some(stripped) = attr_spec.strip_suffix("{}") {
         Attribute::attr_name_only_multi(stripped)?
     } else {
@@ -1567,8 +1567,8 @@ mod test {
         assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::Endpoint);
         assert_eq!(attr.zpl_value(), "endpoint.tag");
         assert_eq!(attr.values, None);
-        assert_eq!(attr.multi_valued, false);
-        assert_eq!(attr.tag, true);
+        assert_eq!(attr.is_multi_valued(), false);
+        assert_eq!(attr.is_tag(), true);
         assert_eq!(attr.optional, false);
     }
 
@@ -1584,8 +1584,8 @@ mod test {
         assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::User);
         assert_eq!(attr.zpl_key(), "user.groups");
         assert_eq!(attr.values, None);
-        assert_eq!(attr.multi_valued, true);
-        assert_eq!(attr.tag, false);
+        assert_eq!(attr.is_multi_valued(), true);
+        assert_eq!(attr.is_tag(), false);
         assert_eq!(attr.optional, false);
     }
 
@@ -1601,8 +1601,8 @@ mod test {
         assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::Service);
         assert_eq!(attr.zpl_key(), "service.role");
         assert_eq!(attr.values, None);
-        assert_eq!(attr.multi_valued, false);
-        assert_eq!(attr.tag, false);
+        assert_eq!(attr.is_multi_valued(), false);
+        assert_eq!(attr.is_tag(), false);
         assert_eq!(attr.optional, false);
     }
 
@@ -1632,8 +1632,8 @@ mod test {
         assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::User);
         assert_eq!(attr.zpl_key(), "user.name");
         assert_eq!(attr.values, None);
-        assert_eq!(attr.multi_valued, false);
-        assert_eq!(attr.tag, false);
+        assert_eq!(attr.is_multi_valued(), false);
+        assert_eq!(attr.is_tag(), false);
         assert_eq!(attr.optional, false);
     }
 

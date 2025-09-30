@@ -135,7 +135,7 @@ impl Weaver {
         );
 
         // The provider of the visa service is a hardcoded CN value.
-        let vs_attrs = vec![Attribute::attr_or_panic(
+        let vs_attrs = vec![Attribute::must_new_single_valued(
             zpl::KATTR_CN,
             zpl::VISA_SERVICE_CN,
         )];
@@ -149,7 +149,7 @@ impl Weaver {
         // Visa service has policy that allows nodes to access it.  We use a node role attribute so
         // we don't care about individual node names.
         let pline = PLine::new_builtin("allow node access to visa service");
-        let vs_access_attrs = vec![Attribute::zpr_internal_attr(zpl::KATTR_ROLE, "node")];
+        let vs_access_attrs = vec![Attribute::must_zpr_internal_attr(zpl::KATTR_ROLE, "node")];
         self.fabric.add_condition_to_service(
             false,
             &fab_svc_id,
@@ -449,7 +449,7 @@ impl Weaver {
         let mut resolved_attrs = Vec::new();
         for zpl_attr in attrs {
             let attr_name = zpl_attr.zpl_key();
-            if zpl_attr.tag && zpl_attr.zpl_value() == zpl::KATTR_CN {
+            if zpl_attr.is_tag() && zpl_attr.zpl_value() == zpl::KATTR_CN {
                 return Err(CompilationError::ConfigError(format!(
                     "{} attribute used as a tag, but is a tuple attribute",
                     zpl_attr,
@@ -488,7 +488,7 @@ impl Weaver {
                         // As we search we need to consider that a tuple type attribute could match
                         // either the service plain key eg, "user.role" or the service multi-value key, eg, "user.role{}".
                         let search_str = zpl_attr.zplc_key();
-                        let alt_search_str = if !zpl_attr.tag && !zpl_attr.multi_valued {
+                        let alt_search_str = if !zpl_attr.is_tag() && !zpl_attr.is_multi_valued() {
                             Some(format!("{}{{}}", search_str))
                         } else {
                             None
@@ -509,8 +509,8 @@ impl Weaver {
                             }
                             let mut new_attr = zpl_attr.clone();
                             // If the service indicates that this attribute is multi-valued then we keep that info.
-                            if attr_spec.multi_valued {
-                                new_attr.multi_valued = true;
+                            if attr_spec.is_multi_valued() {
+                                new_attr.set_multi_valued();
                             }
                             resolved_attrs.push(new_attr);
                             self.used_trusted_services.insert(ts_name.clone());
@@ -646,11 +646,11 @@ impl Weaver {
                     // a provider of ANY service.
                     if lhs_class.flavor == ClassFlavor::Service {
                         let svc_attr = if lhs_class.class == zpl::DEF_CLASS_SERVICE_NAME {
-                            Attribute::zpr_internal_attr_mv(zpl::KATTR_SERVICES, "")
+                            Attribute::must_zpr_internal_attr_mv(zpl::KATTR_SERVICES, "")
                         } else {
                             let fab_svc_name =
                                 self.service_clause_name_to_fabric_id(class_idx, &lhs_class.class);
-                            Attribute::zpr_internal_attr_mv(zpl::KATTR_SERVICES, &fab_svc_name)
+                            Attribute::must_zpr_internal_attr_mv(zpl::KATTR_SERVICES, &fab_svc_name)
                         };
                         attrs.push(svc_attr);
                     }
@@ -900,7 +900,7 @@ impl Weaver {
                 })?;
 
             // The visa service can access the trusted service over its vs interface.
-            let vs_access_attrs = vec![Attribute::attr_or_panic(
+            let vs_access_attrs = vec![Attribute::must_new_single_valued(
                 zpl::KATTR_CN,
                 zpl::VISA_SERVICE_CN,
             )];

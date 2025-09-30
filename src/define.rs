@@ -238,27 +238,47 @@ where
                         tok.col,
                     ));
                 }
-                let attr = Attribute::new_with_domain_hint(
-                    AttrDomain::from_flavor(class.flavor),
-                    &name,
-                    Some(value.clone()),
-                    multiple || value.len() > 1,
-                    false,
-                    optional,
-                );
+                let attr = if multiple || value.len() > 1 {
+                    Attribute::new_multiple_attribute_with_domain_hint(
+                        AttrDomain::from_flavor(class.flavor),
+                        name,
+                        Some(value.clone()),
+                        optional,
+                    )?
+                } else {
+                    Attribute::new_single_attribute_with_domain_hint(
+                        AttrDomain::from_flavor(class.flavor),
+                        name,
+                        Some(value.clone()),
+                        optional,
+                    )?
+                };
                 class.with_attrs.push(attr);
                 multiple = false;
                 and = false;
             }
             TokenType::Literal(s) => {
-                let attr = Attribute::new_with_domain_hint(
-                    AttrDomain::from_flavor(class.flavor),
-                    &s,
-                    None,
-                    multiple,
-                    tags || tag,
-                    optional,
-                );
+                if (tag || tags) && multiple {
+                    return Err(CompilationError::DefineStmtParseError(
+                        "MULTIPLE not allowed with tag/tags".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+                let attr = if tag || tags {
+                    Attribute::new_tag_with_domain_hint(
+                        AttrDomain::from_flavor(class.flavor),
+                        s,
+                        optional,
+                    )?
+                } else {
+                    Attribute::new_blank_attribute_with_domain_hint(
+                        AttrDomain::from_flavor(class.flavor),
+                        s,
+                        multiple,
+                        optional,
+                    )?
+                };
                 class.with_attrs.push(attr);
                 multiple = false;
                 and = false;
