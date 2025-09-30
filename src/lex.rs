@@ -43,7 +43,7 @@ pub struct Token {
 impl Token {
     pub fn new_from_str(s: &ZPLStr, line: usize, col: usize) -> Token {
         if s.is_tuple() {
-            return Token::new(TokenType::Tuple(s.as_tuple()), line, col, s.len());
+            return Token::new(TokenType::Tuple(s.as_tuple()), line, col, s.rendered_len());
         }
         let ls = s.as_atom().to_lowercase();
         let tok = match ls.as_str() {
@@ -68,7 +68,7 @@ impl Token {
             "signal" => TokenType::Signal,
             _ => TokenType::Literal(s.as_atom()),
         };
-        Token::new(tok, line, col, s.len())
+        Token::new(tok, line, col, s.rendered_len())
     }
 
     pub fn new(tt: TokenType, line: usize, col: usize, sz: usize) -> Token {
@@ -165,7 +165,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             current_start.1,
                         ));
                     }
-                    current_word.clear();
+                    current_word = ZPLStrBuilder::new();
                 }
                 line += 1;
                 col = 1;
@@ -182,7 +182,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             current_start.1,
                         ));
                     }
-                    current_word.clear();
+                    current_word = ZPLStrBuilder::new();
                 }
                 col += 1;
             }
@@ -200,7 +200,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                     current_start.1,
                                 ));
                             }
-                            current_word.clear();
+                            current_word = ZPLStrBuilder::new();
                         }
                     }
                 }
@@ -227,7 +227,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                     current_start.1,
                                 ));
                             }
-                            current_word.clear();
+                            current_word = ZPLStrBuilder::new();
                             tokens.push(Token::new(TokenType::Comma, line, col, 1));
                         }
                     }
@@ -258,7 +258,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                 current_start.1,
                             ));
                         }
-                        current_word.clear();
+                        current_word = ZPLStrBuilder::new();
                         tokens.push(Token::new(TokenType::Period, line, col, 1));
                     } else {
                         current_word.push(c, quoting.is_quoting(), line, col)?;
@@ -318,7 +318,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                 current_start.0,
                                 current_start.1,
                             ));
-                            current_word.clear();
+                            current_word = ZPLStrBuilder::new();
                         }
                         line += 1;
                         col = 1;
@@ -368,7 +368,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                         current_start.0,
                         current_start.1,
                     ));
-                    current_word.clear();
+                    current_word = ZPLStrBuilder::new();
                 }
                 col += 1;
             }
@@ -393,7 +393,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                 current_start.0,
                                 current_start.1,
                             ));
-                            current_word.clear();
+                            current_word = ZPLStrBuilder::new();
                             quoting = QuotingType::None;
                         } else {
                             return Err(CompilationError::IllegalQuote(line, col));
@@ -425,7 +425,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                         current_start.1,
                                     ));
                                 }
-                                current_word.clear();
+                                current_word = ZPLStrBuilder::new();
                             }
                             quoting = QuotingType::None;
                         }

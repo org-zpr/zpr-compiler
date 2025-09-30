@@ -21,18 +21,18 @@ pub struct ZPLStr {
 }
 
 impl ZPLStr {
-    pub fn new_atom(name: &str) -> ZPLStr {
+    pub fn new_atom(name: String) -> ZPLStr {
         ZPLStr {
-            name: name.to_string(),
+            name,
             value: None,
             tuple: false,
         }
     }
 
-    pub fn new_tuple_vec(name: &str, value: &[String]) -> ZPLStr {
+    pub fn new_tuple_vec(name: String, value: Vec<String>) -> ZPLStr {
         ZPLStr {
-            name: name.to_string(),
-            value: Some(value.to_vec()),
+            name,
+            value: Some(value),
             tuple: true,
         }
     }
@@ -69,7 +69,7 @@ impl ZPLStr {
     }
 
     /// Get the length of the string representation.
-    pub fn len(&self) -> usize {
+    pub fn rendered_len(&self) -> usize {
         let str_form = format!("{}", self);
         str_form.len()
     }
@@ -77,7 +77,7 @@ impl ZPLStr {
 
 impl Default for ZPLStr {
     fn default() -> Self {
-        ZPLStr::new_atom("")
+        ZPLStr::new_atom("".into())
     }
 }
 
@@ -117,19 +117,12 @@ impl ZPLStrBuilder {
         }
     }
 
-    pub fn clear(&mut self) {
-        self.name.clear();
-        self.current_value.clear();
-        self.prev_values = Vec::new();
-        self.tuple = false;
-        self.input_to_value = false;
-    }
-
     pub fn is_empty(&self) -> bool {
         self.name.is_empty() && self.current_value.is_empty() && self.prev_values.is_empty()
     }
 
     /// Push supplied character onto the name or value depending on mode.
+    /// TODO: Currently only accepts ASCII alphanumerics, '-', '_', and '.' (for names).
     pub fn push(
         &mut self,
         c: char,
@@ -190,18 +183,18 @@ impl ZPLStrBuilder {
         if self.tuple {
             return false;
         }
-        matches!(self.name.to_lowercase().as_str(), "a" | "an")
+        self.name.eq_ignore_ascii_case("a") || self.name.eq_ignore_ascii_case("an")
     }
 
-    pub fn build(&mut self) -> ZPLStr {
+    pub fn build(self) -> ZPLStr {
         if self.tuple {
+            let mut vals = self.prev_values;
             if !self.current_value.is_empty() {
-                self.prev_values.push(self.current_value.clone());
-                self.current_value.clear();
+                vals.push(self.current_value);
             }
-            return ZPLStr::new_tuple_vec(&self.name, &self.prev_values);
+            return ZPLStr::new_tuple_vec(self.name, vals);
         }
-        ZPLStr::new_atom(&self.name)
+        ZPLStr::new_atom(self.name)
     }
 }
 
