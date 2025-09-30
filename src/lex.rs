@@ -42,10 +42,15 @@ pub struct Token {
 
 impl Token {
     pub fn new_from_str(s: &ZPLStr, line: usize, col: usize) -> Token {
-        if s.is_tuple() {
-            return Token::new(TokenType::Tuple(s.as_tuple()), line, col, s.rendered_len());
+        if let Some((name, vals)) = s.as_tuple() {
+            return Token::new(
+                TokenType::Tuple((name.to_string(), vals.to_vec())),
+                line,
+                col,
+                s.rendered_len(),
+            );
         }
-        let ls = s.as_atom().to_lowercase();
+        let ls = s.as_atom().unwrap().to_lowercase();
         let tok = match ls.as_str() {
             "never" => TokenType::Never,
             "allow" => TokenType::Allow,
@@ -66,7 +71,7 @@ impl Token {
             "multiple" => TokenType::Multiple,
             "." => TokenType::Period,
             "signal" => TokenType::Signal,
-            _ => TokenType::Literal(s.as_atom()),
+            _ => TokenType::Literal(s.as_atom().unwrap().into()), // is case sensitive
         };
         Token::new(tok, line, col, s.rendered_len())
     }
@@ -333,7 +338,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 }
                 if quoting.is_quoting() {
                     current_word.push(c, true, line, col)?;
-                } else if !current_word.accept_value() {
+                } else if current_word.accept_value().is_err() {
                     return Err(CompilationError::IllegalColon(line, col));
                 }
 

@@ -14,58 +14,42 @@ use std::fmt;
 
 use crate::errors::CompilationError;
 
-pub struct ZPLStr {
-    name: String,
-    value: Option<Vec<String>>,
-    tuple: bool,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ZPLStr {
+    Atom(String),
+    Tuple { name: String, values: Vec<String> },
 }
 
 impl ZPLStr {
-    pub fn new_atom(name: String) -> ZPLStr {
-        ZPLStr {
-            name,
-            value: None,
-            tuple: false,
-        }
+    pub fn atom<S: Into<String>>(name: S) -> Self {
+        ZPLStr::Atom(name.into())
     }
 
-    pub fn new_tuple_vec(name: String, value: Vec<String>) -> ZPLStr {
-        ZPLStr {
-            name,
-            value: Some(value),
-            tuple: true,
+    pub fn tuple<S: Into<String>>(name: S, values: Vec<String>) -> Self {
+        ZPLStr::Tuple {
+            name: name.into(),
+            values,
         }
     }
 
     #[allow(dead_code)]
-    pub fn new_tuple_empty(name: &str) -> ZPLStr {
-        ZPLStr {
-            name: name.to_string(),
-            value: None,
-            tuple: true,
-        }
-    }
-
     pub fn is_tuple(&self) -> bool {
-        self.tuple
+        matches!(self, ZPLStr::Tuple { .. })
     }
 
-    /// Note that returned `value` may be empty vector.
-    pub fn as_tuple(&self) -> (String, Vec<String>) {
-        if !self.tuple {
-            panic!("not a tuple");
-        }
-        match self.value {
-            Some(ref v) => (self.name.clone(), v.clone()),
-            None => (self.name.clone(), Vec::new()),
+    pub fn as_atom(&self) -> Option<&str> {
+        match self {
+            ZPLStr::Atom(n) => Some(n.as_str()),
+            _ => None,
         }
     }
 
-    pub fn as_atom(&self) -> String {
-        if self.tuple {
-            panic!("not an atom");
+    /// Note that returned values may be empty list.
+    pub fn as_tuple(&self) -> Option<(&str, &[String])> {
+        match self {
+            ZPLStr::Tuple { name, values } => Some((name.as_str(), values.as_slice())),
+            _ => None,
         }
-        self.name.clone()
     }
 
     /// Get the length of the string representation.
@@ -77,23 +61,30 @@ impl ZPLStr {
 
 impl Default for ZPLStr {
     fn default() -> Self {
-        ZPLStr::new_atom("".into())
+        ZPLStr::atom("")
     }
 }
 
 impl fmt::Display for ZPLStr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.tuple {
-            let (k, v) = self.as_tuple();
-            if v.len() == 0 {
-                write!(f, "{k}:")
-            } else if v.len() == 1 {
-                write!(f, "{k}:{}", v[0])
-            } else {
-                write!(f, "{k}:{{{}}}", v.join(", "))
+        match self {
+            ZPLStr::Atom(n) => write!(f, "{n}"),
+            ZPLStr::Tuple { name, values } => {
+                if values.is_empty() {
+                    write!(f, "{name}:")
+                } else if values.len() == 1 {
+                    write!(f, "{name}:{}", values[0])
+                } else {
+                    write!(f, "{name}:{{")?;
+                    for (i, v) in values.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{v}")?;
+                    }
+                    write!(f, "}}")
+                }
             }
-        } else {
-            write!(f, "{}", self.name)
         }
     }
 }
@@ -136,7 +127,7 @@ impl ZPLStrBuilder {
             }
             self.current_value.push(c);
         } else {
-            // The name part of a tuple is allowed to contain periods wihout needing quotes.
+            // The name part of a tuple is allowed to contain periods without needing quotes.
             if !quoted && !c.is_ascii_alphanumeric() && !matches!(c, '.' | '-' | '_') {
                 return Err(CompilationError::IllegalNameLiteralChar(c, line, col));
             }
@@ -146,20 +137,21 @@ impl ZPLStrBuilder {
     }
 
     /// Switch to value mode ... all further pushes go to the tuple value. Implies that this is a tuple
-    /// meaning that it has a key part and a value part.  The value part may be an atom type string or
-    /// a list of atoms.
+    /// meaning that it has a key part and a value part.  The value part may be zero or more strings.
     ///
-    /// Returns false if we are already in value mode.
-    pub fn accept_value(&mut self) -> bool {
+    /// Returns error if we are already in value mode.
+    pub fn accept_value(&mut self) -> Result<(), &'static str> {
         if self.input_to_value {
-            return false;
+            return Err("already in value mode");
         }
         self.input_to_value = true;
         self.tuple = true;
-        true
+        Ok(())
     }
 
     /// Start accepting the next value in a tuple list.
+    ///
+    /// Panics if not in value mode.
     pub fn next_value(&mut self) {
         if !self.input_to_value {
             panic!("not in value mode");
@@ -170,7 +162,7 @@ impl ZPLStrBuilder {
         }
     }
 
-    /// Get the length of the current value string.
+    /// TRUE if the current value being built is empty.
     pub fn value_is_empty(&self) -> bool {
         self.current_value.is_empty()
     }
@@ -179,6 +171,7 @@ impl ZPLStrBuilder {
         self.tuple
     }
 
+    /// Check for syntactic "sugar"
     pub fn is_sugar(&self) -> bool {
         if self.tuple {
             return false;
@@ -186,15 +179,16 @@ impl ZPLStrBuilder {
         self.name.eq_ignore_ascii_case("a") || self.name.eq_ignore_ascii_case("an")
     }
 
+    /// Convert this builder into a [ZPLStr].
     pub fn build(self) -> ZPLStr {
         if self.tuple {
             let mut vals = self.prev_values;
             if !self.current_value.is_empty() {
                 vals.push(self.current_value);
             }
-            return ZPLStr::new_tuple_vec(self.name, vals);
+            return ZPLStr::tuple(self.name, vals);
         }
-        ZPLStr::new_atom(self.name)
+        ZPLStr::atom(self.name)
     }
 }
 
@@ -216,7 +210,7 @@ mod test {
         assert!(!b.is_sugar());
         let s = b.build();
         assert_eq!(s.is_tuple(), false);
-        assert_eq!(s.as_atom(), "classified");
+        assert_eq!(s.as_atom().unwrap(), "classified");
         assert_eq!(format!("{}", s), "classified");
     }
 
@@ -232,12 +226,12 @@ mod test {
         assert!(!b.is_empty());
         assert!(!b.is_tuple());
         assert!(!b.is_sugar());
-        assert!(b.accept_value());
-        assert!(!b.accept_value()); // second time should return false
+        assert!(b.accept_value().is_ok());
+        assert!(b.accept_value().is_err()); // second time should return false
         assert!(b.is_tuple());
         let s = b.build();
         assert_eq!(s.is_tuple(), true);
-        let (k, v) = s.as_tuple();
+        let (k, v) = s.as_tuple().unwrap();
         assert_eq!(k, "name");
         assert_eq!(v.len(), 0);
         assert_eq!(format!("{}", s), "name:");
@@ -255,15 +249,15 @@ mod test {
         assert!(!b.is_empty());
         assert!(!b.is_tuple());
         assert!(!b.is_sugar());
-        assert!(b.accept_value());
-        assert!(!b.accept_value()); // second time should return false
+        assert!(b.accept_value().is_ok());
+        assert!(b.accept_value().is_err()); // second time should return false
         assert!(b.is_tuple());
         for (i, c) in "John".chars().enumerate() {
             b.push(c, false, 1, i + 1).unwrap();
         }
         let s = b.build();
         assert_eq!(s.is_tuple(), true);
-        let (k, v) = s.as_tuple();
+        let (k, v) = s.as_tuple().unwrap();
         assert_eq!(k, "name");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0], "John");
@@ -282,8 +276,8 @@ mod test {
         assert!(!b.is_empty());
         assert!(!b.is_tuple());
         assert!(!b.is_sugar());
-        assert!(b.accept_value());
-        assert!(!b.accept_value()); // second time should return false
+        assert!(b.accept_value().is_ok());
+        assert!(b.accept_value().is_err()); // second time should return false
         assert!(b.is_tuple());
         for (i, c) in "role1".chars().enumerate() {
             b.push(c, false, 1, i + 1).unwrap();
@@ -298,7 +292,7 @@ mod test {
         }
         let s = b.build();
         assert_eq!(s.is_tuple(), true);
-        let (k, v) = s.as_tuple();
+        let (k, v) = s.as_tuple().unwrap();
         assert_eq!(k, "roles");
         assert_eq!(v.len(), 3);
         assert_eq!(v[0], "role1");
