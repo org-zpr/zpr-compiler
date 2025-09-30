@@ -475,7 +475,6 @@ impl Fabric {
                 service_id
             );
         }
-
         // TODO check that service signal wants to signal to exists?
         let svc = svc.unwrap();
         svc.client_policies.push(ClientPolicy {
