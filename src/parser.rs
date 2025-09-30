@@ -157,7 +157,7 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
         if ctx.verbose {
             println!("defined class: {} (is a {:?})", class.name, class.flavor);
             for attr in &class.with_attrs {
-                println!("  with: {}", attr);
+                println!("  with: {}", attr.to_instance_string());
             }
         }
         policy.defines.push(class);

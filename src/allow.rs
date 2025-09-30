@@ -494,7 +494,8 @@ where
                             // This is not permitted. You can only talk about endpoints in the ON clause.
                             return Err(CompilationError::AllowStmtParseError(
                                 format!(
-                                    "illegal non-endpoint attribute in service ON clause: '{domained_attr}'"
+                                    "illegal non-endpoint attribute in service ON clause: '{}'",
+                                    domained_attr.to_instance_string()
                                 ),
                                 pa_state.root_tok.line,
                                 pa_state.root_tok.col,
@@ -954,7 +955,7 @@ mod test {
                 lhs_clause
                     .with
                     .iter()
-                    .find(|a| a.to_string() == "#user.blue")
+                    .find(|a| a.to_instance_string() == "#user.blue")
                     .expect("blue tag missing from user clause");
             }
         }
@@ -969,7 +970,7 @@ mod test {
                 rhs_clause
                     .with
                     .iter()
-                    .find(|a| a.to_string() == "endpoint.level:seven")
+                    .find(|a| a.to_instance_string() == "endpoint.level:seven")
                     .expect("level:seven tag missing from service clause");
             }
         }
@@ -1005,7 +1006,7 @@ mod test {
                 lhs_clause
                     .with
                     .iter()
-                    .find(|a| a.to_string() == "#user.blue")
+                    .find(|a| a.to_instance_string() == "#user.blue")
                     .expect("blue tag missing from user clause");
             } else if lhs_clause.flavor == ClassFlavor::Endpoint {
                 // level:seven attr goes in as an endpoint attribute
@@ -1013,7 +1014,7 @@ mod test {
                 lhs_clause
                     .with
                     .iter()
-                    .find(|a| a.to_string() == "endpoint.level:seven")
+                    .find(|a| a.to_instance_string() == "endpoint.level:seven")
                     .expect("level:seven tag missing from endpoint clause");
             }
         }
@@ -1056,7 +1057,7 @@ mod test {
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "#user.blue")
+                        .find(|a| a.to_instance_string() == "#user.blue")
                         .expect("blue tag missing from user clause");
                 }
                 ClassFlavor::Endpoint => {
@@ -1065,7 +1066,7 @@ mod test {
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "endpoint.level:seven")
+                        .find(|a| a.to_instance_string() == "endpoint.level:seven")
                         .expect("level:seven tag missing from endpoint clause");
                 }
                 _ => (),
@@ -1081,7 +1082,7 @@ mod test {
                     rhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "endpoint.level:eight")
+                        .find(|a| a.to_instance_string() == "endpoint.level:eight")
                         .expect("level:eight tag missing from service clause");
                 }
                 _ => (),
@@ -1130,7 +1131,7 @@ mod test {
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "#service.blue")
+                        .find(|a| a.to_instance_string() == "#service.blue")
                         .expect(
                             format!("blue tag missing from service clause: {:?}", lhs_clause)
                                 .as_str(),
@@ -1142,7 +1143,7 @@ mod test {
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "endpoint.level:seven")
+                        .find(|a| a.to_instance_string() == "endpoint.level:seven")
                         .expect("level:seven tag missing from endpoint clause");
                 }
                 _ => (),
@@ -1159,7 +1160,7 @@ mod test {
                     rhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "endpoint.level:eight")
+                        .find(|a| a.to_instance_string() == "endpoint.level:eight")
                         .expect("level:eight tag missing from service clause");
                 }
                 _ => (),
@@ -1202,7 +1203,7 @@ mod test {
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "user.colors:{blue, red}")
+                        .find(|a| a.to_instance_string() == "user.colors:{blue, red}")
                         .expect("blue tag missing from user clause");
                 }
                 ClassFlavor::Endpoint => {
@@ -1211,7 +1212,7 @@ mod test {
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "endpoint.levels:{1, 2}")
+                        .find(|a| a.to_instance_string() == "endpoint.levels:{1, 2}")
                         .expect("level:seven tag missing from endpoint clause");
                 }
                 _ => (),
@@ -1227,7 +1228,7 @@ mod test {
                     rhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "endpoint.levels:{9, 10}")
+                        .find(|a| a.to_instance_string() == "endpoint.levels:{9, 10}")
                         .expect("level:eight tag missing from service clause");
                 }
                 _ => (),

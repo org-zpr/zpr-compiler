@@ -454,7 +454,7 @@ impl Weaver {
             if zpl_attr.is_tag() && zpl_attr.zpl_value() == zpl::KATTR_CN {
                 return Err(CompilationError::ConfigError(format!(
                     "{} attribute used as a tag, but is a tuple attribute",
-                    zpl_attr,
+                    zpl_attr.to_instance_string(),
                 )));
             }
 
@@ -506,7 +506,8 @@ impl Weaver {
                         if let Some((_svcname, attr_spec)) = found {
                             if matched {
                                 return Err(CompilationError::ConfigError(format!(
-                                    "attribute {zpl_attr} found in multiple trusted services"
+                                    "attribute {} found in multiple trusted services",
+                                    zpl_attr.to_instance_string()
                                 )));
                             }
                             let mut new_attr = zpl_attr.clone();
@@ -521,7 +522,8 @@ impl Weaver {
                     }
                     if !matched {
                         return Err(CompilationError::ConfigError(format!(
-                            "attribute {zpl_attr} not found in any trusted service"
+                            "attribute {} not found in any trusted service",
+                            zpl_attr.to_instance_string()
                         )));
                     }
                 }
@@ -1303,8 +1305,8 @@ mod test {
         assert_eq!(fsvc.fabric_id, "bas");
         let return_attrs = fsvc.returns_attrs.as_ref().unwrap();
         assert_eq!(return_attrs.len(), 2);
-        assert!(return_attrs["id"].to_string() == "user.id");
-        assert!(return_attrs["email"].to_string() == "user.email");
+        assert!(return_attrs["id"].to_schema_string() == "user.id");
+        assert!(return_attrs["email"].to_schema_string() == "user.email");
         let id_attrs = fsvc.identity_attrs.as_ref().unwrap();
         assert_eq!(id_attrs.len(), 1);
         assert!(id_attrs.contains(&String::from("id")));

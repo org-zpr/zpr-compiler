@@ -183,7 +183,7 @@ impl fmt::Display for Clause {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} with [", self.class)?;
         for attr in &self.with {
-            write!(f, " {},", attr)?;
+            write!(f, " {},", attr.to_instance_string())?;
         }
         write!(f, "]")
     }
@@ -369,32 +369,8 @@ pub enum AttrT {
     MultiValued,
 }
 
-impl fmt::Display for Attribute {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let key = format!("{}.{}", self.domain, self.name);
-        if let Some(v) = &self.values {
-            if v.is_empty() {
-                write!(f, "{key}:")?
-            } else if v.len() == 1 {
-                write!(f, "{key}:{}", v[0])?
-            } else {
-                write!(f, "{key}:{{{}}}", v.join(", "))?
-            }
-        } else if self.is_tag() {
-            write!(f, "#{}", key)?
-        } else {
-            write!(f, "{}", key)?;
-            if self.is_multi_valued() {
-                write!(f, "{}", "{}")?;
-            }
-            if self.optional {
-                write!(f, "?")?;
-            }
-        }
-        Ok(())
-    }
-}
-
+/// Strategy to use then parsing attribute names when a domain is
+/// not present.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DomainFallback {
     UseHint(AttrDomain),
@@ -416,6 +392,7 @@ pub struct TupleAttrBuilder {
     domain_fb: DomainFallback,
 }
 
+/// Used to build an attribute that holds a tag.
 impl TagAttrBuilder {
     fn new<N: Into<String>>(name: N) -> Self {
         TagAttrBuilder {
@@ -452,6 +429,7 @@ impl TagAttrBuilder {
     }
 }
 
+/// Used to build an attribute that holds a tuple that may also be multi-valued.
 impl TupleAttrBuilder {
     fn new<N: Into<String>>(name: N) -> Self {
         TupleAttrBuilder {
@@ -555,6 +533,55 @@ impl Attribute {
     /// multi-value attributes use this.
     pub fn tuple<N: Into<String>>(name: N) -> TupleAttrBuilder {
         TupleAttrBuilder::new(name)
+    }
+
+    /// String form of the attribute that also includes the schema hints like
+    /// the '{}' suffix for multi-valued and '?' for optional.
+    pub fn to_schema_string(&self) -> String {
+        let mut f = String::new();
+        let key = format!("{}.{}", self.domain, self.name);
+
+        if self.is_tag() {
+            write!(f, "#{}", key).unwrap();
+        } else if let Some(v) = &self.values {
+            if v.is_empty() {
+                write!(f, "{key}:").unwrap();
+            } else if v.len() == 1 {
+                write!(f, "{key}:{}", v[0]).unwrap();
+            } else {
+                write!(f, "{key}:{{{}}}", v.join(", ")).unwrap();
+            }
+        } else {
+            write!(f, "{}", key).unwrap();
+            if self.is_multi_valued() {
+                write!(f, "{}", "{}").unwrap();
+            }
+            if self.optional {
+                write!(f, "?").unwrap();
+            }
+        }
+        f
+    }
+
+    /// String form of the attribute without the additional schema hints.
+    pub fn to_instance_string(&self) -> String {
+        let mut f = String::new();
+        let key = format!("{}.{}", self.domain, self.name);
+        if self.is_tag() {
+            write!(f, "#{}", key).unwrap();
+        } else if let Some(v) = &self.values {
+            if v.is_empty() {
+                write!(f, "{key}:").unwrap();
+            } else if v.len() == 1 {
+                write!(f, "{key}:{}", v[0]).unwrap();
+            } else {
+                write!(f, "{key}:{{{}}}", v.join(", ")).unwrap();
+            }
+        } else {
+            // Not a tag and has no values not even empty?
+            write!(f, "{}", key).unwrap();
+        }
+        f
     }
 
     /// Special constructor for ZPR internal attributes with a single value.
@@ -741,7 +768,7 @@ mod test {
         assert_eq!(a.is_multi_valued(), false);
         assert_eq!(a.is_tag(), false);
         assert_eq!(a.optional, false);
-        assert_eq!("user.role:admin", a.to_string());
+        assert_eq!("user.role:admin", a.to_instance_string());
         assert_eq!("user.role", a.zpl_key());
         assert_eq!("admin", a.zpl_value());
     }
@@ -755,7 +782,7 @@ mod test {
         assert_eq!(a.is_multi_valued(), false);
         assert_eq!(a.is_tag(), true);
         assert_eq!(a.optional, false);
-        assert_eq!("#endpoint.hardened", a.to_string());
+        assert_eq!("#endpoint.hardened", a.to_instance_string());
         assert_eq!("endpoint.zpr.tag", a.zpl_key());
         assert_eq!("endpoint.hardened", a.zpl_value());
     }
@@ -769,7 +796,7 @@ mod test {
         assert_eq!(a.is_multi_valued(), false);
         assert_eq!(a.is_tag(), false);
         assert_eq!(a.optional, false);
-        assert_eq!("zpr.role:admin", a.to_string());
+        assert_eq!("zpr.role:admin", a.to_instance_string());
         assert_eq!("zpr.role", a.zpl_key());
         assert_eq!("admin", a.zpl_value());
     }
