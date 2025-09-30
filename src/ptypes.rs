@@ -350,14 +350,14 @@ impl AttrDomain {
     }
 }
 
-/// A ZPL attribute. Could be a tule type attibute, eg "user.role:marketing" or a
+/// A ZPL attribute. Could be a tuple type attribute, eg "user.role:marketing" or a
 /// tag type.  An attribute may be optional or required, and may be multi-valued
 /// or single-valued.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Attribute {
     domain: AttrDomain,
     name: String, // For a tag this is the tag name, else this is the attribute name.
-    pub values: Option<Vec<String>>, // For a tag, this is always None.
+    values: Option<Vec<String>>, // For a tag, this is always None.
     attr_type: AttrT,
     pub optional: bool,
 }
@@ -657,13 +657,19 @@ impl Attribute {
         self.attr_type == AttrT::MultiValued
     }
 
-    /// ## Panics
-    /// - If this is a tag.
-    pub fn set_multi_valued(&mut self) {
+    pub fn get_values(&self) -> Option<&[String]> {
+        self.values.as_deref()
+    }
+
+    pub fn set_multi_valued(&mut self) -> Result<(), AttributeError> {
         if self.is_tag() {
-            panic!("Attribute::set_multi_valued: cannot set multi-valued on a tag attribute");
+            return Err(AttributeError::InvalidOperation(format!(
+                "attempt to set tag as multi valued on {}",
+                self.zplc_key()
+            )));
         }
         self.attr_type = AttrT::MultiValued;
+        Ok(())
     }
 
     /// Parse off one the ZPR domains from the key.  Does not work with ZPR internal domain.
@@ -738,16 +744,15 @@ impl Attribute {
     /// - regular tuples look like `domain.name`
     /// - multi-valued attributes look like `domain.name{}`
     pub fn zplc_key(&self) -> String {
-        let mut f = String::new();
-        let key = format!("{}.{}", self.domain, self.name);
+        let mut result = String::new();
         if self.is_tag() {
-            write!(f, "#").unwrap();
+            result.push_str("#");
         }
-        write!(f, "{}", key).unwrap();
+        result.push_str(&format!("{}.{}", self.domain, self.name));
         if self.is_multi_valued() {
-            write!(f, "{}", "{}").unwrap();
+            result.push_str("{}");
         }
-        f
+        result
     }
 }
 
@@ -815,6 +820,15 @@ mod test {
     fn test_zplc_key_tag_attribute() {
         let a = Attribute::tag("endpoint.hardened").build().unwrap();
         assert_eq!("#endpoint.hardened", a.zplc_key());
+    }
+
+    #[test]
+    fn test_tag_representation() {
+        let a = Attribute::tag("user.red").build().unwrap();
+        assert_eq!("#user.red", a.to_instance_string());
+        assert_eq!("#user.red", a.to_schema_string());
+        assert_eq!("user.zpr.tag", a.zpl_key());
+        assert_eq!("user.red", a.zpl_value());
     }
 
     #[test]

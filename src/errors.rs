@@ -102,4 +102,7 @@ pub enum AttributeError {
 
     #[error("Invalid attribute: {0}")]
     ParseError(String),
+
+    #[error("Invalid operation: {0}")]
+    InvalidOperation(String),
 }

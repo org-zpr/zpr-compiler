@@ -513,7 +513,7 @@ impl Weaver {
                             let mut new_attr = zpl_attr.clone();
                             // If the service indicates that this attribute is multi-valued then we keep that info.
                             if attr_spec.is_multi_valued() {
-                                new_attr.set_multi_valued();
+                                new_attr.set_multi_valued()?;
                             }
                             resolved_attrs.push(new_attr);
                             self.used_trusted_services.insert(ts_name.clone());
