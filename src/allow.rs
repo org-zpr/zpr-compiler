@@ -766,7 +766,10 @@ impl PState {
                 }
                 TokenType::Tuple((name, value)) => {
                     // This is an attribute.
-                    let attr = Attribute::new_attr_domain_opt(name, value.to_vec())?;
+                    let attr = Attribute::tuple(name)
+                        .values(value.to_vec())
+                        .allow_unspecified()
+                        .build()?;
                     self.attrs.push(attr);
                     last_token = tokens.next().unwrap().clone();
                 }
@@ -787,7 +790,8 @@ impl PState {
                         self.class_name_token = Some(tok.clone());
                         last_token = tok.clone();
                     } else {
-                        self.attrs.push(Attribute::new_tag_domain_opt(s)?);
+                        self.attrs
+                            .push(Attribute::tag(s).allow_unspecified().build()?);
                         last_token = tokens.next().unwrap().clone();
                     }
                 }

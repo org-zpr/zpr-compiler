@@ -12,7 +12,7 @@ use crate::ptypes::FPos;
 pub fn vec_to_attributes(v: &[(String, String)]) -> Result<Vec<Attribute>, CompilationError> {
     let mut attrs = Vec::new();
     for (k, v) in v {
-        attrs.push(Attribute::new_single_valued(k, v)?);
+        attrs.push(Attribute::tuple(k).single().value(v).build()?);
     }
     Ok(attrs)
 }

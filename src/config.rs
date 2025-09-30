@@ -407,7 +407,7 @@ impl ConfigParse {
         if default_creates == 0 {
             let returns = HashMap::from([(
                 zpl::KATTR_CN.to_string(),
-                Attribute::attr_name_only(zpl::KATTR_CN).unwrap(),
+                Attribute::tuple(zpl::KATTR_CN).single().build().unwrap(),
             )]);
             let ts = TrustedService {
                 id: zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string(),
@@ -806,11 +806,11 @@ fn parse_attribute_mapping(mapping: &str) -> Result<(String, Attribute), Compila
     let attr_spec = parts[1].trim();
 
     let zpr_attr = if let Some(stripped) = attr_spec.strip_prefix("#") {
-        Attribute::new_tag(stripped)?
+        Attribute::tag(stripped).build()?
     } else if let Some(stripped) = attr_spec.strip_suffix("{}") {
-        Attribute::attr_name_only_multi(stripped)?
+        Attribute::tuple(stripped).multi().build()?
     } else {
-        Attribute::attr_name_only(attr_spec)?
+        Attribute::tuple(attr_spec).single().build()?
     };
 
     // In theory we can support any attribute names if they are quoted.

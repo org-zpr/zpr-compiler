@@ -239,19 +239,19 @@ where
                     ));
                 }
                 let attr = if multiple || value.len() > 1 {
-                    Attribute::new_multiple_attribute_with_domain_hint(
-                        AttrDomain::from_flavor(class.flavor),
-                        name,
-                        Some(value.clone()),
-                        optional,
-                    )?
+                    Attribute::tuple(name)
+                        .multi()
+                        .values(value.to_vec())
+                        .optional(optional)
+                        .domain_hint(AttrDomain::from_flavor(class.flavor))
+                        .build()?
                 } else {
-                    Attribute::new_single_attribute_with_domain_hint(
-                        AttrDomain::from_flavor(class.flavor),
-                        name,
-                        Some(value.clone()),
-                        optional,
-                    )?
+                    Attribute::tuple(name)
+                        .single()
+                        .values(value.to_vec())
+                        .optional(optional)
+                        .domain_hint(AttrDomain::from_flavor(class.flavor))
+                        .build()?
                 };
                 class.with_attrs.push(attr);
                 multiple = false;
@@ -266,18 +266,16 @@ where
                     ));
                 }
                 let attr = if tag || tags {
-                    Attribute::new_tag_with_domain_hint(
-                        AttrDomain::from_flavor(class.flavor),
-                        s,
-                        optional,
-                    )?
+                    Attribute::tag(s)
+                        .domain_hint(AttrDomain::from_flavor(class.flavor))
+                        .optional(optional)
+                        .build()?
                 } else {
-                    Attribute::new_blank_attribute_with_domain_hint(
-                        AttrDomain::from_flavor(class.flavor),
-                        s,
-                        multiple,
-                        optional,
-                    )?
+                    Attribute::tuple(s)
+                        .optional(optional)
+                        .domain_hint(AttrDomain::from_flavor(class.flavor))
+                        .multi_if(multiple)
+                        .build()?
                 };
                 class.with_attrs.push(attr);
                 multiple = false;

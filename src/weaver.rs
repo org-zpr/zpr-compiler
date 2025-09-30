@@ -135,10 +135,12 @@ impl Weaver {
         );
 
         // The provider of the visa service is a hardcoded CN value.
-        let vs_attrs = vec![Attribute::must_new_single_valued(
-            zpl::KATTR_CN,
-            zpl::VISA_SERVICE_CN,
-        )];
+        let vs_cn_attr = Attribute::tuple(zpl::KATTR_CN)
+            .single()
+            .value(zpl::VISA_SERVICE_CN)
+            .build()
+            .expect("invalid attribute");
+        let vs_attrs = vec![vs_cn_attr];
         let fab_svc_id = self.fabric.add_service(
             zpl::VS_SERVICE_NAME,
             &vs_protocol,
@@ -900,10 +902,12 @@ impl Weaver {
                 })?;
 
             // The visa service can access the trusted service over its vs interface.
-            let vs_access_attrs = vec![Attribute::must_new_single_valued(
-                zpl::KATTR_CN,
-                zpl::VISA_SERVICE_CN,
-            )];
+            let cn_attr = Attribute::tuple(zpl::KATTR_CN)
+                .single()
+                .value(zpl::VISA_SERVICE_CN)
+                .build()
+                .expect("invalid attribute");
+            let vs_access_attrs = vec![cn_attr];
             let pline = PLine::new_builtin(&format!(
                 "allow visa service access to trusted service {}",
                 ts_name
