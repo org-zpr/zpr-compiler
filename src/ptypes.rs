@@ -369,7 +369,7 @@ pub enum AttrT {
     MultiValued,
 }
 
-/// Strategy to use then parsing attribute names when a domain is
+/// Strategy to use when parsing attribute names and a domain is
 /// not present.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DomainFallback {

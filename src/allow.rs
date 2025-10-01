@@ -1198,22 +1198,20 @@ mod test {
         for lhs_clause in clause.client {
             match lhs_clause.flavor {
                 ClassFlavor::User => {
-                    // Blue tag goes on user.
                     matched_user = true;
                     lhs_clause
                         .with
                         .iter()
                         .find(|a| a.to_instance_string() == "user.colors:{blue, red}")
-                        .expect("blue tag missing from user clause");
+                        .expect("colors{blue,red} missing from user clause");
                 }
                 ClassFlavor::Endpoint => {
-                    // level:seven attr goes in as an endpoint attribute
                     matched_endpoint = true;
                     lhs_clause
                         .with
                         .iter()
                         .find(|a| a.to_instance_string() == "endpoint.levels:{1, 2}")
-                        .expect("level:seven tag missing from endpoint clause");
+                        .expect("levels{1,2} missing from endpoint clause");
                 }
                 _ => (),
             }
@@ -1229,7 +1227,7 @@ mod test {
                         .with
                         .iter()
                         .find(|a| a.to_instance_string() == "endpoint.levels:{9, 10}")
-                        .expect("level:eight tag missing from service clause");
+                        .expect("levels{9,10} missing from service clause");
                 }
                 _ => (),
             }
