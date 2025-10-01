@@ -962,6 +962,11 @@ fn warn_unknown_prot_property(prot: &Table, ctx: &CompilationCtx) -> Result<(), 
 }
 
 /// Parse the "port" value, if not found or invalid return an error.
+/// Valid port format is:
+/// - single port number, eg `port = 80`
+/// - comma separated list of port numbers, eg `port = "22,80,443"`
+/// - range of port numbers, eg `port = "8000-9000"`
+/// - comma separated mix of the above (eg, `port = "22,80,443,8000-9000"`)
 fn parse_tcp_udp_ports(ctx: &str, tab: &Table) -> Result<Vec<PortSpec>, CompilationError> {
     let ps_strv = if tab.contains_key("port") {
         if tab["port"].is_str() {
@@ -1672,6 +1677,169 @@ mod test {
         assert!(result.is_err());
         if let Err(CompilationError::ConfigError(msg)) = result {
             assert!(msg.contains("invalid attribute mapping"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_single_port() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String("80".to_string()));
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], crate::protocols::PortSpec::Single(80));
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_single_port_integer() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::Integer(443));
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], crate::protocols::PortSpec::Single(443));
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_multiple_ports() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String("80,443,8080".to_string()));
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 3);
+        assert_eq!(ports[0], crate::protocols::PortSpec::Single(80));
+        assert_eq!(ports[1], crate::protocols::PortSpec::Single(443));
+        assert_eq!(ports[2], crate::protocols::PortSpec::Single(8080));
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_port_range() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String("8000-9000".to_string()));
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], crate::protocols::PortSpec::Range(8000, 9000));
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_mixed_ports_and_ranges() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String("22,80,8000-8999,443".to_string()));
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 4);
+        assert_eq!(ports[0], crate::protocols::PortSpec::Single(22));
+        assert_eq!(ports[1], crate::protocols::PortSpec::Single(80));
+        assert_eq!(ports[2], crate::protocols::PortSpec::Range(8000, 8999));
+        assert_eq!(ports[3], crate::protocols::PortSpec::Single(443));
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_with_spaces() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String(" 80 , 443 , 8080 ".to_string()));
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 3);
+        assert_eq!(ports[0], crate::protocols::PortSpec::Single(80));
+        assert_eq!(ports[1], crate::protocols::PortSpec::Single(443));
+        assert_eq!(ports[2], crate::protocols::PortSpec::Single(8080));
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_missing_port() {
+        let table = Table::new(); // Empty table, no port key
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("protocol test-protocol missing port"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_invalid_port_number() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String("invalid".to_string()));
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("protocol test-protocol invalid port specification"));
+            assert!(msg.contains("invalid"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_invalid_port_range() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String("8000-7000".to_string())); // Invalid range (start > end)
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("protocol test-protocol invalid port specification"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_zero_port() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String("0".to_string()));
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("protocol test-protocol invalid port specification"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_port_too_high() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String("65536".to_string())); // Port out of range
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("protocol test-protocol invalid port specification"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_malformed_range() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String("8000-8500-9000".to_string())); // Too many dashes
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("protocol test-protocol invalid port specification"));
         } else {
             panic!("Expected ConfigError");
         }
