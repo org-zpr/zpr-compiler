@@ -172,21 +172,15 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                 );
             }
 
-            if let Some((l7p, port)) = svc.get_l7protocol_and_port() {
-                self.policy_writer.write_trusted_service(
-                    &canonical_svc_id,
-                    TSType::VsAuth,
-                    None,                                       // query uri
-                    Some(&format!("{}://[::1]:{}", l7p, port)), // validate uri
-                    svc.returns_attrs.as_ref(),
-                    svc.identity_attrs.as_ref(),
-                );
-            } else {
-                return Err(CompilationError::ConfigError(format!(
-                    "trusted service {}: must have single port number",
-                    svc.config_id
-                )));
-            }
+            let (l7p, port) = svc.get_l7protocol_and_port()?;
+            self.policy_writer.write_trusted_service(
+                &canonical_svc_id,
+                TSType::VsAuth,
+                None,                                       // query uri
+                Some(&format!("{}://[::1]:{}", l7p, port)), // validate uri
+                svc.returns_attrs.as_ref(),
+                svc.identity_attrs.as_ref(),
+            );
 
             // The adapter facing auth service (if present) we register as a new-style "authentication" service.
             if let Some(asvc) = fabric.get_service(svc.client_service_name.as_ref().unwrap()) {
@@ -198,21 +192,15 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                     );
                 }
                 let canonical_asvc_id = self.get_canonical_service_name(&asvc.config_id);
-                if let Some((l7p, port)) = asvc.get_l7protocol_and_port() {
-                    self.policy_writer.write_trusted_service(
-                        &canonical_asvc_id,
-                        TSType::ActorAuth,
-                        None, // query uri
-                        Some(&format!("{}://[::1]:{}", l7p, port)),
-                        None, // not set for adapter facing
-                        None, // not set for adapter facing
-                    );
-                } else {
-                    return Err(CompilationError::ConfigError(format!(
-                        "authentication service {}: must have single port number",
-                        asvc.config_id
-                    )));
-                }
+                let (l7p, port) = asvc.get_l7protocol_and_port()?;
+                self.policy_writer.write_trusted_service(
+                    &canonical_asvc_id,
+                    TSType::ActorAuth,
+                    None, // query uri
+                    Some(&format!("{}://[::1]:{}", l7p, port)),
+                    None, // not set for adapter facing
+                    None, // not set for adapter facing
+                );
             } else {
                 // Not found. This means that either the service has no adapter facing offering
                 // (ie, it is a query only service). Or the user did not add any ZPL allowing

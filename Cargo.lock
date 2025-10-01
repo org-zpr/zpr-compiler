@@ -912,7 +912,7 @@ checksum = "21a0236b59786fed61e2a80582dd500fe61f18b5dca67a4a067d0bc9039339cf"
 
 [[package]]
 name = "zplc"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "base64",
  "bytes",

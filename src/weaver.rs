@@ -10,7 +10,7 @@ use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
 use crate::fabric::{Fabric, PLine, ServiceType};
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
-use crate::protocols::{IanaProtocol, Protocol, ZPR_OAUTH_RSA, ZPR_VALIDATION_2};
+use crate::protocols::{PortSpec, Protocol, ZPR_OAUTH_RSA, ZPR_VALIDATION_2};
 use crate::ptypes::{AllowClause, Attribute, Class, ClassFlavor, FPos, Policy};
 use crate::zpl;
 
@@ -128,11 +128,10 @@ impl Weaver {
         config: &ConfigApi,
         ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
-        let vs_protocol = Protocol::new_l4_with_port(
-            "zpr-vs".to_string(),
-            IanaProtocol::TCP,
-            zpl::VISA_SERVICE_PORT.to_string(),
-        );
+        let vs_protocol = Protocol::tcp("zpr-vs")
+            .add_port(PortSpec::Single(zpl::VISA_SERVICE_PORT))
+            .build()
+            .unwrap();
 
         // The provider of the visa service is a hardcoded CN value.
         let vs_cn_attr = Attribute::tuple(zpl::KATTR_CN)
@@ -163,11 +162,10 @@ impl Weaver {
         )?;
 
         // Now add a service for the admin HTTPS API.
-        let admin_api_protocol = Protocol::new_l4_with_port(
-            "zpr-vsadmin".to_string(),
-            IanaProtocol::TCP,
-            zpl::VISA_SERVICE_ADMIN_PORT.to_string(),
-        );
+        let admin_api_protocol = Protocol::tcp("zpr-vsadmin")
+            .add_port(PortSpec::Single(zpl::VISA_SERVICE_ADMIN_PORT))
+            .build()
+            .unwrap();
 
         // This AMIN service is provided by the visa service too.
         let fab_admin_svc_id = self.fabric.add_builtin_service(
@@ -314,7 +312,7 @@ impl Weaver {
         // service must have a protocol
         let prot = match config.get(&format!("/services/{}/protocol", matched_service_name)) {
             Some(citem) => match &citem {
-                ConfigItem::Protocol(_, _, _) => Protocol::from(citem),
+                ConfigItem::Protocol(_, _, _) => citem.try_into_protocol()?,
                 _ => {
                     panic!("error: protocol must be a protocol enum");
                 }
@@ -963,7 +961,7 @@ impl Weaver {
             // service must have a protocol
             let prot = match config.get(&format!("/services/{svc_name}/protocol")) {
                 Some(citem) => match &citem {
-                    ConfigItem::Protocol(_, _, _) => Protocol::from(citem),
+                    ConfigItem::Protocol(_, _, _) => citem.try_into_protocol()?,
                     _ => {
                         panic!("error: protocol must be a protocol enum");
                     }
