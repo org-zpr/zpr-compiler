@@ -1709,7 +1709,10 @@ mod test {
     #[test]
     fn test_parse_tcp_udp_ports_multiple_ports() {
         let mut table = Table::new();
-        table.insert("port".to_string(), toml::Value::String("80,443,8080".to_string()));
+        table.insert(
+            "port".to_string(),
+            toml::Value::String("80,443,8080".to_string()),
+        );
 
         let result = parse_tcp_udp_ports("test-protocol", &table);
         assert!(result.is_ok());
@@ -1723,7 +1726,10 @@ mod test {
     #[test]
     fn test_parse_tcp_udp_ports_port_range() {
         let mut table = Table::new();
-        table.insert("port".to_string(), toml::Value::String("8000-9000".to_string()));
+        table.insert(
+            "port".to_string(),
+            toml::Value::String("8000-9000".to_string()),
+        );
 
         let result = parse_tcp_udp_ports("test-protocol", &table);
         assert!(result.is_ok());
@@ -1735,7 +1741,10 @@ mod test {
     #[test]
     fn test_parse_tcp_udp_ports_mixed_ports_and_ranges() {
         let mut table = Table::new();
-        table.insert("port".to_string(), toml::Value::String("22,80,8000-8999,443".to_string()));
+        table.insert(
+            "port".to_string(),
+            toml::Value::String("22,80,8000-8999,443".to_string()),
+        );
 
         let result = parse_tcp_udp_ports("test-protocol", &table);
         assert!(result.is_ok());
@@ -1750,7 +1759,10 @@ mod test {
     #[test]
     fn test_parse_tcp_udp_ports_with_spaces() {
         let mut table = Table::new();
-        table.insert("port".to_string(), toml::Value::String(" 80 , 443 , 8080 ".to_string()));
+        table.insert(
+            "port".to_string(),
+            toml::Value::String(" 80 , 443 , 8080 ".to_string()),
+        );
 
         let result = parse_tcp_udp_ports("test-protocol", &table);
         assert!(result.is_ok());
@@ -1777,7 +1789,10 @@ mod test {
     #[test]
     fn test_parse_tcp_udp_ports_invalid_port_number() {
         let mut table = Table::new();
-        table.insert("port".to_string(), toml::Value::String("invalid".to_string()));
+        table.insert(
+            "port".to_string(),
+            toml::Value::String("invalid".to_string()),
+        );
 
         let result = parse_tcp_udp_ports("test-protocol", &table);
         assert!(result.is_err());
@@ -1792,7 +1807,10 @@ mod test {
     #[test]
     fn test_parse_tcp_udp_ports_invalid_port_range() {
         let mut table = Table::new();
-        table.insert("port".to_string(), toml::Value::String("8000-7000".to_string())); // Invalid range (start > end)
+        table.insert(
+            "port".to_string(),
+            toml::Value::String("8000-7000".to_string()),
+        ); // Invalid range (start > end)
 
         let result = parse_tcp_udp_ports("test-protocol", &table);
         assert!(result.is_err());
@@ -1834,7 +1852,10 @@ mod test {
     #[test]
     fn test_parse_tcp_udp_ports_malformed_range() {
         let mut table = Table::new();
-        table.insert("port".to_string(), toml::Value::String("8000-8500-9000".to_string())); // Too many dashes
+        table.insert(
+            "port".to_string(),
+            toml::Value::String("8000-8500-9000".to_string()),
+        ); // Too many dashes
 
         let result = parse_tcp_udp_ports("test-protocol", &table);
         assert!(result.is_err());
