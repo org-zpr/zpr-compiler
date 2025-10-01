@@ -9,7 +9,7 @@ use std::net::Ipv6Addr;
 use crate::config_api::{ConfigApi, ConfigItem};
 use crate::errors::CompilationError;
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
-use crate::protocols::{IanaProtocol, Protocol};
+use crate::protocols::{PortSpec, Protocol};
 use crate::ptypes::{Attribute, FPos, Signal};
 use crate::zpl;
 
@@ -436,11 +436,11 @@ impl Fabric {
                 &svc_name
             )));
         }
-        let vss_prot = Protocol::new_l4_with_port(
-            "zpr-vss".to_string(),
-            IanaProtocol::TCP,
-            format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT),
-        );
+
+        let vss_prot = Protocol::tcp("zpr-vss")
+            .add_port(PortSpec::Single(zpl::VISA_SUPPORT_SEVICE_PORT))
+            .build()
+            .unwrap();
         let vss_id = self.add_builtin_service(&svc_name, &vss_prot, &provider_attrs)?;
         let pline = PLine::new_builtin("allow visa service to access node visa support");
         self.add_condition_to_service(
@@ -536,6 +536,7 @@ impl FabricService {
 
     /// Treat the layer4 protocol port value as a single port number.
     /// If we find that we return it, else None.
+    /* XXX REMOVE/
     pub fn get_port(&self) -> Option<u16> {
         if let Some(ref p) = self.protocol {
             if !p.has_port() {
@@ -549,28 +550,43 @@ impl FabricService {
         }
         None
     }
+    */
 
-    pub fn get_l7protocol_and_port(&self) -> Option<(String, u16)> {
-        if let Some(ref p) = self.protocol {
-            if !p.has_port() {
-                return None;
-            }
-
-            let port = if let Some(pstr) = p.get_port() {
-                if let Ok(pnum) = pstr.parse::<u16>() {
-                    pnum
-                } else {
-                    0
-                }
-            } else {
-                0
-            };
-            if let Some(l7p) = p.get_layer7() {
-                return Some((l7p.to_string(), port));
-            } else if port > 0 {
-                return Some((String::new(), port));
-            }
+    /// Expect that this service has a L7 protocol name and
+    /// a single port.  If that is true, return (L7 protocol name, port)
+    /// else return error.
+    pub fn get_l7protocol_and_port(&self) -> Result<(String, u16), CompilationError> {
+        let p = self.protocol.as_ref().ok_or_else(|| {
+            CompilationError::ConfigError(format!(
+                "Service {} does not have a protocol",
+                self.fabric_id
+            ))
+        })?;
+        if !p.has_port() {
+            return Err(CompilationError::ConfigError(format!(
+                "Service {} does not have a port",
+                self.fabric_id
+            )));
         }
-        None
+        let l7name = p.get_layer7().ok_or_else(|| {
+            CompilationError::ConfigError(format!(
+                "Service {} does not have a layer 7 protocol",
+                self.fabric_id
+            ))
+        })?;
+        let pslist = p.get_port().unwrap();
+        if pslist.len() != 1 {
+            return Err(CompilationError::ConfigError(format!(
+                "Service {} does not have a single port",
+                self.fabric_id
+            )));
+        }
+        match pslist[0] {
+            PortSpec::Single(pnum) => Ok((l7name.to_string(), pnum)),
+            _ => Err(CompilationError::ConfigError(format!(
+                "Service {} does not have a single port",
+                self.fabric_id
+            ))),
+        }
     }
 }

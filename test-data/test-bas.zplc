@@ -37,16 +37,20 @@ port = 80
 
 [services.server]
 protocol = "http"
+port = "80, 8080, 9090"
 
 [services.Image-database]
 protocol = "http"
+port = "6000-6100"
 
 [services.database]
 protocol = "http"
+port = "80, 100-150, 444"
 
 
 [services.gateway]
 protocol = "http"
+port = "80, 443, 8080, 8083, 30000-31000"
 
 [services.bas-vs]
 protocol = "zpr-validation2"

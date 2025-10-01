@@ -12,7 +12,7 @@ use crate::config::{self, Config};
 use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, load_asn1data_from_pem, load_rsa_public_key};
 use crate::errors::CompilationError;
-use crate::protocols::{IanaProtocol, IcmpFlowType, Protocol};
+use crate::protocols::{IanaProtocol, IcmpFlowType, PortSpec, Protocol};
 use crate::ptypes::Attribute;
 
 /// ConfigApi wraps a pseudo RESTFUL api around the config data.
@@ -36,14 +36,68 @@ pub enum PortArgT {
     /// A range of TCP/UDP ports (lo, high) inclusive
     PortRange(u16, u16),
 
-    /// A list of TCP/UDP ports
-    PortList(Vec<u16>),
+    /// A list of Port and/or PortRange
+    PortList(Vec<Box<PortArgT>>),
 
     /// List of permissible ICMP codes
     ICMPOneShot(Vec<u8>),
 
     /// Pair of ICMP codes (request, reply)
     ICMPReqRep(u8, u8),
+}
+
+impl From<PortSpec> for PortArgT {
+    fn from(ps: PortSpec) -> Self {
+        match ps {
+            PortSpec::Single(p) => PortArgT::Port(p),
+            PortSpec::Range(lo, hi) => PortArgT::PortRange(lo, hi),
+        }
+    }
+}
+
+impl From<IcmpFlowType> for PortArgT {
+    fn from(ft: IcmpFlowType) -> Self {
+        match ft {
+            IcmpFlowType::OneShot(codes) => PortArgT::ICMPOneShot(codes),
+            IcmpFlowType::RequestResponse(req, rep) => PortArgT::ICMPReqRep(req, rep),
+        }
+    }
+}
+
+impl fmt::Display for PortArgT {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PortArgT::Port(p) => write!(f, "{}", p),
+            PortArgT::PortRange(lo, hi) => write!(f, "{}-{}", lo, hi),
+            PortArgT::PortList(pl) => {
+                let mut first = true;
+                write!(f, "[")?;
+                for p in pl {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", p)?;
+                }
+                write!(f, "]")
+            }
+            PortArgT::ICMPOneShot(codes) => {
+                let mut first = true;
+                write!(f, "[")?;
+                for c in codes {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", c)?;
+                }
+                write!(f, "]")
+            }
+            PortArgT::ICMPReqRep(req, rep) => write!(f, "{}-{}", req, rep),
+        }
+    }
 }
 
 /// The config API return values.
@@ -115,65 +169,30 @@ impl fmt::Display for ConfigItem {
                 write!(f, "]")
             }
             ConfigItem::NetAddr(host, port) => write!(f, "{}:{}", host, port),
-            ConfigItem::Protocol(name, prot, ports) => {
-                write!(f, "{}: {} ", name, prot)?;
-                match ports {
-                    PortArgT::Port(p) => write!(f, "{}", p),
-                    PortArgT::PortRange(p1, p2) => write!(f, "{}-{}", p1, p2),
-                    PortArgT::PortList(pl) => {
-                        let mut first = true;
-                        write!(f, "[")?;
-                        for p in pl {
-                            if first {
-                                first = false;
-                            } else {
-                                write!(f, ", ")?;
-                            }
-                            write!(f, "{}", p)?;
-                        }
-                        write!(f, "]")
-                    }
-                    PortArgT::ICMPOneShot(codes) => {
-                        let mut first = true;
-                        write!(f, "[")?;
-                        for c in codes {
-                            if first {
-                                first = false;
-                            } else {
-                                write!(f, ", ")?;
-                            }
-                            write!(f, "{}", c)?;
-                        }
-                        write!(f, "]")
-                    }
-                    PortArgT::ICMPReqRep(req, rep) => write!(f, "{}-{}", req, rep),
-                }
-            }
+            ConfigItem::Protocol(name, prot, ports) => write!(f, "{}: {} {}", name, prot, ports),
         }
     }
 }
 
-impl From<ConfigItem> for Protocol {
-    fn from(item: ConfigItem) -> Self {
-        return Protocol::from(&item);
-    }
-}
-
-impl From<&ConfigItem> for Protocol {
-    fn from(item: &ConfigItem) -> Self {
-        match item {
-            // TODO: ConfigItem is missing the layer7 value
+impl ConfigItem {
+    /// The [ConfigItem::Protocol] is supposed to be holding a [Protocol]. This
+    /// functions attepts to map the config item back into the protocol.
+    pub fn try_into_protocol(self) -> Result<Protocol, CompilationError> {
+        match self {
             ConfigItem::Protocol(name, prot, port_t) => {
                 let (port_arg, icmp_arg) = match port_t {
-                    PortArgT::Port(pnum) => (Some(pnum.to_string()), None),
-                    PortArgT::PortRange(low, hi) => (Some(format!("{}-{}", low, hi)), None),
+                    PortArgT::Port(pnum) => (Some(vec![PortSpec::Single(pnum)]), None),
+                    PortArgT::PortRange(low, hi) => (Some(vec![PortSpec::Range(low, hi)]), None),
                     PortArgT::PortList(plist) => (
                         Some(
                             plist
                                 .iter()
-                                .map(|n| n.to_string())
-                                .collect::<Vec<String>>()
-                                .join(","),
+                                .map(|n| match **n {
+                                    PortArgT::Port(p) => PortSpec::Single(p),
+                                    PortArgT::PortRange(lo, hi) => PortSpec::Range(lo, hi),
+                                    _ => panic!("invalid port spec in PortList"),
+                                })
+                                .collect::<Vec<PortSpec>>(),
                         ),
                         None,
                     ),
@@ -181,17 +200,71 @@ impl From<&ConfigItem> for Protocol {
                         (None, Some(IcmpFlowType::OneShot(codes.clone())))
                     }
                     PortArgT::ICMPReqRep(req, resp) => {
-                        (None, Some(IcmpFlowType::RequestResponse(*req, *resp)))
+                        (None, Some(IcmpFlowType::RequestResponse(req, resp)))
                     }
                 };
-                if port_arg.is_some() {
-                    Protocol::new_l4_with_port(name.clone(), *prot, port_arg.unwrap())
-                // todo -- use TryFrom instead?
+
+                if let Some(pspecs) = port_arg {
+                    match prot {
+                        IanaProtocol::TCP => {
+                            Ok(Protocol::tcp(name).add_ports(pspecs).build().unwrap())
+                        }
+                        IanaProtocol::UDP => {
+                            Ok(Protocol::udp(name).add_ports(pspecs).build().unwrap())
+                        }
+                        _ => Err(CompilationError::ConfigError(
+                            "has port specs but not TCP/UDP".to_string(),
+                        )),
+                    }
                 } else {
-                    Protocol::new_l4_with_icmp(name.clone(), *prot, icmp_arg.unwrap())
+                    if let Some(ft) = icmp_arg {
+                        match prot {
+                            IanaProtocol::ICMP => Ok(Protocol::icmp4(name, ft).build().unwrap()),
+                            IanaProtocol::ICMPv6 => Ok(Protocol::icmp6(name, ft).build().unwrap()),
+                            _ => Err(CompilationError::ConfigError(
+                                "has icmp arg but not ICMP protocol".to_string(),
+                            )),
+                        }
+                    } else {
+                        Err(CompilationError::ConfigError(
+                            "protocol config item has neither port nor icmp arg".to_string(),
+                        ))
+                    }
                 }
             }
-            _ => panic!("ConfigItem is not a protocol"),
+            _ => Err(CompilationError::ConfigError(format!(
+                "not a protocol: {self:?}"
+            ))),
+        }
+    }
+
+    /// Create a [ConfigItem::Protocol] from a [Protocol]
+    fn from_protocol(prot: &Protocol) -> ConfigItem {
+        match prot.get_layer4() {
+            IanaProtocol::TCP | IanaProtocol::UDP => {
+                let parg: PortArgT;
+
+                let pspec_list = prot.get_port().unwrap();
+                if pspec_list.len() > 1 {
+                    let mut arglist = Vec::new();
+                    for pspec in pspec_list {
+                        let parg = PortArgT::from(pspec.clone());
+                        arglist.push(Box::new(parg));
+                    }
+                    parg = PortArgT::PortList(arglist);
+                } else {
+                    parg = PortArgT::from(pspec_list[0].clone());
+                }
+                ConfigItem::Protocol(prot.get_label().to_string(), prot.get_layer4(), parg)
+            }
+            IanaProtocol::ICMP | IanaProtocol::ICMPv6 => {
+                let flowtype = prot.get_icmp().unwrap();
+                ConfigItem::Protocol(
+                    prot.get_label().to_string(),
+                    prot.get_layer4(),
+                    PortArgT::from(flowtype.clone()),
+                )
+            }
         }
     }
 }
@@ -434,48 +507,9 @@ impl ConfigApi {
                 };
                 let mut prot = prot.clone();
                 if let Some(refinement) = svc.protocol_refinement.as_ref() {
-                    refinement.apply(&mut prot);
+                    refinement.apply(&mut prot).unwrap();
                 }
-                match prot.get_layer4() {
-                    IanaProtocol::TCP | IanaProtocol::UDP => {
-                        // TODO: The config should parse out the port. For now we only accept single port number.
-                        let Some(pstr) = prot.get_port() else {
-                            panic!(
-                                "port not set for service {}, protocol {}",
-                                svc.id, svc.protocol_id
-                            );
-                        };
-                        // TODO: This error should be caught in config parser
-                        let portnum = pstr.parse::<u16>().unwrap_or_else(|_| {
-                            panic!("failed to parse port number for serrvice {}", svc.id)
-                        });
-                        Some(ConfigItem::Protocol(
-                            svc.id.clone(),
-                            prot.get_layer4(),
-                            PortArgT::Port(portnum),
-                        ))
-                    }
-                    IanaProtocol::ICMP | IanaProtocol::ICMPv6 => {
-                        let Some(flowtype) = prot.get_icmp() else {
-                            panic!(
-                                "flowtype not set for service {}, protocol {}",
-                                svc.id, svc.protocol_id
-                            );
-                        };
-                        match flowtype {
-                            IcmpFlowType::RequestResponse(req, rep) => Some(ConfigItem::Protocol(
-                                svc.id.clone(),
-                                prot.get_layer4(),
-                                PortArgT::ICMPReqRep(*req, *rep),
-                            )),
-                            IcmpFlowType::OneShot(codes) => Some(ConfigItem::Protocol(
-                                svc.id.clone(),
-                                prot.get_layer4(),
-                                PortArgT::ICMPOneShot(codes.clone()),
-                            )),
-                        }
-                    }
-                }
+                Some(ConfigItem::from_protocol(&prot))
             }
             _ => panic!("unknown key {}", key),
         }
@@ -792,5 +826,38 @@ mod test {
             }
             _ => panic!("expected a BytesB64"),
         }
+    }
+
+    #[test]
+    fn test_convert_to_from_protocol() {
+        let proto = Protocol::tcp("foo")
+            .add_ports(vec![PortSpec::Single(21), PortSpec::Range(1000, 2000)])
+            .build()
+            .unwrap();
+        let item = ConfigItem::from_protocol(&proto);
+        let reconstituted = item.try_into_protocol().unwrap();
+        assert_eq!(proto, reconstituted);
+
+        let proto = Protocol::icmp6("bar", IcmpFlowType::OneShot(vec![1, 2, 3]))
+            .build()
+            .unwrap();
+        let item = ConfigItem::from_protocol(&proto);
+        let reconstituted = item.try_into_protocol().unwrap();
+        assert_eq!(proto, reconstituted);
+    }
+
+    #[test]
+    fn test_convert_to_from_protocol_lossy_l7() {
+        let proto = Protocol::udp("fee")
+            .add_port(PortSpec::Single(100))
+            .layer7(String::from("heehaw"))
+            .build()
+            .unwrap();
+        let item = ConfigItem::from_protocol(&proto);
+        let reconstituted = item.try_into_protocol().unwrap();
+        assert_ne!(proto, reconstituted);
+        assert_eq!(proto.get_layer7(), Some(&String::from("heehaw")));
+        assert_eq!(reconstituted.get_layer7(), None);
+        // TODO: Fix this.  We should be able to pass layer7 value across the config-api too.
     }
 }

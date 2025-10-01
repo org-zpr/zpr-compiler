@@ -7,7 +7,7 @@ use crate::compiler::get_compiler_version;
 use crate::errors::CompilationError;
 use crate::fabric::ServiceType; // TODO: remove refs to fabric
 use crate::policywriter::{PFlags, PolicyContainer, PolicyWriter, TSType};
-use crate::protocols::{IcmpFlowType, Protocol};
+use crate::protocols::{IcmpFlowType, PortSpec, Protocol, ProtocolDetails};
 use crate::ptypes;
 use crate::ptypes::Attribute;
 use crate::zpl;
@@ -250,9 +250,32 @@ impl PolicyBinaryV1 {
 
         let parg: polio::scope::Protarg;
 
-        match &svc_prot.get_icmp() {
-            Some(icmp) => {
-                let picmp = match icmp {
+        match svc_prot.get_details() {
+            ProtocolDetails::TcpUdp(specs) => {
+                let mut pspec = polio::PortSpecList { spec: Vec::new() };
+                for spec in specs {
+                    match spec {
+                        PortSpec::Single(pnum) => {
+                            let pps = polio::PortSpec {
+                                parg: Some(polio::port_spec::Parg::Port(*pnum as u32)),
+                            };
+                            pspec.spec.push(pps);
+                        }
+                        PortSpec::Range(low, hi) => {
+                            let pps = polio::PortSpec {
+                                parg: Some(polio::port_spec::Parg::Pr(polio::PortRange {
+                                    low: *low as u32,
+                                    high: *hi as u32,
+                                })),
+                            };
+                            pspec.spec.push(pps);
+                        }
+                    }
+                }
+                parg = polio::scope::Protarg::Pspec(pspec);
+            }
+            ProtocolDetails::Icmp(ft) => {
+                let picmp = match ft {
                     IcmpFlowType::OneShot(codes) => {
                         let pcodes = codes.iter().map(|c| *c as u32).collect();
                         polio::Icmp {
@@ -270,30 +293,7 @@ impl PolicyBinaryV1 {
                 };
                 parg = polio::scope::Protarg::Icmp(picmp);
             }
-            None => {
-                match &svc_prot.get_port() {
-                    Some(port_str) => {
-                        let port_num: u16 = match port_str.parse() {
-                            Ok(n) => n,
-                            Err(_) => {
-                                panic!("service with invalid port number: {}", port_str);
-                            }
-                        };
-                        let pspec = polio::PortSpecList {
-                            spec: vec![polio::PortSpec {
-                                parg: Some(polio::port_spec::Parg::Port(port_num as u32)),
-                            }],
-                        };
-                        parg = polio::scope::Protarg::Pspec(pspec);
-                    }
-                    None => {
-                        // TODO: Catch this earlier when we revamp port parsing.
-                        panic!("service protocol must be ICMP or have a valid port");
-                    }
-                }
-            }
         }
-
         let scope = polio::Scope {
             protocol: svc_prot.get_layer4().into(),
             protarg: Some(parg),
