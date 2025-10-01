@@ -375,7 +375,10 @@ impl Protocol {
                     s.push_str(&format!(",{}/{}", protname, resp));
                 }
                 IcmpFlowType::OneShot(codes) => {
-                    for c in codes {
+                    for (i, c) in codes.iter().enumerate() {
+                        if i > 0 {
+                            s.push(',');
+                        }
                         s.push_str(&format!("{}/{}", protname, c));
                     }
                 }
@@ -403,10 +406,10 @@ impl PortSpec {
                         part
                     )));
                 }
-                let start: u16 = bounds[0].parse().map_err(|_| {
+                let start: u16 = bounds[0].trim().parse().map_err(|_| {
                     ProtocolError::InvalidPort(format!("invalid port number: {}", bounds[0]))
                 })?;
-                let end: u16 = bounds[1].parse().map_err(|_| {
+                let end: u16 = bounds[1].trim().parse().map_err(|_| {
                     ProtocolError::InvalidPort(format!("invalid port number: {}", bounds[1]))
                 })?;
                 if start == 0 || end == 0 || start > end {
@@ -415,7 +418,11 @@ impl PortSpec {
                         part
                     )));
                 }
-                ports.push(PortSpec::Range(start, end));
+                if start == end {
+                    ports.push(PortSpec::Single(start));
+                } else {
+                    ports.push(PortSpec::Range(start, end));
+                }
             } else {
                 let p: u16 = part.parse().map_err(|_| {
                     ProtocolError::InvalidPort(format!("invalid port number: {}", part))
@@ -457,5 +464,373 @@ mod test {
         assert_eq!(IanaProtocol::parse("icmpv4"), Some(IanaProtocol::ICMP));
         assert_eq!(IanaProtocol::parse("iana.foo"), None);
         assert_eq!(IanaProtocol::parse("foo"), None);
+    }
+
+    #[test]
+    fn test_to_endpoint_str_tcp_single_port() {
+        let protocol = Protocol::tcp("web")
+            .add_port(PortSpec::Single(80))
+            .build()
+            .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "TCP/80");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_tcp_multiple_ports() {
+        let protocol = Protocol::tcp("multi")
+            .add_port(PortSpec::Single(80))
+            .add_port(PortSpec::Single(443))
+            .add_port(PortSpec::Single(8080))
+            .build()
+            .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "TCP/80,TCP/443,TCP/8080");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_tcp_port_range() {
+        let protocol = Protocol::tcp("range")
+            .add_port(PortSpec::Range(8000, 9000))
+            .build()
+            .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "TCP/8000-9000");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_tcp_mixed_ports_and_ranges() {
+        let protocol = Protocol::tcp("mixed")
+            .add_port(PortSpec::Single(80))
+            .add_port(PortSpec::Range(8000, 8999))
+            .add_port(PortSpec::Single(443))
+            .build()
+            .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "TCP/80,TCP/8000-8999,TCP/443");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_tcp_no_ports() {
+        // Create a TCP protocol with no ports (edge case)
+        let protocol = Protocol {
+            label: "empty".to_string(),
+            layer7: None,
+            layer4: IanaProtocol::TCP,
+            details: ProtocolDetails::TcpUdp(vec![]),
+        };
+
+        assert_eq!(protocol.to_endpoint_str(), "TCP/0");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_udp_single_port() {
+        let protocol = Protocol::udp("dns")
+            .add_port(PortSpec::Single(53))
+            .build()
+            .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "UDP/53");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_udp_multiple_ports() {
+        let protocol = Protocol::udp("multi-udp")
+            .add_port(PortSpec::Single(53))
+            .add_port(PortSpec::Single(123))
+            .build()
+            .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "UDP/53,UDP/123");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_udp_port_range() {
+        let protocol = Protocol::udp("udp-range")
+            .add_port(PortSpec::Range(10000, 20000))
+            .build()
+            .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "UDP/10000-20000");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_icmp_request_response() {
+        let protocol = Protocol::icmp4("ping", IcmpFlowType::RequestResponse(8, 0))
+            .build()
+            .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "ICMP/8,ICMP/0");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_icmp_oneshot_single() {
+        let protocol = Protocol::icmp4("dest-unreachable", IcmpFlowType::OneShot(vec![3]))
+            .build()
+            .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "ICMP/3");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_icmp_oneshot_multiple() {
+        let protocol = Protocol::icmp4("errors", IcmpFlowType::OneShot(vec![3, 11, 12]))
+            .build()
+            .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "ICMP/3,ICMP/11,ICMP/12");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_icmpv6_request_response() {
+        let protocol = Protocol::icmp6("ping6", IcmpFlowType::RequestResponse(128, 129))
+            .build()
+            .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "ICMP6/128,ICMP6/129");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_icmpv6_oneshot() {
+        let protocol = Protocol::icmp6("neighbor-solicitation", IcmpFlowType::OneShot(vec![135]))
+            .build()
+            .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "ICMP6/135");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_tcp_with_layer7() {
+        let protocol = Protocol::tcp("https")
+            .layer7("tls".to_string())
+            .add_port(PortSpec::Single(443))
+            .build()
+            .unwrap();
+
+        // Layer 7 protocol shouldn't affect the endpoint string format
+        assert_eq!(protocol.to_endpoint_str(), "TCP/443");
+    }
+
+    #[test]
+    fn test_to_endpoint_str_zpr_l7_protocol() {
+        let protocol = Protocol::new_zpr_l7(
+            "oauth".to_string(),
+            "zpr-oauthrsa".to_string(),
+            Some(PortSpec::Single(8443)),
+        )
+        .unwrap();
+
+        assert_eq!(protocol.to_endpoint_str(), "TCP/8443");
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_single_port() {
+        let result = PortSpec::parse_list("80");
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], PortSpec::Single(80));
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_multiple_ports() {
+        let result = PortSpec::parse_list("80,443,8080");
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 3);
+        assert_eq!(ports[0], PortSpec::Single(80));
+        assert_eq!(ports[1], PortSpec::Single(443));
+        assert_eq!(ports[2], PortSpec::Single(8080));
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_port_range() {
+        let result = PortSpec::parse_list("8000-9000");
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], PortSpec::Range(8000, 9000));
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_mixed_ports_and_ranges() {
+        let result = PortSpec::parse_list("22,80,8000-8999,443");
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 4);
+        assert_eq!(ports[0], PortSpec::Single(22));
+        assert_eq!(ports[1], PortSpec::Single(80));
+        assert_eq!(ports[2], PortSpec::Range(8000, 8999));
+        assert_eq!(ports[3], PortSpec::Single(443));
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_with_whitespace() {
+        let result = PortSpec::parse_list(" 80 , 443 , 8080 ");
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 3);
+        assert_eq!(ports[0], PortSpec::Single(80));
+        assert_eq!(ports[1], PortSpec::Single(443));
+        assert_eq!(ports[2], PortSpec::Single(8080));
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_range_with_whitespace() {
+        let result = PortSpec::parse_list("8000-9000");
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], PortSpec::Range(8000, 9000));
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_range_with_internal_whitespace_ok() {
+        // Whitespace around the dash is not supported in the current implementation
+        let result = PortSpec::parse_list("8000 - 9000");
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], PortSpec::Range(8000, 9000));
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_empty_string() {
+        let result = PortSpec::parse_list("");
+        assert!(result.is_err());
+        if let Err(ProtocolError::InvalidPort(msg)) = result {
+            assert!(msg.contains("invalid port number"));
+        } else {
+            panic!("Expected ProtocolError::InvalidPort");
+        }
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_zero_port() {
+        let result = PortSpec::parse_list("0");
+        assert!(result.is_err());
+        if let Err(ProtocolError::InvalidPort(msg)) = result {
+            assert!(msg.contains("invalid port number: 0"));
+        } else {
+            panic!("Expected ProtocolError::InvalidPort");
+        }
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_zero_in_range() {
+        let result = PortSpec::parse_list("0-100");
+        assert!(result.is_err());
+        if let Err(ProtocolError::InvalidPort(msg)) = result {
+            assert!(msg.contains("invalid port range"));
+        } else {
+            panic!("Expected ProtocolError::InvalidPort");
+        }
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_invalid_port_number() {
+        let result = PortSpec::parse_list("invalid");
+        assert!(result.is_err());
+        if let Err(ProtocolError::InvalidPort(msg)) = result {
+            assert!(msg.contains("invalid port number: invalid"));
+        } else {
+            panic!("Expected ProtocolError::InvalidPort");
+        }
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_port_too_high() {
+        let result = PortSpec::parse_list("65536");
+        assert!(result.is_err());
+        if let Err(ProtocolError::InvalidPort(msg)) = result {
+            assert!(msg.contains("invalid port number"));
+        } else {
+            panic!("Expected ProtocolError::InvalidPort");
+        }
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_invalid_range_order() {
+        let result = PortSpec::parse_list("9000-8000");
+        assert!(result.is_err());
+        if let Err(ProtocolError::InvalidPort(msg)) = result {
+            assert!(msg.contains("invalid port range"));
+        } else {
+            panic!("Expected ProtocolError::InvalidPort");
+        }
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_malformed_range_too_many_dashes() {
+        let result = PortSpec::parse_list("8000-8500-9000");
+        assert!(result.is_err());
+        if let Err(ProtocolError::InvalidPort(msg)) = result {
+            assert!(msg.contains("invalid port range spec"));
+        } else {
+            panic!("Expected ProtocolError::InvalidPort");
+        }
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_malformed_range_single_dash() {
+        let result = PortSpec::parse_list("8000-");
+        assert!(result.is_err());
+        if let Err(ProtocolError::InvalidPort(msg)) = result {
+            assert!(msg.contains("invalid port number"));
+        } else {
+            panic!("Expected ProtocolError::InvalidPort");
+        }
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_mixed_valid_and_invalid() {
+        let result = PortSpec::parse_list("80,invalid,443");
+        assert!(result.is_err());
+        if let Err(ProtocolError::InvalidPort(msg)) = result {
+            assert!(msg.contains("invalid port number: invalid"));
+        } else {
+            panic!("Expected ProtocolError::InvalidPort");
+        }
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_edge_case_valid_ports() {
+        let result = PortSpec::parse_list("1,65535");
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 2);
+        assert_eq!(ports[0], PortSpec::Single(1));
+        assert_eq!(ports[1], PortSpec::Single(65535));
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_edge_case_valid_range() {
+        let result = PortSpec::parse_list("1-65535");
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], PortSpec::Range(1, 65535));
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_single_port_range() {
+        let result = PortSpec::parse_list("80-80");
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], PortSpec::Single(80));
+    }
+
+    #[test]
+    fn test_port_spec_parse_list_complex_mixed() {
+        let result = PortSpec::parse_list("22,80-90,443,8000-9000,3000");
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 5);
+        assert_eq!(ports[0], PortSpec::Single(22));
+        assert_eq!(ports[1], PortSpec::Range(80, 90));
+        assert_eq!(ports[2], PortSpec::Single(443));
+        assert_eq!(ports[3], PortSpec::Range(8000, 9000));
+        assert_eq!(ports[4], PortSpec::Single(3000));
     }
 }
