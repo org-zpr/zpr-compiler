@@ -157,7 +157,7 @@ impl fmt::Display for Fabric {
             }
             writeln!(f, "    provider attrs:")?;
             for a in &s.provider_attrs {
-                writeln!(f, "      {}", a)?;
+                writeln!(f, "      {}", a.to_instance_string())?;
             }
             writeln!(f, "    policies:")?;
             if s.client_policies.is_empty() {
@@ -170,7 +170,7 @@ impl fmt::Display for Fabric {
                     i + 1,
                     cp.cli_condition
                         .iter()
-                        .map(|a| a.to_string())
+                        .map(|a| a.to_instance_string())
                         .collect::<Vec<String>>()
                         .join(", ")
                 )?;
@@ -180,7 +180,7 @@ impl fmt::Display for Fabric {
                     i + 1,
                     cp.svc_condition
                         .iter()
-                        .map(|a| a.to_string())
+                        .map(|a| a.to_instance_string())
                         .collect::<Vec<String>>()
                         .join(", ")
                 )?;
@@ -193,7 +193,7 @@ impl fmt::Display for Fabric {
             writeln!(f, "  node: {}", n.node_id)?;
             writeln!(f, "    provider attrs:")?;
             for a in &n.provider_attrs {
-                writeln!(f, "      {}", a)?;
+                writeln!(f, "      {}", a.to_instance_string())?;
             }
         }
         writeln!(f)
@@ -407,7 +407,7 @@ impl Fabric {
                 )));
             }
         };
-        node_attrs.push(Attribute::zpr_internal_attr(
+        node_attrs.push(Attribute::must_zpr_internal_attr(
             zpl::KATTR_ADDR,
             &naddr.to_string(),
         ));
@@ -475,7 +475,6 @@ impl Fabric {
                 service_id
             );
         }
-
         // TODO check that service signal wants to signal to exists?
         let svc = svc.unwrap();
         svc.client_policies.push(ClientPolicy {

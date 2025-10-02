@@ -157,7 +157,7 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
         if ctx.verbose {
             println!("defined class: {} (is a {:?})", class.name, class.flavor);
             for attr in &class.with_attrs {
-                println!("  with: {}", attr);
+                println!("  with: {}", attr.to_instance_string());
             }
         }
         policy.defines.push(class);
@@ -233,28 +233,28 @@ allow marketing-emps to access role:marketing services
         for attr in &emp.with_attrs {
             match attr.zpl_key().as_str() {
                 "user.ID-number" => {
-                    assert_eq!(attr.multi_valued, false);
-                    assert_eq!(attr.tag, false);
+                    assert_eq!(attr.is_multi_valued(), false);
+                    assert_eq!(attr.is_tag(), false);
                     assert_eq!(attr.optional, false);
                 }
                 "user.roles" => {
-                    assert_eq!(attr.multi_valued, true);
-                    assert_eq!(attr.tag, false);
+                    assert_eq!(attr.is_multi_valued(), true);
+                    assert_eq!(attr.is_tag(), false);
                     assert_eq!(attr.optional, false);
                 }
                 "user.zpr.tag" if attr.zpl_value() == "user.full-time" => {
-                    assert_eq!(attr.multi_valued, false);
-                    assert_eq!(attr.tag, true);
+                    assert_eq!(attr.is_multi_valued(), false);
+                    assert_eq!(attr.is_tag(), true);
                     assert_eq!(attr.optional, true);
                 }
                 "user.zpr.tag" if attr.zpl_value() == "user.part-time" => {
-                    assert_eq!(attr.multi_valued, false);
-                    assert_eq!(attr.tag, true);
+                    assert_eq!(attr.is_multi_valued(), false);
+                    assert_eq!(attr.is_tag(), true);
                     assert_eq!(attr.optional, true);
                 }
                 "user.zpr.tag" if attr.zpl_value() == "user.intern" => {
-                    assert_eq!(attr.multi_valued, false);
-                    assert_eq!(attr.tag, true);
+                    assert_eq!(attr.is_multi_valued(), false);
+                    assert_eq!(attr.is_tag(), true);
                     assert_eq!(attr.optional, true);
                 }
                 "user.zpr.tag" => {

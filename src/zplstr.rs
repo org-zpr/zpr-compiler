@@ -1,5 +1,12 @@
 //! The ZPLStr type can hold either a plain string (atom) or a ZPL tuple.
-//! Note that a tuple may have an empty value.
+//! A tuple has a value that may be empty, or a single string, or a list
+//! of strings.
+//!
+//! Examples:
+//! - Atom: "classified"
+//! - Tuple with empty value: "name:"
+//! - Tuple with single string value: "name:John"
+//! - Tuple with list value: "roles:{role1, role2, role3}"
 //!
 //! This has functionality that is specifically helpful to the lexer step.
 
@@ -7,88 +14,85 @@ use std::fmt;
 
 use crate::errors::CompilationError;
 
-pub struct ZPLStr {
-    name: String,
-    value: Option<String>,
-    tuple: bool,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ZPLStr {
+    Atom(String),
+    Tuple { name: String, values: Vec<String> },
 }
 
 impl ZPLStr {
-    pub fn new_atom(name: &str) -> ZPLStr {
-        ZPLStr {
-            name: name.to_string(),
-            value: None,
-            tuple: false,
-        }
+    pub fn atom<S: Into<String>>(name: S) -> Self {
+        ZPLStr::Atom(name.into())
     }
 
-    pub fn new_tuple(name: &str, value: &str) -> ZPLStr {
-        ZPLStr {
-            name: name.to_string(),
-            value: Some(value.to_string()),
-            tuple: true,
+    pub fn tuple<S: Into<String>>(name: S, values: Vec<String>) -> Self {
+        ZPLStr::Tuple {
+            name: name.into(),
+            values,
         }
     }
 
     #[allow(dead_code)]
-    pub fn new_tuple_empty(name: &str) -> ZPLStr {
-        ZPLStr {
-            name: name.to_string(),
-            value: None,
-            tuple: true,
-        }
-    }
-
     pub fn is_tuple(&self) -> bool {
-        self.tuple
+        matches!(self, ZPLStr::Tuple { .. })
     }
 
-    pub fn as_tuple(&self) -> (String, String) {
-        if !self.tuple {
-            panic!("not a tuple");
-        }
-        match self.value {
-            Some(ref v) => (self.name.clone(), v.clone()),
-            None => (self.name.clone(), String::new()),
+    pub fn as_atom(&self) -> Option<&str> {
+        match self {
+            ZPLStr::Atom(n) => Some(n.as_str()),
+            _ => None,
         }
     }
 
-    pub fn as_atom(&self) -> String {
-        if self.tuple {
-            panic!("not an atom");
+    /// Note that returned values may be empty list.
+    pub fn as_tuple(&self) -> Option<(&str, &[String])> {
+        match self {
+            ZPLStr::Tuple { name, values } => Some((name.as_str(), values.as_slice())),
+            _ => None,
         }
-        self.name.clone()
     }
 
-    pub fn len(&self) -> usize {
-        self.name.len()
-            + match &self.value {
-                Some(v) => v.len() + 1,
-                None => 0,
-            }
+    /// Get the length of the string representation.
+    pub fn rendered_len(&self) -> usize {
+        let str_form = format!("{}", self);
+        str_form.len()
     }
 }
 
 impl Default for ZPLStr {
     fn default() -> Self {
-        ZPLStr::new_atom("")
+        ZPLStr::atom("")
     }
 }
 
 impl fmt::Display for ZPLStr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.tuple {
-            let tup = self.as_tuple();
-            write!(f, "{}:{}", tup.0, tup.1)
-        } else {
-            write!(f, "{}", self.name)
+        match self {
+            ZPLStr::Atom(n) => write!(f, "{n}"),
+            ZPLStr::Tuple { name, values } => {
+                if values.is_empty() {
+                    write!(f, "{name}:")
+                } else if values.len() == 1 {
+                    write!(f, "{name}:{}", values[0])
+                } else {
+                    write!(f, "{name}:{{")?;
+                    for (i, v) in values.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{v}")?;
+                    }
+                    write!(f, "}}")
+                }
+            }
         }
     }
 }
 
 pub struct ZPLStrBuilder {
     name: String,
-    value: String,
+    current_value: String,
+    prev_values: Vec<String>,
     tuple: bool,
     input_to_value: bool,
 }
@@ -97,23 +101,19 @@ impl ZPLStrBuilder {
     pub fn new() -> Self {
         ZPLStrBuilder {
             name: String::new(),
-            value: String::new(),
+            current_value: String::new(),
+            prev_values: Vec::new(),
             tuple: false,
             input_to_value: false,
         }
     }
 
-    pub fn clear(&mut self) {
-        self.name.clear();
-        self.value.clear();
-        self.tuple = false;
-        self.input_to_value = false;
+    pub fn is_empty(&self) -> bool {
+        self.name.is_empty() && self.current_value.is_empty() && self.prev_values.is_empty()
     }
 
-    pub fn len(&self) -> usize {
-        self.name.len() + self.value.len()
-    }
-
+    /// Push supplied character onto the name or value depending on mode.
+    /// TODO: Currently only accepts ASCII alphanumerics, '-', '_', and '.' (for names).
     pub fn push(
         &mut self,
         c: char,
@@ -125,9 +125,9 @@ impl ZPLStrBuilder {
             if !quoted && !c.is_ascii_alphanumeric() && !matches!(c, '-' | '_') {
                 return Err(CompilationError::IllegalStringLiteralChar(c, line, col));
             }
-            self.value.push(c);
+            self.current_value.push(c);
         } else {
-            // The name part of a tuple is allowed to contain periods wihout needing quotes.
+            // The name part of a tuple is allowed to contain periods without needing quotes.
             if !quoted && !c.is_ascii_alphanumeric() && !matches!(c, '.' | '-' | '_') {
                 return Err(CompilationError::IllegalNameLiteralChar(c, line, col));
             }
@@ -136,43 +136,168 @@ impl ZPLStrBuilder {
         Ok(())
     }
 
-    /// Switch to value mode ... all further pushes go to the tuple value. Implies that this is a tuple.
-    /// Returns false if we are already in value mode.
-    pub fn accept_value(&mut self) -> bool {
+    /// Switch to value mode ... all further pushes go to the tuple value. Implies that this is a tuple
+    /// meaning that it has a key part and a value part.  The value part may be zero or more strings.
+    ///
+    /// Returns error if we are already in value mode.
+    pub fn accept_value(&mut self) -> Result<(), &'static str> {
         if self.input_to_value {
-            return false;
+            return Err("already in value mode");
         }
         self.input_to_value = true;
         self.tuple = true;
-        true
+        Ok(())
     }
 
-    // Size of the value part of the tuple.
-    pub fn value_len(&self) -> usize {
-        self.value.len()
+    /// Start accepting the next value in a tuple list.
+    ///
+    /// Panics if not in value mode.
+    pub fn next_value(&mut self) {
+        if !self.input_to_value {
+            panic!("not in value mode");
+        }
+        if !self.current_value.is_empty() {
+            self.prev_values.push(self.current_value.clone());
+            self.current_value.clear();
+        }
+    }
+
+    /// TRUE if the current value being built is empty.
+    pub fn value_is_empty(&self) -> bool {
+        self.current_value.is_empty()
     }
 
     pub fn is_tuple(&self) -> bool {
         self.tuple
     }
 
+    /// Check for syntactic "sugar"
     pub fn is_sugar(&self) -> bool {
         if self.tuple {
             return false;
         }
-        matches!(self.name.to_lowercase().as_str(), "a" | "an")
+        self.name.eq_ignore_ascii_case("a") || self.name.eq_ignore_ascii_case("an")
     }
 
-    pub fn build(&self) -> ZPLStr {
+    /// Convert this builder into a [ZPLStr].
+    pub fn build(self) -> ZPLStr {
         if self.tuple {
-            return ZPLStr::new_tuple(&self.name, &self.value);
+            let mut vals = self.prev_values;
+            if !self.current_value.is_empty() {
+                vals.push(self.current_value);
+            }
+            return ZPLStr::tuple(self.name, vals);
         }
-        ZPLStr::new_atom(&self.name)
+        ZPLStr::atom(self.name)
     }
 }
 
-impl fmt::Display for ZPLStrBuilder {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.build())
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_atom() {
+        let mut b = ZPLStrBuilder::new();
+        assert!(b.is_empty());
+        assert!(!b.is_tuple());
+        assert!(!b.is_sugar());
+        for (i, c) in "classified".chars().enumerate() {
+            b.push(c, false, 1, i + 1).unwrap();
+        }
+        assert!(!b.is_empty());
+        assert!(!b.is_tuple());
+        assert!(!b.is_sugar());
+        let s = b.build();
+        assert_eq!(s.is_tuple(), false);
+        assert_eq!(s.as_atom().unwrap(), "classified");
+        assert_eq!(format!("{}", s), "classified");
+    }
+
+    #[test]
+    fn test_tuple_empty() {
+        let mut b = ZPLStrBuilder::new();
+        assert!(b.is_empty());
+        assert!(!b.is_tuple());
+        assert!(!b.is_sugar());
+        for (i, c) in "name".chars().enumerate() {
+            b.push(c, false, 1, i + 1).unwrap();
+        }
+        assert!(!b.is_empty());
+        assert!(!b.is_tuple());
+        assert!(!b.is_sugar());
+        assert!(b.accept_value().is_ok());
+        assert!(b.accept_value().is_err()); // second time should return false
+        assert!(b.is_tuple());
+        let s = b.build();
+        assert_eq!(s.is_tuple(), true);
+        let (k, v) = s.as_tuple().unwrap();
+        assert_eq!(k, "name");
+        assert_eq!(v.len(), 0);
+        assert_eq!(format!("{}", s), "name:");
+    }
+
+    #[test]
+    fn test_tuple_single() {
+        let mut b = ZPLStrBuilder::new();
+        assert!(b.is_empty());
+        assert!(!b.is_tuple());
+        assert!(!b.is_sugar());
+        for (i, c) in "name".chars().enumerate() {
+            b.push(c, false, 1, i + 1).unwrap();
+        }
+        assert!(!b.is_empty());
+        assert!(!b.is_tuple());
+        assert!(!b.is_sugar());
+        assert!(b.accept_value().is_ok());
+        assert!(b.accept_value().is_err()); // second time should return false
+        assert!(b.is_tuple());
+        for (i, c) in "John".chars().enumerate() {
+            b.push(c, false, 1, i + 1).unwrap();
+        }
+        let s = b.build();
+        assert_eq!(s.is_tuple(), true);
+        let (k, v) = s.as_tuple().unwrap();
+        assert_eq!(k, "name");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0], "John");
+        assert_eq!(format!("{}", s), "name:John");
+    }
+
+    #[test]
+    fn test_tuple_list() {
+        let mut b = ZPLStrBuilder::new();
+        assert!(b.is_empty());
+        assert!(!b.is_tuple());
+        assert!(!b.is_sugar());
+        for (i, c) in "roles".chars().enumerate() {
+            b.push(c, false, 1, i + 1).unwrap();
+        }
+        assert!(!b.is_empty());
+        assert!(!b.is_tuple());
+        assert!(!b.is_sugar());
+        assert!(b.accept_value().is_ok());
+        assert!(b.accept_value().is_err()); // second time should return false
+        assert!(b.is_tuple());
+        for (i, c) in "role1".chars().enumerate() {
+            b.push(c, false, 1, i + 1).unwrap();
+        }
+        b.next_value();
+        for (i, c) in "role2".chars().enumerate() {
+            b.push(c, false, 1, i + 1).unwrap();
+        }
+        b.next_value();
+        for (i, c) in "role3".chars().enumerate() {
+            b.push(c, false, 1, i + 1).unwrap();
+        }
+        let s = b.build();
+        assert_eq!(s.is_tuple(), true);
+        let (k, v) = s.as_tuple().unwrap();
+        assert_eq!(k, "roles");
+        assert_eq!(v.len(), 3);
+        assert_eq!(v[0], "role1");
+        assert_eq!(v[1], "role2");
+        assert_eq!(v[2], "role3");
+        assert_eq!(format!("{}", s), "roles:{role1, role2, role3}");
     }
 }

@@ -34,6 +34,8 @@ pub const VS_SERVICE_NAME: &str = "/zpr/visaservice";
 pub const KATTR_ROLE: &str = "zpr.role";
 pub const KATTR_CN: &str = "endpoint.zpr.adapter.cn";
 pub const KATTR_ADDR: &str = "zpr.addr";
+
+/// Multi-valued "services" attribute.
 pub const KATTR_SERVICES: &str = "zpr.services";
 
 pub const ATTR_DOMAIN_SERVICE: &str = "service";

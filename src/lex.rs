@@ -26,15 +26,10 @@ pub enum TokenType {
     Optional,
     Multiple,
     Literal(String),
-    Tuple((String, String)),
+    Tuple((String, Vec<String>)),
     Period,
     Eos, // means "end of statement" but is never actually created
     Signal,
-}
-
-#[allow(dead_code)]
-pub fn tuple_from_strs(name: &str, value: &str) -> TokenType {
-    TokenType::Tuple((String::from(name), String::from(value)))
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -47,10 +42,15 @@ pub struct Token {
 
 impl Token {
     pub fn new_from_str(s: &ZPLStr, line: usize, col: usize) -> Token {
-        if s.is_tuple() {
-            return Token::new(TokenType::Tuple(s.as_tuple()), line, col, s.len());
+        if let Some((name, vals)) = s.as_tuple() {
+            return Token::new(
+                TokenType::Tuple((name.to_string(), vals.to_vec())),
+                line,
+                col,
+                s.rendered_len(),
+            );
         }
-        let ls = s.as_atom().to_lowercase();
+        let ls = s.as_atom().unwrap().to_lowercase();
         let tok = match ls.as_str() {
             "never" => TokenType::Never,
             "allow" => TokenType::Allow,
@@ -71,9 +71,9 @@ impl Token {
             "multiple" => TokenType::Multiple,
             "." => TokenType::Period,
             "signal" => TokenType::Signal,
-            _ => TokenType::Literal(s.as_atom()),
+            _ => TokenType::Literal(s.as_atom().unwrap().into()), // is case sensitive
         };
-        Token::new(tok, line, col, s.len())
+        Token::new(tok, line, col, s.rendered_len())
     }
 
     pub fn new(tt: TokenType, line: usize, col: usize, sz: usize) -> Token {
@@ -150,6 +150,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
     let mut current_word = ZPLStrBuilder::new();
     let mut current_start = (line, col);
     let mut quoting = QuotingType::None;
+    let mut reading_set = false;
 
     while let Some(c) = chars.next() {
         match c {
@@ -161,7 +162,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                         current_start.1,
                     ));
                 }
-                if current_word.len() > 0 {
+                if !current_word.is_empty() && !reading_set {
                     if !current_word.is_sugar() {
                         tokens.push(Token::new_from_str(
                             &current_word.build(),
@@ -169,14 +170,15 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             current_start.1,
                         ));
                     }
-                    current_word.clear();
+                    current_word = ZPLStrBuilder::new();
                 }
                 line += 1;
                 col = 1;
             }
             '\t' => {
                 // tab?
-                if current_word.len() > 0 {
+                // TODO: What if we are quoting?
+                if !current_word.is_empty() && !reading_set {
                     // Then treat as a delimiter
                     if !current_word.is_sugar() {
                         tokens.push(Token::new_from_str(
@@ -185,43 +187,54 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             current_start.1,
                         ));
                     }
-                    current_word.clear();
+                    current_word = ZPLStrBuilder::new();
                 }
                 col += 1;
             }
             ' ' => {
                 // if we are quoting the literal, keep space, otherwise this is a delimiter
-                if current_word.len() > 0 {
+                if !current_word.is_empty() {
                     if quoting.is_quoting() {
                         current_word.push(c, true, line, col)?;
                     } else {
-                        if !current_word.is_sugar() {
-                            tokens.push(Token::new_from_str(
-                                &current_word.build(),
-                                current_start.0,
-                                current_start.1,
-                            ));
+                        if !reading_set {
+                            if !current_word.is_sugar() {
+                                tokens.push(Token::new_from_str(
+                                    &current_word.build(),
+                                    current_start.0,
+                                    current_start.1,
+                                ));
+                            }
+                            current_word = ZPLStrBuilder::new();
                         }
-                        current_word.clear();
                     }
                 }
                 col += 1;
             }
             ',' => {
-                // if we are quoting the literal, keep comma, otherwise this is new COMMA token (should this be AND?)
-                if current_word.len() > 0 {
+                // if we are quoting the literal, keep comma, otherwise of we are reading set values
+                // this starts the next value, else this is new COMMA token (should this be AND?)
+                if !current_word.is_empty() {
                     if quoting.is_quoting() {
+                        if reading_set {
+                            // TODO: https://github.com/org-zpr/zpr-compiler/issues/72
+                            return Err(CompilationError::IllegalStringLiteralChar(c, line, col));
+                        }
                         current_word.push(c, true, line, col)?;
                     } else {
-                        if !current_word.is_sugar() {
-                            tokens.push(Token::new_from_str(
-                                &current_word.build(),
-                                current_start.0,
-                                current_start.1,
-                            ));
+                        if reading_set {
+                            current_word.next_value();
+                        } else {
+                            if !current_word.is_sugar() {
+                                tokens.push(Token::new_from_str(
+                                    &current_word.build(),
+                                    current_start.0,
+                                    current_start.1,
+                                ));
+                            }
+                            current_word = ZPLStrBuilder::new();
+                            tokens.push(Token::new(TokenType::Comma, line, col, 1));
                         }
-                        current_word.clear();
-                        tokens.push(Token::new(TokenType::Comma, line, col, 1));
                     }
                 } else {
                     tokens.push(Token::new(TokenType::Comma, line, col, 1));
@@ -234,12 +247,15 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 } else {
                     true // none (end of input)
                 };
-                if current_word.len() > 0 && quoting.is_quoting() {
+                if !current_word.is_empty() && quoting.is_quoting() {
                     current_word.push(c, true, line, col)?;
-                } else if current_word.len() > 0 {
+                } else if !current_word.is_empty() {
                     // We have a word going, we are not quoting. A period followed by whitespace ends the statement.
                     // Otherwise it is assumed to be part of the word.
                     if followed_by_whitespace {
+                        if reading_set {
+                            return Err(CompilationError::UnterminatedSet(line, col));
+                        }
                         if !current_word.is_sugar() {
                             tokens.push(Token::new_from_str(
                                 &current_word.build(),
@@ -247,7 +263,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                 current_start.1,
                             ));
                         }
-                        current_word.clear();
+                        current_word = ZPLStrBuilder::new();
                         tokens.push(Token::new(TokenType::Period, line, col, 1));
                     } else {
                         current_word.push(c, quoting.is_quoting(), line, col)?;
@@ -301,13 +317,13 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             }
                         }
                         // We may have parsed a word prior to the comment.
-                        if current_word.len() > 0 {
+                        if !current_word.is_empty() && !reading_set {
                             tokens.push(Token::new_from_str(
                                 &current_word.build(),
                                 current_start.0,
                                 current_start.1,
                             ));
-                            current_word.clear();
+                            current_word = ZPLStrBuilder::new();
                         }
                         line += 1;
                         col = 1;
@@ -316,17 +332,49 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
             }
             ':' => {
                 // If we are quoting, then this is just a normal colon.
-                // If proceeded by "note" or "comment" this indicates rest of line is a comment.
                 // Otherwise we treat this as an attribute signifier.
-                if current_word.len() == 0 {
+                if current_word.is_empty() {
                     return Err(CompilationError::IllegalColon(line, col));
                 }
                 if quoting.is_quoting() {
                     current_word.push(c, true, line, col)?;
-                } else if !current_word.accept_value() {
+                } else if current_word.accept_value().is_err() {
                     return Err(CompilationError::IllegalColon(line, col));
                 }
 
+                col += 1;
+            }
+            '{' => {
+                // Set notation for specifying values for a multi-valued attribute.
+                // Sets us into set_mode until closing bracket.
+                // Must be preceeded by a ':'.
+                if quoting.is_quoting() {
+                    current_word.push(c, true, line, col)?;
+                } else {
+                    if reading_set || current_word.is_empty() || !current_word.is_tuple() {
+                        return Err(CompilationError::IllegalSetStart(line, col));
+                    }
+                    reading_set = true;
+                }
+                col += 1;
+            }
+            '}' => {
+                if quoting.is_quoting() {
+                    current_word.push(c, true, line, col)?;
+                } else {
+                    // End of a set of values.
+                    if !reading_set {
+                        return Err(CompilationError::IllegalSetEnd(line, col));
+                    }
+                    reading_set = false;
+                    // The current tuple we were reading is completed.
+                    tokens.push(Token::new_from_str(
+                        &current_word.build(),
+                        current_start.0,
+                        current_start.1,
+                    ));
+                    current_word = ZPLStrBuilder::new();
+                }
                 col += 1;
             }
             '\'' | '`' | '\"' => {
@@ -337,12 +385,12 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 //
                 // Within a quoted string a leading backslash can be used to escape
                 // a quote character or a backslash itself.
-                if current_word.len() == 0 {
+                if current_word.is_empty() {
                     if !quoting.is_quoting() {
                         quoting.set_quoting(c);
                         current_start = (line, col);
                     } else {
-                        // No word in buffer is either empty string or invalud.
+                        // No word in buffer is either empty string or invalid.
                         if quoting.is_match(c) {
                             // take empty string
                             tokens.push(Token::new_from_str(
@@ -350,7 +398,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                 current_start.0,
                                 current_start.1,
                             ));
-                            current_word.clear();
+                            current_word = ZPLStrBuilder::new();
                             quoting = QuotingType::None;
                         } else {
                             return Err(CompilationError::IllegalQuote(line, col));
@@ -365,7 +413,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             current_word.push(c, true, line, col)?;
                         } else {
                             // We are at the end of the quoted literal.
-                            // If next char is a colon, then we continue to parse attr value.
+                            // If next char is a colon, then we continue to maybe parse attr value.
                             if let Some(&next) = chars.peek() {
                                 if next == ':' {
                                     quoting = QuotingType::None;
@@ -374,20 +422,22 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                 }
                             }
                             // Otherwise consume the current word.
-                            if !current_word.is_sugar() {
-                                tokens.push(Token::new_from_str(
-                                    &current_word.build(),
-                                    current_start.0,
-                                    current_start.1,
-                                ));
+                            if !reading_set {
+                                if !current_word.is_sugar() {
+                                    tokens.push(Token::new_from_str(
+                                        &current_word.build(),
+                                        current_start.0,
+                                        current_start.1,
+                                    ));
+                                }
+                                current_word = ZPLStrBuilder::new();
                             }
-                            current_word.clear();
                             quoting = QuotingType::None;
                         }
                     } else {
                         // We have a word in buffer but are not quoting and we just read a quote char?
                         // Only allowed if this is starting to quote a tuple value.
-                        if current_word.is_tuple() && current_word.value_len() == 0 {
+                        if current_word.is_tuple() && current_word.value_is_empty() {
                             quoting.set_quoting(c); // turn on tuple value quoting
                         } else {
                             return Err(CompilationError::IllegalQuote(line, col));
@@ -416,7 +466,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 col += 1;
             }
             _ => {
-                if current_word.len() == 0 && !quoting.is_quoting() {
+                if current_word.is_empty() && !quoting.is_quoting() {
                     current_start = (line, col);
                 }
                 current_word.push(c, quoting.is_quoting(), line, col)?;
@@ -430,7 +480,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
             current_start.1,
         ));
     }
-    if current_word.len() > 0 && !current_word.is_sugar() {
+    if !current_word.is_empty() && !current_word.is_sugar() {
         tokens.push(Token::new_from_str(
             &current_word.build(),
             current_start.0,
@@ -444,7 +494,19 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use crate::context::CompilationCtx;
+
+    fn tuple_from_strs(name: &str, value: &str) -> TokenType {
+        TokenType::Tuple((String::from(name), vec![String::from(value)]))
+    }
+
+    fn tuple_from_strset(name: &str, values: &[&str]) -> TokenType {
+        TokenType::Tuple((
+            String::from(name),
+            values.iter().map(|&v| String::from(v)).collect(),
+        ))
+    }
 
     #[test]
     fn test_tuple_literal() {
@@ -454,11 +516,60 @@ mod test {
         println!("{:?}", tokens);
         assert_eq!(tokens.len(), 14);
         let colorpurple = &tokens[5];
-        assert_eq!(colorpurple.tt, super::tuple_from_strs("color", "purple"));
+        assert_eq!(colorpurple.tt, tuple_from_strs("color", "purple"));
         let rolemanager = &tokens[7];
-        assert_eq!(rolemanager.tt, super::tuple_from_strs("role", "manager"));
+        assert_eq!(rolemanager.tt, tuple_from_strs("role", "manager"));
         let officefrisco = &tokens[9];
-        assert_eq!(officefrisco.tt, super::tuple_from_strs("office", "fris:co"));
+        assert_eq!(officefrisco.tt, tuple_from_strs("office", "fris:co"));
+    }
+
+    #[test]
+    fn test_tuple_literal_sets() {
+        let zpl = "define foo as user with colors:{purple,yellow}, `roles`:{`manager`, chef}, office:`fris:co`, and tag `foo bar`";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        println!("{:?}", tokens);
+        assert_eq!(tokens.len(), 14);
+        let colors = &tokens[5];
+        assert_eq!(
+            colors.tt,
+            tuple_from_strset("colors", &["purple", "yellow"])
+        );
+        let rolemanager = &tokens[7];
+        assert_eq!(
+            rolemanager.tt,
+            tuple_from_strset("roles", &["manager", "chef"])
+        );
+        let officefrisco = &tokens[9];
+        assert_eq!(officefrisco.tt, tuple_from_strs("office", "fris:co"));
+    }
+
+    #[test]
+    fn test_tuple_literal_more_sets() {
+        let zpl = "define foo as user with colors:{purple}, roles:{`man ager`, chef}";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        println!("{:?}", tokens);
+        assert_eq!(tokens.len(), 8);
+        let colors = &tokens[5];
+        assert_eq!(colors.tt, tuple_from_strset("colors", &["purple"]));
+        let rolemanager = &tokens[7];
+        assert_eq!(
+            rolemanager.tt,
+            tuple_from_strset("roles", &["man ager", "chef"])
+        );
+    }
+
+    // Open issue: https://github.com/org-zpr/zpr-compiler/issues/72
+    #[test]
+    fn test_tuple_literal_no_commas_allowed() {
+        let zpl = "define foo as user with colors:{purple, 'red,foo'}, roles:{manager, chef}";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        let err = tz.unwrap_err();
+        assert!(
+            matches!(err, super::CompilationError::IllegalStringLiteralChar(c, _line, _col) if c == ',')
+        );
     }
 
     #[test]
@@ -504,7 +615,7 @@ mod test {
         assert_eq!(tokens[6].tt, super::TokenType::Period);
         assert_eq!(
             tokens[5].tt,
-            super::TokenType::Tuple(("color".to_string(), "green.".to_string()))
+            super::TokenType::Tuple(("color".to_string(), vec!["green.".to_string()]))
         );
     }
 
@@ -517,7 +628,7 @@ mod test {
         assert_eq!(tokens[6].tt, super::TokenType::Period);
         assert_eq!(
             tokens[5].tt,
-            super::TokenType::Tuple(("color".to_string(), "green.".to_string()))
+            super::TokenType::Tuple(("color".to_string(), vec!["green.".to_string()]))
         );
     }
 
@@ -530,7 +641,7 @@ mod test {
         assert_eq!(tokens[6].tt, super::TokenType::Period);
         assert_eq!(
             tokens[5].tt,
-            super::TokenType::Tuple(("color".to_string(), "green.".to_string()))
+            super::TokenType::Tuple(("color".to_string(), vec!["green.".to_string()]))
         );
     }
 

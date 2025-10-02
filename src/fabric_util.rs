@@ -12,7 +12,7 @@ use crate::ptypes::FPos;
 pub fn vec_to_attributes(v: &[(String, String)]) -> Result<Vec<Attribute>, CompilationError> {
     let mut attrs = Vec::new();
     for (k, v) in v {
-        attrs.push(Attribute::attr(k, v)?);
+        attrs.push(Attribute::tuple(k).single().value(v).build()?);
     }
     Ok(attrs)
 }
@@ -31,11 +31,14 @@ pub fn squash_attributes(
             // that is an error.
 
             let map_attr = attr_map.get(&a.zpl_key()).unwrap();
-            if map_attr.value.is_none() && a.value.is_some() {
+            if map_attr.get_values().is_none() && a.get_values().is_some() {
                 attr_map.insert(a.zpl_key(), a.clone()); // overwrite old non-valued attribute
-            } else if map_attr.value.is_some() && a.value.is_none() {
+            } else if map_attr.get_values().is_some() && a.get_values().is_none() {
                 // do nothing
-            } else if map_attr.value.is_some() && a.value.is_some() && map_attr.value != a.value {
+            } else if map_attr.get_values().is_some()
+                && a.get_values().is_some()
+                && map_attr.zpl_value() != a.zpl_value()
+            {
                 return Err(CompilationError::AttributeValueConflict(
                     a.zpl_key(),
                     tok.line,

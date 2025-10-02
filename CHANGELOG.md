@@ -3,7 +3,7 @@
 
 ## pending
 
-- empty
+- Can now encode set value attribute properly.
 
 ## [0.9.0] - 2025-09-26
 

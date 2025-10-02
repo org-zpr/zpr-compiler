@@ -135,10 +135,12 @@ impl Weaver {
         );
 
         // The provider of the visa service is a hardcoded CN value.
-        let vs_attrs = vec![Attribute::attr_or_panic(
-            zpl::KATTR_CN,
-            zpl::VISA_SERVICE_CN,
-        )];
+        let vs_cn_attr = Attribute::tuple(zpl::KATTR_CN)
+            .single()
+            .value(zpl::VISA_SERVICE_CN)
+            .build()
+            .expect("invalid attribute");
+        let vs_attrs = vec![vs_cn_attr];
         let fab_svc_id = self.fabric.add_service(
             zpl::VS_SERVICE_NAME,
             &vs_protocol,
@@ -149,7 +151,7 @@ impl Weaver {
         // Visa service has policy that allows nodes to access it.  We use a node role attribute so
         // we don't care about individual node names.
         let pline = PLine::new_builtin("allow node access to visa service");
-        let vs_access_attrs = vec![Attribute::zpr_internal_attr(zpl::KATTR_ROLE, "node")];
+        let vs_access_attrs = vec![Attribute::must_zpr_internal_attr(zpl::KATTR_ROLE, "node")];
         self.fabric.add_condition_to_service(
             false,
             &fab_svc_id,
@@ -447,28 +449,28 @@ impl Weaver {
         let trusted_service_names = config.must_get_keys("/trusted_services");
 
         let mut resolved_attrs = Vec::new();
-        for a in attrs {
-            let attr_name = a.zpl_key();
-            if a.tag && a.zpl_value() == zpl::KATTR_CN {
+        for zpl_attr in attrs {
+            let attr_name = zpl_attr.zpl_key();
+            if zpl_attr.is_tag() && zpl_attr.zpl_value() == zpl::KATTR_CN {
                 return Err(CompilationError::ConfigError(format!(
                     "{} attribute used as a tag, but is a tuple attribute",
-                    a,
+                    zpl_attr.to_instance_string(),
                 )));
             }
 
             match attr_name.as_str() {
                 zpl::KATTR_CN => {
-                    resolved_attrs.push(a.clone());
+                    resolved_attrs.push(zpl_attr.clone());
                     self.used_trusted_services
                         .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
                 }
                 zpl::DEFAULT_ATTR => {
-                    resolved_attrs.push(a.clone_with_new_name(zpl::KATTR_CN));
+                    resolved_attrs.push(zpl_attr.clone_with_new_name(zpl::KATTR_CN));
                     self.used_trusted_services
                         .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
                 }
                 zpl::KATTR_SERVICES => {
-                    resolved_attrs.push(a.clone());
+                    resolved_attrs.push(zpl_attr.clone());
                     self.used_trusted_services
                         .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
                 }
@@ -477,14 +479,6 @@ impl Weaver {
                     // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
                     let mut matched = false;
                     for ts_name in &trusted_service_names {
-                        /*
-                        let search_name = if a.tag {
-                            a.zpl_value().clone()
-                        } else {
-                            attr_name.clone()
-                        };
-                        */
-
                         let ts_attrs = config.must_get_attr_map(&format!(
                             "/trusted_services/{}/attributes",
                             ts_name
@@ -493,17 +487,34 @@ impl Weaver {
                         // "a" is the attribute referenced in the ZPL, so this will turn up on the RIGHT side of the map.
                         // The left side (the strings) are the names of the raw attributes returned by the service.
 
-                        let search_str = a.zplc_key();
-                        let found = ts_attrs.iter().find(|(_k, v)| v.zplc_key() == search_str);
+                        // As we search we need to consider that a tuple type attribute could match
+                        // either the service plain key eg, "user.role" or the service multi-value key, eg, "user.role{}".
+                        let search_str = zpl_attr.zplc_key();
+                        let alt_search_str = if !zpl_attr.is_tag() && !zpl_attr.is_multi_valued() {
+                            Some(format!("{}{{}}", search_str))
+                        } else {
+                            None
+                        };
+
+                        let found = ts_attrs.iter().find(|(_k, v)| {
+                            v.zplc_key() == search_str
+                                || alt_search_str.is_some()
+                                    && &v.zplc_key() == alt_search_str.as_ref().unwrap()
+                        });
 
                         //if ts_attrs.contains(&search_name) {
-                        if found.is_some() {
+                        if let Some((_svcname, attr_spec)) = found {
                             if matched {
                                 return Err(CompilationError::ConfigError(format!(
-                                    "attribute {a} found in multiple trusted services"
+                                    "attribute {} found in multiple trusted services",
+                                    zpl_attr.to_instance_string()
                                 )));
                             }
-                            let new_attr = a.clone();
+                            let mut new_attr = zpl_attr.clone();
+                            // If the service indicates that this attribute is multi-valued then we keep that info.
+                            if attr_spec.is_multi_valued() {
+                                new_attr.set_multi_valued()?;
+                            }
                             resolved_attrs.push(new_attr);
                             self.used_trusted_services.insert(ts_name.clone());
                             matched = true;
@@ -511,7 +522,8 @@ impl Weaver {
                     }
                     if !matched {
                         return Err(CompilationError::ConfigError(format!(
-                            "attribute {a} not found in any trusted service"
+                            "attribute {} not found in any trusted service",
+                            zpl_attr.to_instance_string()
                         )));
                     }
                 }
@@ -638,11 +650,11 @@ impl Weaver {
                     // a provider of ANY service.
                     if lhs_class.flavor == ClassFlavor::Service {
                         let svc_attr = if lhs_class.class == zpl::DEF_CLASS_SERVICE_NAME {
-                            Attribute::zpr_internal_attr(zpl::KATTR_SERVICES, "")
+                            Attribute::must_zpr_internal_attr_mv(zpl::KATTR_SERVICES, "")
                         } else {
                             let fab_svc_name =
                                 self.service_clause_name_to_fabric_id(class_idx, &lhs_class.class);
-                            Attribute::zpr_internal_attr_mv(zpl::KATTR_SERVICES, &fab_svc_name)
+                            Attribute::must_zpr_internal_attr_mv(zpl::KATTR_SERVICES, &fab_svc_name)
                         };
                         attrs.push(svc_attr);
                     }
@@ -806,13 +818,6 @@ impl Weaver {
         // Copy the used trusted service names into a stand alone vector to avoid
         // holding an immutable ref to self in the following loop.
         let used_trusted_service_names = self.used_trusted_services.clone();
-        /*
-        let used_trusted_service_names = self
-            .used_trusted_services
-            .iter()
-            .map(|s| s.clone())
-            .collect::<Vec<String>>();
-        */
 
         for ts_name in used_trusted_service_names {
             if ts_name == zpl::DEFAULT_TRUSTED_SERVICE_ID {
@@ -899,10 +904,12 @@ impl Weaver {
                 })?;
 
             // The visa service can access the trusted service over its vs interface.
-            let vs_access_attrs = vec![Attribute::attr_or_panic(
-                zpl::KATTR_CN,
-                zpl::VISA_SERVICE_CN,
-            )];
+            let cn_attr = Attribute::tuple(zpl::KATTR_CN)
+                .single()
+                .value(zpl::VISA_SERVICE_CN)
+                .build()
+                .expect("invalid attribute");
+            let vs_access_attrs = vec![cn_attr];
             let pline = PLine::new_builtin(&format!(
                 "allow visa service access to trusted service {}",
                 ts_name
@@ -1298,8 +1305,8 @@ mod test {
         assert_eq!(fsvc.fabric_id, "bas");
         let return_attrs = fsvc.returns_attrs.as_ref().unwrap();
         assert_eq!(return_attrs.len(), 2);
-        assert!(return_attrs["id"].to_string() == "user.id");
-        assert!(return_attrs["email"].to_string() == "user.email");
+        assert!(return_attrs["id"].to_schema_string() == "user.id");
+        assert!(return_attrs["email"].to_schema_string() == "user.email");
         let id_attrs = fsvc.identity_attrs.as_ref().unwrap();
         assert_eq!(id_attrs.len(), 1);
         assert!(id_attrs.contains(&String::from("id")));

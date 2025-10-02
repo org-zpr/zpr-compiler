@@ -97,7 +97,7 @@ impl fmt::Display for ConfigItem {
                     } else {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}: {}", k, v)?;
+                    write!(f, "{}: {}", k, v.to_schema_string())?;
                 }
                 write!(f, "]")
             }

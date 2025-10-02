@@ -98,7 +98,7 @@ impl PolicyBinaryV1 {
                 .unwrap();
             attrexpr.push(polio::AttrExpr {
                 key: key_idx as u32,
-                op: if val.is_empty() {
+                op: if val.is_empty() || a.is_multi_valued() {
                     polio::AttrOpT::Has as i32
                 } else {
                     polio::AttrOpT::Eq as i32

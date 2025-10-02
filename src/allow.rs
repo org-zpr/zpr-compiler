@@ -494,7 +494,8 @@ where
                             // This is not permitted. You can only talk about endpoints in the ON clause.
                             return Err(CompilationError::AllowStmtParseError(
                                 format!(
-                                    "illegal non-endpoint attribute in service ON clause: '{domained_attr}'"
+                                    "illegal non-endpoint attribute in service ON clause: '{}'",
+                                    domained_attr.to_instance_string()
                                 ),
                                 pa_state.root_tok.line,
                                 pa_state.root_tok.col,
@@ -766,7 +767,10 @@ impl PState {
                 }
                 TokenType::Tuple((name, value)) => {
                     // This is an attribute.
-                    let attr = Attribute::attr_domain_opt(name, value);
+                    let attr = Attribute::tuple(name)
+                        .values(value.to_vec())
+                        .allow_unspecified()
+                        .build()?;
                     self.attrs.push(attr);
                     last_token = tokens.next().unwrap().clone();
                 }
@@ -787,7 +791,8 @@ impl PState {
                         self.class_name_token = Some(tok.clone());
                         last_token = tok.clone();
                     } else {
-                        self.attrs.push(Attribute::tag_domain_opt(s));
+                        self.attrs
+                            .push(Attribute::tag(s).allow_unspecified().build()?);
                         last_token = tokens.next().unwrap().clone();
                     }
                 }
@@ -950,7 +955,7 @@ mod test {
                 lhs_clause
                     .with
                     .iter()
-                    .find(|a| a.to_string() == "#user.blue")
+                    .find(|a| a.to_instance_string() == "#user.blue")
                     .expect("blue tag missing from user clause");
             }
         }
@@ -965,7 +970,7 @@ mod test {
                 rhs_clause
                     .with
                     .iter()
-                    .find(|a| a.to_string() == "endpoint.level:seven")
+                    .find(|a| a.to_instance_string() == "endpoint.level:seven")
                     .expect("level:seven tag missing from service clause");
             }
         }
@@ -1001,7 +1006,7 @@ mod test {
                 lhs_clause
                     .with
                     .iter()
-                    .find(|a| a.to_string() == "#user.blue")
+                    .find(|a| a.to_instance_string() == "#user.blue")
                     .expect("blue tag missing from user clause");
             } else if lhs_clause.flavor == ClassFlavor::Endpoint {
                 // level:seven attr goes in as an endpoint attribute
@@ -1009,7 +1014,7 @@ mod test {
                 lhs_clause
                     .with
                     .iter()
-                    .find(|a| a.to_string() == "endpoint.level:seven")
+                    .find(|a| a.to_instance_string() == "endpoint.level:seven")
                     .expect("level:seven tag missing from endpoint clause");
             }
         }
@@ -1052,7 +1057,7 @@ mod test {
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "#user.blue")
+                        .find(|a| a.to_instance_string() == "#user.blue")
                         .expect("blue tag missing from user clause");
                 }
                 ClassFlavor::Endpoint => {
@@ -1061,7 +1066,7 @@ mod test {
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "endpoint.level:seven")
+                        .find(|a| a.to_instance_string() == "endpoint.level:seven")
                         .expect("level:seven tag missing from endpoint clause");
                 }
                 _ => (),
@@ -1077,7 +1082,7 @@ mod test {
                     rhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "endpoint.level:eight")
+                        .find(|a| a.to_instance_string() == "endpoint.level:eight")
                         .expect("level:eight tag missing from service clause");
                 }
                 _ => (),
@@ -1126,7 +1131,7 @@ mod test {
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "#service.blue")
+                        .find(|a| a.to_instance_string() == "#service.blue")
                         .expect(
                             format!("blue tag missing from service clause: {:?}", lhs_clause)
                                 .as_str(),
@@ -1138,7 +1143,7 @@ mod test {
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "endpoint.level:seven")
+                        .find(|a| a.to_instance_string() == "endpoint.level:seven")
                         .expect("level:seven tag missing from endpoint clause");
                 }
                 _ => (),
@@ -1155,8 +1160,74 @@ mod test {
                     rhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_string() == "endpoint.level:eight")
+                        .find(|a| a.to_instance_string() == "endpoint.level:eight")
                         .expect("level:eight tag missing from service clause");
+                }
+                _ => (),
+            }
+        }
+        assert!(matched_service, "failed to locate service clause in RHS");
+    }
+
+    #[test]
+    fn test_multi_value_attrs() {
+        let statement = "allow colors:{blue, red} users on levels:{1, 2} endpoints to access services on levels:{9, 10} endpoints";
+
+        let mut classes: HashMap<String, Class> = HashMap::new();
+        for defclass in Class::defaults() {
+            classes.insert(defclass.name.clone(), defclass);
+        }
+        let mut class_index: HashMap<String, String> = HashMap::new();
+        for (name, class) in classes.iter() {
+            class_index.insert(name.clone(), name.clone());
+            class_index.insert(class.aka.clone(), name.clone());
+        }
+
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        let tokens = tz.tokens;
+        let clause = parse_allow(&tokens, 1, &class_index, &classes).unwrap();
+
+        assert_eq!(2, clause.client.len()); // users, endpoints
+        assert_eq!(1, clause.server.len()); // services
+
+        let mut matched_user = false;
+        let mut matched_endpoint = false;
+        let mut matched_service = false;
+
+        for lhs_clause in clause.client {
+            match lhs_clause.flavor {
+                ClassFlavor::User => {
+                    matched_user = true;
+                    lhs_clause
+                        .with
+                        .iter()
+                        .find(|a| a.to_instance_string() == "user.colors:{blue, red}")
+                        .expect("colors{blue,red} missing from user clause");
+                }
+                ClassFlavor::Endpoint => {
+                    matched_endpoint = true;
+                    lhs_clause
+                        .with
+                        .iter()
+                        .find(|a| a.to_instance_string() == "endpoint.levels:{1, 2}")
+                        .expect("levels{1,2} missing from endpoint clause");
+                }
+                _ => (),
+            }
+        }
+        assert!(matched_user, "failed to locate user clause in LHS");
+        assert!(matched_endpoint, "failed to locate endpoint clause in LHS");
+
+        for rhs_clause in clause.server {
+            match rhs_clause.flavor {
+                ClassFlavor::Service => {
+                    matched_service = true;
+                    rhs_clause
+                        .with
+                        .iter()
+                        .find(|a| a.to_instance_string() == "endpoint.levels:{9, 10}")
+                        .expect("levels{9,10} missing from service clause");
                 }
                 _ => (),
             }
