@@ -17,6 +17,7 @@ mod config_api;
 mod context;
 pub mod crypto;
 mod define;
+pub mod dump;
 pub mod errors;
 mod fabric;
 mod fabric_util;

@@ -1,7 +1,9 @@
+use bytes::Bytes;
 use std::env;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zplc::compilation::{CompilationBuilder, OutputFormat};
+use zplc::dump::{dump_v1, dump_v2};
 
 fn get_zpl_dir() -> PathBuf {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -206,15 +208,34 @@ fn can_compile_misc_test_policies() {
                     }
                 }
             }
-            let cb = CompilationBuilder::new(path)
-                .verbose(true)
-                .output_directory(&temp_dir.path);
-            let mut comp = cb.build();
-            match comp.compile() {
-                Ok(_warnings) => println!("{:?}: compiled ok", fent.path()),
-                Err(e) => {
-                    println!("error: {}", e);
-                    panic!("failed to compile {:?}", fent.path());
+
+            for outfmt in &[OutputFormat::V1, OutputFormat::V2] {
+                let cb = CompilationBuilder::new(path.clone())
+                    .verbose(true)
+                    .output_format(*outfmt)
+                    .output_directory(&temp_dir.path);
+                let mut comp = cb.build();
+                match comp.compile() {
+                    Ok(_warnings) => {
+                        println!("{:?}: compiled ok", fent.path());
+                        // Ok now try to dump it.
+                        let encoded = std::fs::read(&comp.output_file)
+                            .expect("failed to read binary policy file");
+                        let encoded_buf = Bytes::from(encoded);
+                        match outfmt {
+                            OutputFormat::V1 => {
+                                dump_v1(&comp.output_file.to_string_lossy(), encoded_buf);
+                            }
+                            OutputFormat::V2 => {
+                                dump_v2(&comp.output_file.to_string_lossy(), encoded_buf);
+                            }
+                        }
+                        println!("{:?}: dumped ok", fent.path());
+                    }
+                    Err(e) => {
+                        println!("error: {}", e);
+                        panic!("failed to compile {:?}", fent.path());
+                    }
                 }
             }
         }
