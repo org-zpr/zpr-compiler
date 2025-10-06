@@ -27,10 +27,8 @@ and another for the Visa Service to be able to implement the policy.
 
 Here are syntax bits that are not yet supported by the compiler:
 
-- Set values for attributes.  Eg, `allow color:{red, blue} users to access ...` (Issue: [#32][1])
 - Limits.
 - Conditions.
 
 
-[1]: https://github.com/org-zpr/zpr-compiler/issues/32
 
