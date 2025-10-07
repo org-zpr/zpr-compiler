@@ -534,24 +534,6 @@ impl FabricService {
         true
     }
 
-    /// Treat the layer4 protocol port value as a single port number.
-    /// If we find that we return it, else None.
-    /* XXX REMOVE/
-    pub fn get_port(&self) -> Option<u16> {
-        if let Some(ref p) = self.protocol {
-            if !p.has_port() {
-                return None;
-            }
-            if let Some(pstr) = p.get_port() {
-                if let Ok(port) = pstr.parse::<u16>() {
-                    return Some(port);
-                }
-            }
-        }
-        None
-    }
-    */
-
     /// Expect that this service has a L7 protocol name and
     /// a single port.  If that is true, return (L7 protocol name, port)
     /// else return error.
