@@ -4,6 +4,8 @@
 ## pending
 
 - Can now encode set value attribute properly.
+- Support for our full port-spec for the protocol and service port
+  value.
 
 ## [0.9.0] - 2025-09-26
 

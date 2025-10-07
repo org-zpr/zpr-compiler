@@ -13,7 +13,9 @@ use toml::Table;
 use crate::context::CompilationCtx;
 use crate::crypto::sha256;
 use crate::errors::CompilationError;
-use crate::protocols::{IanaProtocol, IcmpFlowType, Protocol, ZPR_L7_BUILTINS};
+use crate::protocols::{
+    IanaProtocol, IcmpFlowType, PortSpec, Protocol, ProtocolError, ZPR_L7_BUILTINS,
+};
 use crate::ptypes::Attribute;
 use crate::zpl;
 
@@ -60,18 +62,16 @@ pub struct Service {
 }
 
 #[derive(Debug)]
-pub struct ProtocolRefinement {
-    pub port: Option<String>,       // override protocol port
-    pub icmp: Option<IcmpFlowType>, // override protocol icmp (needed??)
+pub enum ProtocolRefinement {
+    Port(Vec<PortSpec>), // override protocol portspec
+    Icmp(IcmpFlowType),  // override protocol icmp (needed??)
 }
 
 impl ProtocolRefinement {
-    pub fn apply(&self, protocol: &mut Protocol) {
-        if let Some(refine) = &self.port {
-            protocol.set_port(refine.clone());
-        }
-        if let Some(refine) = &self.icmp {
-            protocol.set_icmp(refine.clone());
+    pub fn apply(&self, protocol: &mut Protocol) -> Result<(), ProtocolError> {
+        match self {
+            ProtocolRefinement::Port(ports) => protocol.set_portspec(ports.clone()),
+            ProtocolRefinement::Icmp(icmp) => protocol.set_icmp(icmp.clone()),
         }
     }
 }
@@ -212,7 +212,7 @@ impl ConfigParse {
         for pname in ZPR_L7_BUILTINS {
             protocols.insert(
                 pname.to_string(),
-                Protocol::new_zpr(pname.to_string(), pname.to_string(), None).unwrap(),
+                Protocol::new_zpr_l7(pname.to_string(), pname.to_string(), None).unwrap(),
             );
         }
     }
@@ -895,8 +895,6 @@ fn parse_protocol(
         .as_str()
         .ok_or(err_config!("protocol {} missing protocol", prot_label))?
         .to_string();
-    let is_icmp = prot.contains_key("icmp_type") || prot.contains_key("icmp_codes");
-    let (port, icmp) = parse_port_and_or_icmp(prot_label, is_icmp, prot)?;
     let l7protocol = if prot.contains_key("l7protocol") {
         Some(
             prot["l7protocol"]
@@ -911,13 +909,32 @@ fn parse_protocol(
         None
     };
     if let Some(l4) = IanaProtocol::parse(&protocol_name) {
-        Ok(Protocol::new(
-            prot_label.to_string(),
-            l4,
-            port,
-            icmp,
-            l7protocol,
-        ))
+        match l4 {
+            IanaProtocol::TCP => {
+                let mut bldr = Protocol::tcp(prot_label);
+                let pspec = parse_tcp_udp_ports(prot_label, prot)?;
+                bldr = bldr.add_ports(pspec);
+                if let Some(l7) = l7protocol {
+                    bldr = bldr.layer7(l7);
+                }
+                Ok(bldr.build()?)
+            }
+            IanaProtocol::UDP => {
+                let mut bldr = Protocol::udp(prot_label);
+                let pspec = parse_tcp_udp_ports(prot_label, prot)?;
+                bldr = bldr.add_ports(pspec);
+                if let Some(l7) = l7protocol {
+                    bldr = bldr.layer7(l7);
+                }
+                Ok(bldr.build()?)
+            }
+            IanaProtocol::ICMP => {
+                Ok(Protocol::icmp4(prot_label, parse_icmp_details(prot_label, prot)?).build()?)
+            }
+            IanaProtocol::ICMPv6 => {
+                Ok(Protocol::icmp6(prot_label, parse_icmp_details(prot_label, prot)?).build()?)
+            }
+        }
     } else {
         Err(err_config!(
             "protocol {}: invalid l4 protocol name: {}",
@@ -944,42 +961,36 @@ fn warn_unknown_prot_property(prot: &Table, ctx: &CompilationCtx) -> Result<(), 
     Ok(())
 }
 
-fn parse_port_and_or_icmp(
-    ctx: &str,
-    is_icmp: bool,
-    prot: &Table,
-) -> Result<(Option<String>, Option<IcmpFlowType>), CompilationError> {
-    // For now we treat the port value as a string. But is really going to be a port spec so could
-    // be a range of ports or a sequence of ports, etc.  In TOML this may come through as a number.
-    let port = if prot.contains_key("port") {
-        if prot["port"].is_str() {
-            Some(prot["port"].as_str().unwrap().to_string())
+/// Parse the "port" value, if not found or invalid return an error.
+/// Valid port format is:
+/// - single port number, eg `port = 80`
+/// - comma separated list of port numbers, eg `port = "22,80,443"`
+/// - range of port numbers, eg `port = "8000-9000"`
+/// - comma separated mix of the above (eg, `port = "22,80,443,8000-9000"`)
+fn parse_tcp_udp_ports(ctx: &str, tab: &Table) -> Result<Vec<PortSpec>, CompilationError> {
+    let ps_strv = if tab.contains_key("port") {
+        if tab["port"].is_str() {
+            tab["port"].as_str().unwrap().to_string()
         } else {
-            Some(prot["port"].to_string())
+            tab["port"].to_string()
         }
     } else {
-        None
+        return Err(err_config!("protocol {} missing port", ctx));
     };
 
-    let icmp = if is_icmp {
-        Some(parse_icmp_details(ctx, prot)?)
-    } else {
-        if prot.contains_key("icmp_type") {
-            return Err(err_config!(
-                "protocol {} has icmp_type but is not an ICMP protocol",
-                ctx
-            ));
-        }
-        if prot.contains_key("icmp_codes") {
-            return Err(err_config!(
-                "protocol {} has icmp_codes but is not an ICMP protocol",
-                ctx,
-            ));
-        }
-        None
-    };
-
-    Ok((port, icmp))
+    // Valid form of `ps_strv` is:
+    // - single port number
+    // - comma separated list of port numbers
+    // - range of port numbers (e.g. 8000-9000)
+    // - comma separated mix of the above (e.g. 22,80,443,8000-9000)
+    PortSpec::parse_list(&ps_strv).map_err(|e| {
+        err_config!(
+            "protocol {} invalid port specification '{}': {}",
+            ctx,
+            ps_strv,
+            e
+        )
+    })
 }
 
 /// Parse the very bare bones individual service table.
@@ -1015,34 +1026,17 @@ fn parse_service(
     };
 
     // The service could contain overrides for protocol.
-    let looks_like_icmp = s.contains_key("icmp_type") || s.contains_key("icmp_codes");
-    let (port, icmp) = parse_port_and_or_icmp(sid, looks_like_icmp, s)?;
-    let opt_refine =
-        // Is in our table.  Did this clause specify any sort of override?
-        if port.is_some() || icmp.is_some() {
-            if port.is_some() && matched_protocol.is_icmp() {
-                return Err(err_config!(
-                    "service {}: cannot override port for ICMP protocol: {}",
-                    sid,
-                    protocol_label
-                ));
-            }
-            if icmp.is_some() && !matched_protocol.is_icmp() {
-                return Err(err_config!(
-                    "service {}: cannot override icmp for non-ICMP protocol: {}",
-                    sid,
-                    protocol_label
-                ));
-            }
-            let refinement = ProtocolRefinement {
-                port,
-                icmp,
-            };
-            Some(refinement)
+    let opt_refine = if matched_protocol.is_icmp() {
+        if s.contains_key("icmp_type") || s.contains_key("icmp_codes") {
+            Some(ProtocolRefinement::Icmp(parse_icmp_details(sid, s)?))
         } else {
-            // No override, just use the protocol as is.
             None
-        };
+        }
+    } else if s.contains_key("port") {
+        Some(ProtocolRefinement::Port(parse_tcp_udp_ports(sid, s)?))
+    } else {
+        None
+    };
 
     Ok(Service {
         id: sid.to_string(),
@@ -1441,7 +1435,7 @@ mod test {
         assert_eq!(prots.len(), 2);
         let http = prots.get("http").unwrap();
         assert_eq!(http.get_layer4(), IanaProtocol::TCP);
-        assert_eq!(http.get_port(), Some(&String::from("80")));
+        assert_eq!(http.get_port().unwrap(), &vec![PortSpec::Single(80)]);
         assert!(!http.is_icmp());
         let ping = prots.get("ping").unwrap();
         assert_eq!(ping.get_layer4(), IanaProtocol::ICMPv6);
@@ -1454,6 +1448,34 @@ mod test {
             }
             _ => panic!("unexpected icmp type"),
         }
+    }
+
+    #[test]
+    fn test_parse_protocols_with_port_specs() {
+        let tstr = r#"
+        [protocols.http]
+        l4protocol = "iana.Tcp"
+        port = "80, 443, 8080-8081, 31337"
+
+        "#;
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let prots = cparser.parse_protocols(&ctx);
+        assert!(prots.is_ok());
+        let prots = prots.unwrap();
+        assert_eq!(prots.len(), 1);
+        let http = prots.get("http").unwrap();
+        assert_eq!(http.get_layer4(), IanaProtocol::TCP);
+        assert_eq!(
+            http.get_port().unwrap(),
+            &vec![
+                PortSpec::Single(80),
+                PortSpec::Single(443),
+                PortSpec::Range(8080, 8081),
+                PortSpec::Single(31337),
+            ]
+        );
+        assert!(!http.is_icmp());
     }
 
     #[test]
@@ -1470,12 +1492,16 @@ mod test {
         let ctx = CompilationCtx::default();
         let mut protocols = HashMap::new();
         protocols.insert(
-            String::from("ping"),
-            Protocol::new("ping".to_string(), IanaProtocol::ICMPv6, None, None, None),
+            "ping".to_string(),
+            Protocol::icmp6("ping", IcmpFlowType::OneShot(vec![128, 129]))
+                .build()
+                .unwrap(),
         );
         protocols.insert(
             String::from("pong"),
-            Protocol::new("pong".to_string(), IanaProtocol::ICMPv6, None, None, None),
+            Protocol::icmp6("pong", IcmpFlowType::OneShot(vec![128, 129]))
+                .build()
+                .unwrap(),
         );
         let services = cparser.parse_services(&ctx, &protocols);
         if services.is_err() {
@@ -1528,7 +1554,13 @@ mod test {
         assert_eq!(parsed.id, "MyService");
         assert!(parsed.protocol_refinement.is_some());
         let pr = parsed.protocol_refinement.as_ref().unwrap();
-        assert_eq!(pr.port, Some("3000".to_string()));
+        assert!(matches!(pr, ProtocolRefinement::Port(_)));
+        let ports = match pr {
+            ProtocolRefinement::Port(p) => p,
+            _ => panic!("unexpected protocol refinement"),
+        };
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], PortSpec::Single(3000));
     }
 
     #[test]
@@ -1645,6 +1677,190 @@ mod test {
         assert!(result.is_err());
         if let Err(CompilationError::ConfigError(msg)) = result {
             assert!(msg.contains("invalid attribute mapping"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_single_port() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String("80".to_string()));
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], crate::protocols::PortSpec::Single(80));
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_single_port_integer() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::Integer(443));
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], crate::protocols::PortSpec::Single(443));
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_multiple_ports() {
+        let mut table = Table::new();
+        table.insert(
+            "port".to_string(),
+            toml::Value::String("80,443,8080".to_string()),
+        );
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 3);
+        assert_eq!(ports[0], crate::protocols::PortSpec::Single(80));
+        assert_eq!(ports[1], crate::protocols::PortSpec::Single(443));
+        assert_eq!(ports[2], crate::protocols::PortSpec::Single(8080));
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_port_range() {
+        let mut table = Table::new();
+        table.insert(
+            "port".to_string(),
+            toml::Value::String("8000-9000".to_string()),
+        );
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 1);
+        assert_eq!(ports[0], crate::protocols::PortSpec::Range(8000, 9000));
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_mixed_ports_and_ranges() {
+        let mut table = Table::new();
+        table.insert(
+            "port".to_string(),
+            toml::Value::String("22,80,8000-8999,443".to_string()),
+        );
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 4);
+        assert_eq!(ports[0], crate::protocols::PortSpec::Single(22));
+        assert_eq!(ports[1], crate::protocols::PortSpec::Single(80));
+        assert_eq!(ports[2], crate::protocols::PortSpec::Range(8000, 8999));
+        assert_eq!(ports[3], crate::protocols::PortSpec::Single(443));
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_with_spaces() {
+        let mut table = Table::new();
+        table.insert(
+            "port".to_string(),
+            toml::Value::String(" 80 , 443 , 8080 ".to_string()),
+        );
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_ok());
+        let ports = result.unwrap();
+        assert_eq!(ports.len(), 3);
+        assert_eq!(ports[0], crate::protocols::PortSpec::Single(80));
+        assert_eq!(ports[1], crate::protocols::PortSpec::Single(443));
+        assert_eq!(ports[2], crate::protocols::PortSpec::Single(8080));
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_missing_port() {
+        let table = Table::new(); // Empty table, no port key
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("protocol test-protocol missing port"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_invalid_port_number() {
+        let mut table = Table::new();
+        table.insert(
+            "port".to_string(),
+            toml::Value::String("invalid".to_string()),
+        );
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("protocol test-protocol invalid port specification"));
+            assert!(msg.contains("invalid"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_invalid_port_range() {
+        let mut table = Table::new();
+        table.insert(
+            "port".to_string(),
+            toml::Value::String("8000-7000".to_string()),
+        ); // Invalid range (start > end)
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("protocol test-protocol invalid port specification"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_zero_port() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String("0".to_string()));
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("protocol test-protocol invalid port specification"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_port_too_high() {
+        let mut table = Table::new();
+        table.insert("port".to_string(), toml::Value::String("65536".to_string())); // Port out of range
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("protocol test-protocol invalid port specification"));
+        } else {
+            panic!("Expected ConfigError");
+        }
+    }
+
+    #[test]
+    fn test_parse_tcp_udp_ports_malformed_range() {
+        let mut table = Table::new();
+        table.insert(
+            "port".to_string(),
+            toml::Value::String("8000-8500-9000".to_string()),
+        ); // Too many dashes
+
+        let result = parse_tcp_udp_ports("test-protocol", &table);
+        assert!(result.is_err());
+        if let Err(CompilationError::ConfigError(msg)) = result {
+            assert!(msg.contains("protocol test-protocol invalid port specification"));
         } else {
             panic!("Expected ConfigError");
         }

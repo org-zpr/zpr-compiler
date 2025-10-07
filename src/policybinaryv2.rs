@@ -5,7 +5,7 @@ use crate::compiler::get_compiler_version;
 use crate::errors::CompilationError;
 use crate::fabric::ServiceType; // TODO: remove refs to fabric
 use crate::policywriter::{PFlags, PolicyContainer, PolicyWriter, TSType};
-use crate::protocols::{IcmpFlowType, Protocol};
+use crate::protocols::{IcmpFlowType, PortSpec, Protocol, ProtocolDetails};
 use crate::ptypes::{Attribute, Signal}; // TODO: remove refs to fabric
 
 #[derive(Default)]
@@ -61,8 +61,9 @@ impl PolicyBinaryV2 {
         // from the icmp enum.  Otherwise we need to parse port. The port spec
         // idea from earlier ZPL is not implemented either, so the only thing
         // we accept in the port field is a single port number.
-        if let Some(icmpflow) = svc_prot.get_icmp() {
-            match icmpflow {
+
+        match svc_prot.get_details() {
+            ProtocolDetails::Icmp(ft) => match ft {
                 IcmpFlowType::OneShot(icmp_types) => {
                     for icmp_type in icmp_types {
                         let scope = Scope {
@@ -83,16 +84,26 @@ impl PolicyBinaryV2 {
                     };
                     scopes.push(scope);
                 }
+            },
+            ProtocolDetails::TcpUdp(specs) => {
+                for spec in specs {
+                    let scope = match spec {
+                        PortSpec::Single(pnum) => Scope {
+                            protocol: svc_prot.get_layer4() as u8,
+                            flag: None,
+                            port: Some(*pnum),
+                            port_range: None,
+                        },
+                        PortSpec::Range(lo, hi) => Scope {
+                            protocol: svc_prot.get_layer4() as u8,
+                            flag: None,
+                            port: None,
+                            port_range: Some((*lo, *hi)),
+                        },
+                    };
+                    scopes.push(scope);
+                }
             }
-        } else {
-            let portnum: u16 = svc_prot.get_port().unwrap().parse().unwrap();
-            let scope = Scope {
-                protocol: svc_prot.get_layer4() as u8,
-                flag: None,
-                port: Some(portnum),
-                port_range: None,
-            };
-            scopes.push(scope);
         }
         scopes
     }
@@ -318,14 +329,16 @@ impl PolicyWriter for PolicyBinaryV2 {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::protocols::{IanaProtocol, IcmpFlowType, Protocol};
+    use crate::protocols::{IcmpFlowType, Protocol};
 
     #[test]
     fn test_protocol_to_scopes_basic_tcp() {
         let pb = PolicyBinaryV2::new();
 
-        let prot1 =
-            Protocol::new_l4_with_port("foo".to_string(), IanaProtocol::TCP, "80".to_string());
+        let prot1 = Protocol::tcp("foo")
+            .add_port(PortSpec::Single(80))
+            .build()
+            .unwrap();
         let scopes1 = pb.protocol_to_scopes(&prot1);
         assert_eq!(scopes1.len(), 1);
         assert_eq!(scopes1[0].protocol, 6);
@@ -335,10 +348,38 @@ mod test {
     }
 
     #[test]
+    fn test_protocol_to_scopes_multiple_tcp() {
+        let pb = PolicyBinaryV2::new();
+
+        let prot1 = Protocol::tcp("foo")
+            .add_ports(vec![
+                PortSpec::Single(80),
+                PortSpec::Single(443),
+                PortSpec::Range(1000, 2000),
+            ])
+            .build()
+            .unwrap();
+        let scopes1 = pb.protocol_to_scopes(&prot1);
+        assert_eq!(scopes1.len(), 3);
+        assert_eq!(scopes1[0].protocol, 6);
+        assert_eq!(scopes1[0].port, Some(80));
+        assert_eq!(scopes1[0].port_range, None);
+        assert_eq!(scopes1[0].flag, None);
+        assert_eq!(scopes1[1].protocol, 6);
+        assert_eq!(scopes1[1].port, Some(443));
+        assert_eq!(scopes1[1].port_range, None);
+        assert_eq!(scopes1[1].flag, None);
+        assert_eq!(scopes1[2].protocol, 6);
+        assert_eq!(scopes1[2].port, None);
+        assert_eq!(scopes1[2].port_range, Some((1000, 2000)));
+        assert_eq!(scopes1[2].flag, None);
+    }
+
+    #[test]
     fn test_protocol_to_scopes_icmp_request_reply() {
         let pb = PolicyBinaryV2::new();
         let flow = IcmpFlowType::RequestResponse(128, 129);
-        let prot1 = Protocol::new_l4_with_icmp("foo".to_string(), IanaProtocol::ICMPv6, flow);
+        let prot1 = Protocol::icmp6("foo", flow).build().unwrap();
         let scopes1 = pb.protocol_to_scopes(&prot1);
         assert_eq!(scopes1.len(), 1);
         assert_eq!(scopes1[0].protocol, 58);
@@ -351,7 +392,7 @@ mod test {
     fn test_protocol_to_scopes_icmp_once() {
         let pb = PolicyBinaryV2::new();
         let flow = IcmpFlowType::OneShot(vec![128]);
-        let prot1 = Protocol::new_l4_with_icmp("foo".to_string(), IanaProtocol::ICMPv6, flow);
+        let prot1 = Protocol::icmp6("foo", flow).build().unwrap();
         let scopes1 = pb.protocol_to_scopes(&prot1);
         assert_eq!(scopes1.len(), 1);
         assert_eq!(scopes1[0].protocol, 58);
@@ -364,7 +405,7 @@ mod test {
     fn test_protocol_to_scopes_icmp_once_multiple() {
         let pb = PolicyBinaryV2::new();
         let flow = IcmpFlowType::OneShot(vec![128, 129, 130]);
-        let prot1 = Protocol::new_l4_with_icmp("foo".to_string(), IanaProtocol::ICMPv6, flow);
+        let prot1 = Protocol::icmp6("foo", flow).build().unwrap();
         let scopes1 = pb.protocol_to_scopes(&prot1);
         assert_eq!(scopes1.len(), 3);
         assert_eq!(scopes1[0].protocol, 58);
