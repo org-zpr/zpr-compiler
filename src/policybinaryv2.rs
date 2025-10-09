@@ -25,6 +25,7 @@ struct CommunicationPolicy {
     cli_conditions: Vec<Attribute>,
     svc_conditions: Vec<Attribute>,
     pline: String,
+    signal: Option<Signal>,
 }
 
 /// This scope flag mirrors what is in the capnp schema.
@@ -227,7 +228,7 @@ impl PolicyWriter for PolicyBinaryV2 {
         allow: bool,
         cli_conditions: &[Attribute],
         svc_conditions: &[Attribute],
-        _signal: Option<Signal>,
+        signal: Option<Signal>,
         pline: &str,
     ) {
         self.communication_policies.push(CommunicationPolicy {
@@ -238,6 +239,7 @@ impl PolicyWriter for PolicyBinaryV2 {
             cli_conditions: cli_conditions.to_vec(),
             svc_conditions: svc_conditions.to_vec(),
             pline: pline.to_string(),
+            signal,
         });
     }
 
@@ -310,6 +312,17 @@ impl PolicyWriter for PolicyBinaryV2 {
                 .reborrow()
                 .init_service_conds(cp.svc_conditions.len() as u32);
             self.write_attributes(&cp.svc_conditions, &mut svcconds);
+
+            if cp.signal.is_some() {
+                let mut sig_build = cpol.reborrow().init_signal();
+                sig_build
+                    .reborrow()
+                    .init_msg(cp.signal.as_ref().unwrap().message.len() as u32)
+                    .push_str(&cp.signal.as_ref().unwrap().message);
+                sig_build
+                    .init_svc(cp.signal.as_ref().unwrap().service_class_name.len() as u32)
+                    .push_str(&cp.signal.as_ref().unwrap().service_class_name);
+            }
         }
 
         let mut policy_bytes: Vec<u8> = Vec::new();
