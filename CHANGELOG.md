@@ -3,6 +3,10 @@
 
 ## pending
 
+- (empty)
+
+## [0.9.1] - 2025-10-14
+
 - Can now encode set value attribute properly.
 - Support for our full port-spec for the protocol and service port
   value.
@@ -102,6 +106,7 @@ repository.
 
 
 
+[0.9.1]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.9.1
 [0.8.1]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.8.1
 [0.8.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.8.0
 [0.7.0]: https://github.com/org-zpr/zpr-compiler/releases/tag/v0.7.0
