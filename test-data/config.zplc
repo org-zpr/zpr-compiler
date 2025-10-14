@@ -8,6 +8,7 @@ zpr_address = "fd5a:5052:90de::1"
 prefix = "foo" # maybe prefix should default to <service-name> ?
 api = "validation/2"
 returns_attributes = [ 
+  "intrnl -> #service.internal",
   "government -> #user.government",
   "cleared -> #user.cleared", 
   "clearance -> user.clearance", 
@@ -38,4 +39,7 @@ protocol = "http"
 protocol = "http"
 
 [services.gateway]
+protocol = "http"
+
+[services.internet-gateway]
 protocol = "http"
