@@ -19,6 +19,27 @@ contents of a "compiled" binary policy, `zpdump`.
 - Help is available via `zplc -h`
 
 
+## How to build
+
+The compiler makes use of our binary policy encodings which are currently
+in a private repository. We have bundled the rust repo along with the
+current compiler [release](https://github.com/org-zpr/zpr-compiler/releases).
+
+First download and unpack `zpr-policy-rs.tar.gz`. Then point the
+zpr-compiler `Cargo.toml` at the path instead of the github repo. So change
+this:
+
+``` 
+zpr-policy = { git = "https://github.com/org-zpr/zpr-policy-rs.git", tag = "v0.8.5", features = ["v1", "v2"]}
+```
+
+to this:
+
+```
+zpr-policy = { path = "/path/to/zpr-policy-rs", tag = "v0.8.5", features = ["v1", "v2"]}
+```
+
+
 ## TODO
 
 Work is ongoing to accept the full ZPL syntax. Note that it is one
