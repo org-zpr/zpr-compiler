@@ -99,11 +99,20 @@ checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
 
 [[package]]
 name = "capnp"
-version = "0.21.5"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f62fcad97587224e2a1bd12ec1c7c0e95b93cefd285763a174cf1b34048c6437"
+checksum = "bbffb6e69e1ea2cf518ac5037a78a223ecb82b4ac81e7ab33cb5211b43d712ac"
 dependencies = [
  "embedded-io",
+]
+
+[[package]]
+name = "capnpc"
+version = "0.23.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f1cd4f042d6725da6245bde08c9e7c74f6fcb2d8bd5e0378e57991be8d711d8"
+dependencies = [
+ "capnp",
 ]
 
 [[package]]
@@ -210,9 +219,9 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "embedded-io"
-version = "0.6.1"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+checksum = "9eb1aa714776b75c7e67e1da744b81a129b3ff919c8712b5e1b32252c1f07cc7"
 
 [[package]]
 name = "equivalent"
@@ -933,9 +942,10 @@ dependencies = [
 
 [[package]]
 name = "zpr-policy"
-version = "0.12.0"
-source = "git+https://github.com/org-zpr/zpr-policy-rs.git?tag=v0.8.5#2e3b673b613bede3a78686318c3418a461ca9b88"
+version = "0.13.0"
+source = "git+https://github.com/org-zpr/zpr-policy-rs.git?tag=v0.9.0#3acf76e60c35bb17693b40568b56122e1a521b13"
 dependencies = [
  "capnp",
+ "capnpc",
  "prost",
 ]
