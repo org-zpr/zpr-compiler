@@ -1,7 +1,8 @@
 use bytes::Bytes;
 use clap::Parser;
 use std::path::PathBuf;
-use zplc::dump;
+use zplc::dumpv1::dump_v1;
+use zplc::dumpv2::dump_v2;
 
 /// ZPL Policy Dumper
 ///
@@ -23,9 +24,9 @@ fn main() {
     let encoded = std::fs::read(cli.zpl).expect("failed to read binary policy file");
     let encoded_buf = Bytes::from(encoded);
     if fname.ends_with(".bin2") {
-        dump::dump_v2(&fname, encoded_buf);
+        dump_v2(&fname, encoded_buf);
     } else {
-        dump::dump_v1(&fname, encoded_buf);
+        dump_v1(&fname, encoded_buf);
     }
     std::process::exit(exit_code);
 }

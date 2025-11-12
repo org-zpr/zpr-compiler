@@ -3,7 +3,8 @@ use std::env;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zplc::compilation::{CompilationBuilder, OutputFormat};
-use zplc::dump::{dump_v1, dump_v2};
+use zplc::dumpv1::dump_v1;
+use zplc::dumpv2::dump_v2;
 
 fn get_zpl_dir() -> PathBuf {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
