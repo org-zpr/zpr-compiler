@@ -16,8 +16,9 @@ env:
 jobs:
   check:
     name: ZPL Compiler
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v0.1.0
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.1
     with:
       name: 'ZPL Compiler'
       runs-on: "['ubuntu-latest']"
+      needs-capnp: true
     secrets: inherit
