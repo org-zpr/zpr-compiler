@@ -1,8 +1,8 @@
-use ::polio::policy_capnp;
 use bytes::Bytes;
 use colored::Colorize;
 use openssl::rsa::Rsa;
 use std::convert::TryInto;
+use zpr::policy::v1 as policy_capnp;
 
 use crate::compiler::get_compiler_version;
 use crate::dump;

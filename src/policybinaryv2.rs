@@ -1,5 +1,5 @@
-use ::polio::policy_capnp;
 use std::collections::HashMap;
+use zpr::policy::v1 as policy_capnp;
 
 use crate::compiler::get_compiler_version;
 use crate::errors::CompilationError;
@@ -120,7 +120,7 @@ impl PolicyBinaryV2 {
     fn write_attributes(
         &self,
         attrs: &[Attribute],
-        conds: &mut capnp::struct_list::Builder<'_, polio::policy_capnp::attr_expr::Owned>,
+        conds: &mut capnp::struct_list::Builder<'_, policy_capnp::attr_expr::Owned>,
     ) {
         for (j, attr) in attrs.iter().enumerate() {
             let mut ccond = conds.reborrow().get(j as u32);
