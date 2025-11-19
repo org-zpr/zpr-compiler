@@ -14,6 +14,7 @@ pub struct PolicyBinaryV2 {
     policy_version: u64,
     policy_metadata: String,
     communication_policies: Vec<CommunicationPolicy>,
+    bootstrap_keys: Vec<BootstrapKey>,
 }
 
 #[allow(dead_code)]
@@ -26,6 +27,11 @@ struct CommunicationPolicy {
     svc_conditions: Vec<Attribute>,
     pline: String,
     signal: Option<Signal>,
+}
+
+struct BootstrapKey {
+    cn: String,
+    keydata: Vec<u8>,
 }
 
 /// This scope flag mirrors what is in the capnp schema.
@@ -217,7 +223,10 @@ impl PolicyWriter for PolicyBinaryV2 {
     }
 
     fn write_bootstrap_key(&mut self, _cn: &str, _keydata: &[u8]) {
-        // nop
+        self.bootstrap_keys.push(BootstrapKey {
+            cn: _cn.to_string(),
+            keydata: _keydata.to_vec(),
+        });
     }
 
     fn write_cpolicy(
@@ -269,6 +278,21 @@ impl PolicyWriter for PolicyBinaryV2 {
         policy.set_created(&self.created_timestamp);
         policy.set_version(self.policy_version);
         policy.set_metadata(&self.policy_metadata);
+
+        let mut bkeys = policy
+            .reborrow()
+            .init_keys(self.bootstrap_keys.len() as u32);
+        for (i, bkey) in self.bootstrap_keys.iter().enumerate() {
+            let mut km_builder = bkeys.reborrow().get(i as u32);
+
+            km_builder.set_id(&bkey.cn);
+            km_builder.set_key_type(policy_capnp::KeyMaterialT::RsaPub);
+
+            let mut allows_builder = km_builder.reborrow().init_key_allows(1);
+            allows_builder.set(0, policy_capnp::KeyAllowance::Bootstrap);
+
+            km_builder.set_key_data(&bkey.keydata);
+        }
 
         let mut cpols = policy.init_com_policies(self.communication_policies.len() as u32);
         for (i, cp) in self.communication_policies.iter().enumerate() {

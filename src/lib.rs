@@ -18,6 +18,8 @@ mod context;
 pub mod crypto;
 mod define;
 pub mod dump;
+pub mod dumpv1;
+pub mod dumpv2;
 pub mod errors;
 mod fabric;
 mod fabric_util;
