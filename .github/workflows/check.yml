@@ -26,12 +26,6 @@ jobs:
     - run: rustup toolchain install stable --profile minimal
     - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
 
-    - name: Install capnp
-      if: ${{ inputs.needs-capnp && runner.os == 'Linux' }}
-      timeout-minutes: 5
-      run: |
-        sudo apt install capnproto
-
     - name: Build ZPLC
       id: build
       timeout-minutes: 5

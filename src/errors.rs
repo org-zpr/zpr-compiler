@@ -93,6 +93,9 @@ pub enum CompilationError {
 
     #[error("attribute error: {0}")]
     AttributeError(#[from] AttributeError),
+
+    #[error("version not available.  Recompile with {0} feature")]
+    VersionError(String),
 }
 
 #[derive(Debug, Error)]
