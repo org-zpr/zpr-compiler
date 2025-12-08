@@ -29,11 +29,11 @@ jobs:
     - name: Build ZPLC
       id: build
       timeout-minutes: 5
-      run: cargo build --verbose
+      run: cargo build --verbose --features v1
 
     - name: Test ZPLC
       timeout-minutes: 5
-      run: cargo test --verbose
+      run: cargo test --verbose --features v1
 
     - name: Check format
       if: ${{ ! cancelled() }}
@@ -43,4 +43,4 @@ jobs:
     - name: Check warnings
       if: ${{ ! cancelled() }}
       timeout-minutes: 5
-      run: cargo build --all-targets --config 'build.rustflags = ["-D", "warnings"]'
+      run: cargo build --all-targets --features v1 --config 'build.rustflags = ["-D", "warnings"]'
