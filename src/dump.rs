@@ -1,8 +1,11 @@
 use colored::Colorize;
+#[cfg(feature = "v1")]
 use polio::polio;
+#[cfg(feature = "v1")]
 use std::convert::TryInto;
 use std::net::IpAddr;
 
+#[cfg(feature = "v1")]
 use crate::protocols::IanaProtocol;
 use crate::zpl;
 
@@ -24,6 +27,7 @@ pub fn config_setting_key_to_string(key: u32) -> String {
     }
 }
 
+#[cfg(feature = "v1")]
 pub fn config_val_to_string(optval: &Option<polio::config_setting::Val>) -> String {
     match optval {
         Some(polio::config_setting::Val::Sv(s)) => s.clone(),
@@ -56,10 +60,12 @@ fn parse_addr(addr_bytes: &[u8]) -> Result<IpAddr, String> {
     }
 }
 
+#[cfg(feature = "v1")]
 pub fn instrs_to_strings(instrs: &[polio::Instruction]) -> Vec<String> {
     instrs.iter().map(instr_to_string).collect::<Vec<String>>()
 }
 
+#[cfg(feature = "v1")]
 fn instr_to_string(instr: &polio::Instruction) -> String {
     let mut sb = String::new();
     sb.push_str(&format!("{} ", opcode_to_string(instr.opcode)));
@@ -83,6 +89,7 @@ fn instr_to_string(instr: &polio::Instruction) -> String {
     sb
 }
 
+#[cfg(feature = "v1")]
 fn opcode_to_string(opcode: i32) -> String {
     String::from(match polio::OpCodeT::try_from(opcode) {
         Ok(t) => t.as_str_name(),
@@ -90,6 +97,7 @@ fn opcode_to_string(opcode: i32) -> String {
     })
 }
 
+#[cfg(feature = "v1")]
 fn flagt_to_string(flag: i32) -> String {
     String::from(match polio::FlagT::try_from(flag) {
         Ok(f) => f.as_str_name(),
@@ -97,6 +105,7 @@ fn flagt_to_string(flag: i32) -> String {
     })
 }
 
+#[cfg(feature = "v1")]
 pub fn svct_to_string(svct: i32) -> String {
     String::from(match polio::SvcT::try_from(svct) {
         Ok(st) => st.as_str_name(),
@@ -104,6 +113,7 @@ pub fn svct_to_string(svct: i32) -> String {
     })
 }
 
+#[cfg(feature = "v1")]
 pub fn scopes_to_string(scopes: &[polio::Scope]) -> String {
     scopes
         .iter()
@@ -112,6 +122,7 @@ pub fn scopes_to_string(scopes: &[polio::Scope]) -> String {
         .join(", ")
 }
 
+#[cfg(feature = "v1")]
 fn scope_to_string(scope: &polio::Scope) -> String {
     let proto: IanaProtocol = match scope.protocol.try_into() {
         Ok(p) => p,
@@ -149,6 +160,7 @@ fn scope_to_string(scope: &polio::Scope) -> String {
     s
 }
 
+#[cfg(feature = "v1")]
 pub fn attr_exp_to_string(exp: &polio::AttrExpr, keys: &[String], values: &[String]) -> String {
     let mut s = String::new();
     s.push_str(&keys[exp.key as usize]);
@@ -157,6 +169,7 @@ pub fn attr_exp_to_string(exp: &polio::AttrExpr, keys: &[String], values: &[Stri
     s
 }
 
+#[cfg(feature = "v1")]
 fn attr_opt_t_to_string(opval: i32) -> String {
     String::from(match polio::AttrOpT::try_from(opval) {
         Ok(o) => o.as_str_name(),

@@ -18,7 +18,9 @@ mod context;
 pub mod crypto;
 mod define;
 pub mod dump;
+#[cfg(feature = "v1")]
 pub mod dumpv1;
+#[cfg(feature = "v2")]
 pub mod dumpv2;
 pub mod errors;
 mod fabric;
@@ -26,9 +28,15 @@ mod fabric_util;
 mod lex;
 mod never;
 mod parser;
+#[cfg(feature = "v1")]
 pub mod policybinaryv1;
+#[cfg(feature = "v2")]
 pub mod policybinaryv2;
 pub mod policybuilder;
+#[cfg(not(feature = "v1"))]
+pub mod policystubv1;
+#[cfg(not(feature = "v2"))]
+pub mod policystubv2;
 pub mod policywriter;
 pub mod protocols;
 mod ptypes;

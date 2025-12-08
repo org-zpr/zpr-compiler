@@ -11,9 +11,15 @@ use crate::crypto::{sha256_of_file, sign_pkcs1v15_sha256};
 use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
+#[cfg(feature = "v1")]
 use crate::policybinaryv1::{PolicyBinaryV1, PolicyContainerV1};
+#[cfg(feature = "v2")]
 use crate::policybinaryv2::{PolicyBinaryV2, PolicyContainerV2};
 use crate::policybuilder::PolicyBuilder;
+#[cfg(not(feature = "v1"))]
+use crate::policystubv1::{PolicyBinaryV1, PolicyContainerV1};
+#[cfg(not(feature = "v2"))]
+use crate::policystubv2::{PolicyBinaryV2, PolicyContainerV2};
 use crate::policywriter::PolicyContainer;
 use crate::ptypes::{AllowClause, Policy};
 use crate::weaver::weave;
@@ -459,7 +465,9 @@ impl CompilationBuilder {
 mod test {
     use super::*;
 
+    #[cfg(feature = "v1")]
     use polio::polio;
+    #[cfg(feature = "v1")]
     use prost::Message;
     use std::env;
     use std::path::PathBuf;
@@ -515,6 +523,7 @@ mod test {
     "#;
 
     // Includes a trusted service
+    #[cfg(feature = "v1")]
     const BAS_CONFIG: &str = r#"
     [nodes.n0]
     key = "none"
@@ -553,6 +562,7 @@ mod test {
     "#;
 
     #[test]
+    #[cfg(feature = "v1")]
     fn simple_compile() {
         let zpl = r#"
         define Webby as service with endpoint.zpr.adapter.cn
@@ -611,6 +621,7 @@ mod test {
 
     // In this case with is not required since we have attributes in conifg.
     #[test]
+    #[cfg(feature = "v1")]
     fn define_ok_without_with() {
         let zplc = r#"
         [nodes.n0]
@@ -748,6 +759,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(feature = "v1")]
     fn test_service_attributes() {
         let zpl = r#"
         define Webby as a service with user.bas_id:100.

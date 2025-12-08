@@ -3,12 +3,23 @@ use std::env;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zplc::compilation::{CompilationBuilder, OutputFormat};
+#[cfg(feature = "v1")]
 use zplc::dumpv1::dump_v1;
+#[cfg(feature = "v2")]
 use zplc::dumpv2::dump_v2;
 
 fn get_zpl_dir() -> PathBuf {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     PathBuf::from(manifest_dir).join("test-data")
+}
+
+fn get_output_formats() -> Vec<OutputFormat> {
+    let mut formats = Vec::<OutputFormat>::new();
+    #[cfg(feature = "v1")]
+    formats.push(OutputFormat::V1);
+    #[cfg(feature = "v2")]
+    formats.push(OutputFormat::V2);
+    formats
 }
 
 struct TempDir {
@@ -66,7 +77,7 @@ fn can_parse_rfc_examples() {
                     }
                 }
             }
-            for outfmt in &[OutputFormat::V1, OutputFormat::V2] {
+            for outfmt in &get_output_formats() {
                 let cb = CompilationBuilder::new(path.clone())
                     .verbose(true)
                     .parse_only(true)
@@ -113,7 +124,7 @@ fn can_compile_m3_policies() {
                     }
                 }
             }
-            for outfmt in &[OutputFormat::V1, OutputFormat::V2] {
+            for outfmt in &get_output_formats() {
                 let cb = CompilationBuilder::new(path.clone())
                     .verbose(true)
                     .output_format(*outfmt)
@@ -162,7 +173,7 @@ fn can_compile_integtest_policies() {
                     }
                 }
             }
-            for outfmt in &[OutputFormat::V1, OutputFormat::V2] {
+            for outfmt in &get_output_formats() {
                 let cb = CompilationBuilder::new(path.clone())
                     .verbose(true)
                     .output_format(*outfmt)
@@ -210,7 +221,7 @@ fn can_compile_misc_test_policies() {
                 }
             }
 
-            for outfmt in &[OutputFormat::V1, OutputFormat::V2] {
+            for outfmt in &get_output_formats() {
                 let cb = CompilationBuilder::new(path.clone())
                     .verbose(true)
                     .output_format(*outfmt)
@@ -225,9 +236,11 @@ fn can_compile_misc_test_policies() {
                         let encoded_buf = Bytes::from(encoded);
                         match outfmt {
                             OutputFormat::V1 => {
+                                #[cfg(feature = "v1")]
                                 dump_v1(&comp.output_file.to_string_lossy(), encoded_buf);
                             }
                             OutputFormat::V2 => {
+                                #[cfg(feature = "v2")]
                                 dump_v2(&comp.output_file.to_string_lossy(), encoded_buf);
                             }
                         }
