@@ -732,7 +732,9 @@ impl Attribute {
             return vec![format!("{}.{}", self.domain, self.name)];
         }
         if let Some(v) = &self.values {
-            v.clone()
+            let mut sorted_values = v.clone();
+            sorted_values.sort();
+            sorted_values
         } else {
             vec![]
         }

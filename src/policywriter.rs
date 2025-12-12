@@ -7,7 +7,7 @@ use crate::ptypes::{Attribute, Signal}; // TODO: remove refs to fabric
 
 /// In V1 These flags are used to set the type of service in the PROC.
 /// TODO: Maybe switch to using the protocol buffer type directly?
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct PFlags {
     pub node: bool,
     pub vs: bool,
@@ -16,11 +16,11 @@ pub struct PFlags {
 
 impl PFlags {
     /// Create the set of flags for a node.
-    pub fn node() -> PFlags {
+    pub fn node(is_vs_dock: bool) -> PFlags {
         PFlags {
             node: true,
             vs: false,
-            vs_dock: true,
+            vs_dock: is_vs_dock,
         }
     }
 
@@ -31,6 +31,12 @@ impl PFlags {
             vs: true,
             vs_dock: false,
         }
+    }
+
+    pub fn or(&mut self, other: Self) {
+        self.node |= other.node;
+        self.vs |= other.vs;
+        self.vs_dock |= other.vs_dock;
     }
 }
 
@@ -54,7 +60,8 @@ pub trait PolicyWriter {
         svc_attrs: &[Attribute],
         svc_id: &str,
         stype: &ServiceType,
-        endpoint: &str,
+        //endpoint: &str,
+        endpoint: &Protocol,
         flags: Option<PFlags>,
     );
 

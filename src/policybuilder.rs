@@ -9,6 +9,7 @@ use crate::context::CompilationCtx;
 use crate::errors::CompilationError;
 use crate::fabric::{Fabric, ServiceType};
 use crate::policywriter::{PFlags, PolicyWriter, TSType};
+use crate::protocols::{PortSpec, Protocol};
 use crate::ptypes::Attribute;
 use crate::zpl;
 
@@ -284,7 +285,7 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                         &svc.provider_attrs,
                         &svc_id,
                         &svc.service_type,
-                        &svc.protocol.as_ref().unwrap().to_endpoint_str(),
+                        &svc.protocol.as_ref().unwrap(),
                         flags,
                     )
                 }
@@ -294,7 +295,7 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                         &svc.provider_attrs,
                         &svc.fabric_id,
                         &svc.service_type,
-                        &svc.protocol.as_ref().unwrap().to_endpoint_str(),
+                        &svc.protocol.as_ref().unwrap(),
                         None,
                     );
                     if let Some(cert_data) = &svc.certificate {
@@ -315,12 +316,18 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
             //
             // So this registers as node service but uses a bogus endpoint.
             let svc_id = format!("/zpr/{}", &node.node_id);
+
+            let dummy_prot = Protocol::tcp("dummy")
+                .add_port(PortSpec::Single(1))
+                .build()
+                .unwrap();
+
             self.policy_writer.write_connect_match_for_provider(
                 &node.provider_attrs,
                 &svc_id,
                 &ServiceType::Regular,
-                "TCP/1",
-                Some(PFlags::node()),
+                &dummy_prot,
+                Some(PFlags::node(true)), // TODO: Not all nodes are VS docks
             );
         }
         Ok(())

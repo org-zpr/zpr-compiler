@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use openssl::sha;
+use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use zpr::policy::v1 as policy_capnp;
 
 use crate::compiler::get_compiler_version;
@@ -15,6 +17,7 @@ pub struct PolicyBinaryV2 {
     policy_metadata: String,
     communication_policies: Vec<CommunicationPolicy>,
     bootstrap_keys: Vec<BootstrapKey>,
+    join_policies: JPBuilder,
 }
 
 #[allow(dead_code)]
@@ -48,6 +51,175 @@ struct Scope {
     flag: Option<ScopeFlag>,
     port: Option<u16>,
     port_range: Option<(u16, u16)>,
+}
+
+#[derive(Default)]
+struct JPBuilder {
+    policies: HashMap<JPKey, JoinPolicy>,
+}
+
+struct JoinPolicy {
+    conditions: Vec<Attribute>,
+    flags: PFlags,
+    provides: Option<Vec<Service>>,
+}
+
+struct Service {
+    id: String,
+    endpoints: Vec<Endpoint>,
+    kind: ServiceType,
+}
+
+// Each endpoint is a protocol then either a RANGE or one or more numbers.
+struct Endpoint {
+    protocol: u8,
+    ports: PbPortSpec,
+    icmp_ft: Option<PbIcmpFlowType>,
+}
+
+enum PbPortSpec {
+    Ports(Vec<u16>),
+    Range(u16, u16), // not used for ICMP
+}
+
+enum PbIcmpFlowType {
+    ReqResp,
+    OneShot,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct JPKey {
+    hashval: String,
+}
+
+impl Endpoint {
+    // TODO: unit tests!!
+    fn new_from_protocol(prot: &Protocol) -> Vec<Self> {
+        let mut endpoints = Vec::new();
+
+        match prot.get_details() {
+            ProtocolDetails::TcpUdp(portspecs) => {
+                let mut ports = Vec::new();
+                for spec in portspecs {
+                    match spec {
+                        PortSpec::Range(low, high) => endpoints.push(Endpoint {
+                            protocol: prot.get_layer4() as u8,
+                            ports: PbPortSpec::Range(*low, *high),
+                            icmp_ft: None,
+                        }),
+                        PortSpec::Single(port) => {
+                            ports.push(*port);
+                        }
+                    }
+                }
+                if !ports.is_empty() {
+                    endpoints.push(Endpoint {
+                        protocol: prot.get_layer4() as u8,
+                        ports: PbPortSpec::Ports(ports),
+                        icmp_ft: None,
+                    });
+                }
+            }
+            ProtocolDetails::Icmp(flow) => match flow {
+                IcmpFlowType::OneShot(codes) => {
+                    endpoints.push(Endpoint {
+                        protocol: prot.get_layer4() as u8,
+                        ports: PbPortSpec::Ports(codes.iter().map(|&c| c as u16).collect()),
+                        icmp_ft: Some(PbIcmpFlowType::OneShot),
+                    });
+                }
+                IcmpFlowType::RequestResponse(req, resp) => {
+                    endpoints.push(Endpoint {
+                        protocol: prot.get_layer4() as u8,
+                        ports: PbPortSpec::Ports(vec![*req as u16, *resp as u16]),
+                        icmp_ft: Some(PbIcmpFlowType::ReqResp),
+                    });
+                }
+            },
+        }
+        endpoints
+    }
+}
+
+impl JPBuilder {
+    fn has(&self, conditions: &[Attribute]) -> bool {
+        let key = JPKey::new(conditions);
+        self.policies.contains_key(&key)
+    }
+
+    fn add_connect(&mut self, conditions: &[Attribute]) {
+        let key = JPKey::new(conditions);
+        let jp = JoinPolicy {
+            conditions: conditions.to_vec(),
+            flags: PFlags::default(),
+            provides: None,
+        };
+        self.policies.insert(key, jp);
+    }
+
+    // Note that same attr set may provide multiple services.
+    // flags are additive.
+    fn add_provides(&mut self, conditions: &[Attribute], service: Service, flags: Option<PFlags>) {
+        let key = JPKey::new(conditions);
+        if let Some(jp) = self.policies.get_mut(&key) {
+            // We already have a policy, so add this service and flags.
+            if let Some(new_flags) = flags {
+                jp.flags.or(new_flags);
+            }
+            if let Some(existing_provides) = jp.provides.as_mut() {
+                existing_provides.push(service);
+            } else {
+                jp.provides = Some(vec![service]);
+            }
+        } else {
+            // Not in our table yet.
+            let mut jp = JoinPolicy {
+                conditions: conditions.to_vec(),
+                flags: PFlags::default(),
+                provides: Some(vec![service]),
+            };
+            if let Some(new_flags) = flags {
+                jp.flags.or(new_flags);
+            }
+            self.policies.insert(key, jp);
+        }
+    }
+}
+
+impl JPKey {
+    fn new(conditions: &[Attribute]) -> Self {
+        // To create the hash we use ordered list of keys, then canonical reps of the attributes.
+        let mut table = HashMap::new();
+        let mut sorted_keys = Vec::new();
+        for attr in conditions {
+            let k = attr.zpl_key();
+
+            let vals = attr.zpl_values();
+            let op_code = if vals.is_empty() || vals[0].is_empty() || attr.is_multi_valued() {
+                "has"
+            } else {
+                "eq"
+            };
+
+            let attr_str = format!("{op_code}: {}", &vals.join(","));
+
+            if let Some(_duplicate) = table.insert(k.clone(), attr_str) {
+                panic!("duplicate attribute found in join conditions: {k}",);
+            }
+            sorted_keys.push(k);
+        }
+        sorted_keys.sort();
+
+        let mut hasher = sha::Sha256::new();
+        for key in sorted_keys {
+            if let Some(val) = table.get(&key) {
+                hasher.update(key.as_bytes());
+                hasher.update(val.as_bytes());
+            }
+        }
+        let hashval = format!("{}", hex::encode(hasher.finish()));
+        JPKey { hashval }
+    }
 }
 
 /// The V2 binary policy container.
@@ -203,19 +375,27 @@ impl PolicyWriter for PolicyBinaryV2 {
         // nop
     }
 
-    fn write_connect_match(&mut self, _conditions: &[Attribute]) {
-        // nop
+    fn write_connect_match(&mut self, conditions: &[Attribute]) {
+        if !self.join_policies.has(conditions) {
+            self.join_policies.add_connect(conditions);
+        }
     }
 
     fn write_connect_match_for_provider(
         &mut self,
-        _svc_attrs: &[Attribute],
-        _svc_id: &str,
-        _stype: &ServiceType,
-        _endpoint: &str,
-        _flags: Option<PFlags>,
+        svc_attrs: &[Attribute],
+        svc_id: &str,
+        stype: &ServiceType,
+        endpoint: &Protocol,
+        flags: Option<PFlags>,
     ) {
-        // nop
+        let endpoints = Endpoint::new_from_protocol(endpoint);
+        let service = Service {
+            id: svc_id.into(),
+            endpoints,
+            kind: stype.clone(),
+        };
+        self.join_policies.add_provides(svc_attrs, service, flags);
     }
 
     fn write_service_cert(&mut self, _svc_id: &str, _cert_data: &[u8]) {
