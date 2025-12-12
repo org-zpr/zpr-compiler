@@ -38,6 +38,21 @@ impl PFlags {
         self.vs |= other.vs;
         self.vs_dock |= other.vs_dock;
     }
+
+    /// Returns number of "set" flags.
+    pub fn count(&self) -> usize {
+        let mut count = 0;
+        if self.node {
+            count += 1;
+        }
+        if self.vs {
+            count += 1;
+        }
+        if self.vs_dock {
+            count += 1;
+        }
+        count
+    }
 }
 
 pub enum TSType {

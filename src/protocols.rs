@@ -119,6 +119,14 @@ impl TryFrom<u32> for IanaProtocol {
     }
 }
 
+impl TryFrom<u8> for IanaProtocol {
+    type Error = &'static str;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        IanaProtocol::try_from(value as u32)
+    }
+}
+
 impl IanaProtocol {
     /// Convert a ZPL string (with or without leading 'iana') to an IANA protocol number enum.
     pub fn parse(s: &str) -> Option<Self> {

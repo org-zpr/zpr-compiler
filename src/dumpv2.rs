@@ -80,6 +80,91 @@ pub fn dump_v2(fname: &str, encoded_buf: Bytes) {
         "   policy_metadata: {}",
         policy.get_metadata().unwrap().to_str().unwrap().yellow()
     );
+
+    if policy.has_join_policies() {
+        dump::print_section_hdr("JOIN POLICIES");
+        for (i, jp) in policy.get_join_policies().unwrap().iter().enumerate() {
+            print!("join {}", format!("{}", i + 1).yellow());
+            let svc_count = jp.get_provides().map_or(0, |p| p.len());
+            let flag_count = jp.get_flags().map_or(0, |f| f.len());
+            print!(
+                "  {} service{}",
+                svc_count,
+                if svc_count == 1 { "" } else { "s" },
+            );
+            if flag_count > 0 {
+                println!(
+                    " - flags {}",
+                    format!("{:?}", jp.get_flags().unwrap()).magenta()
+                );
+            } else {
+                println!();
+            }
+
+            for (_j, match_attr) in jp.get_match().unwrap().iter().enumerate() {
+                println!(
+                    "         {} {}",
+                    format!("{}", "󰞘").dimmed(),
+                    attr_exp_v2_to_string(&match_attr).yellow()
+                );
+            }
+            if svc_count > 0 {
+                for (j, svc) in jp.get_provides().unwrap().iter().enumerate() {
+                    let stype = match svc.get_kind().which().unwrap() {
+                        policy_capnp::service::kind::Which::Builtin(_) => "built_in",
+                        policy_capnp::service::kind::Which::Auth(_) => "auth",
+                        policy_capnp::service::kind::Which::Visa(_) => "visa",
+                        policy_capnp::service::kind::Which::Regular(_) => "",
+                        policy_capnp::service::kind::Which::Trusted(n) => {
+                            let nn = n.unwrap().to_str().unwrap();
+                            &format!("trusted ({})", nn)
+                        }
+                    };
+
+                    println!(
+                        "        {} {} {}",
+                        format!("{}", j + 1).dimmed(),
+                        svc.get_id().unwrap().to_str().unwrap().yellow(),
+                        stype.blue()
+                    );
+                    for (k, ep) in svc.get_endpoints().unwrap().iter().enumerate() {
+                        let pname = match IanaProtocol::try_from(ep.get_protocol()) {
+                            Ok(p) => p.to_string().green(),
+                            Err(_) => format!("protocol({})", ep.get_protocol()).red(),
+                        };
+
+                        if k > 0 {
+                            print!(" / ");
+                        } else {
+                            print!("          ");
+                        }
+                        print!("{}", pname);
+
+                        match ep.which().unwrap() {
+                            policy_capnp::endpoint::Which::Port(pg) => {
+                                print!("{}", format!("{:?}", pg.get_ports().unwrap()).green());
+                            }
+                            policy_capnp::endpoint::Which::PortRange(pr) => {
+                                print!(
+                                    "{}",
+                                    format!("[{}-{}]", pr.get_low(), pr.get_high()).green()
+                                );
+                            }
+                        }
+
+                        if let Ok(ft) = ep.get_icmp_flow() {
+                            if ft != policy_capnp::IcmpFlowType::Unset {
+                                print!(" {}", format!("{:?}", ft).yellow());
+                            }
+                        }
+                    }
+                    println!();
+                }
+            }
+            println!();
+        }
+    }
+
     if policy.has_com_policies() {
         dump::print_section_hdr("COMMUNICATION POLICIES");
         for (i, cp) in policy.get_com_policies().unwrap().iter().enumerate() {
@@ -125,6 +210,7 @@ pub fn dump_v2(fname: &str, encoded_buf: Bytes) {
                     );
                 }
             }
+            println!();
         }
     }
     if policy.has_keys() {
