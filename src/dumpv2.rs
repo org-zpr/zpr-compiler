@@ -127,24 +127,24 @@ pub fn dump_v2(fname: &str, encoded_buf: Bytes) {
                         svc.get_id().unwrap().to_str().unwrap().yellow(),
                         stype.blue()
                     );
-                    for (k, ep) in svc.get_endpoints().unwrap().iter().enumerate() {
-                        let pname = match IanaProtocol::try_from(ep.get_protocol()) {
+                    for (k, scope) in svc.get_endpoints().unwrap().iter().enumerate() {
+                        let pname = match IanaProtocol::try_from(scope.get_protocol()) {
                             Ok(p) => p.to_string().green(),
-                            Err(_) => format!("protocol({})", ep.get_protocol()).red(),
+                            Err(_) => format!("protocol({})", scope.get_protocol()).red(),
                         };
 
                         if k > 0 {
-                            print!(" / ");
+                            print!(", ");
                         } else {
-                            print!("          ");
+                            print!("            ");
                         }
-                        print!("{}", pname);
+                        print!("{}/", pname);
 
-                        match ep.which().unwrap() {
-                            policy_capnp::endpoint::Which::Port(pg) => {
-                                print!("{}", format!("{:?}", pg.get_ports().unwrap()).green());
+                        match scope.which().unwrap() {
+                            policy_capnp::scope::Which::Port(pn) => {
+                                print!("{}", format!("{:?}", pn.get_port_num()).green());
                             }
-                            policy_capnp::endpoint::Which::PortRange(pr) => {
+                            policy_capnp::scope::Which::PortRange(pr) => {
                                 print!(
                                     "{}",
                                     format!("[{}-{}]", pr.get_low(), pr.get_high()).green()
@@ -152,8 +152,8 @@ pub fn dump_v2(fname: &str, encoded_buf: Bytes) {
                             }
                         }
 
-                        if let Ok(ft) = ep.get_icmp_flow() {
-                            if ft != policy_capnp::IcmpFlowType::Unset {
+                        if let Ok(ft) = scope.get_flag() {
+                            if ft != policy_capnp::ScopeFlag::NoFlag {
                                 print!(" {}", format!("{:?}", ft).yellow());
                             }
                         }
