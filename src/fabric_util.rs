@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::errors::CompilationError;
-use crate::ptypes::Attribute;
 use crate::ptypes::FPos;
+use zpr::policy_types::Attribute;
 
 /// Convert the list of (key, value) pairs into a list of attributes.
 ///

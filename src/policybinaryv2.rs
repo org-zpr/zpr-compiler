@@ -5,10 +5,14 @@ use zpr::policy::v1 as policy_capnp;
 
 use crate::compiler::get_compiler_version;
 use crate::errors::CompilationError;
-use crate::fabric::ServiceType; // TODO: remove refs to fabric
-use crate::policywriter::{PFlags, PolicyContainer, PolicyWriter, TSType};
+use crate::policywriter::{PolicyContainer, PolicyWriter, TSType};
 use crate::protocols::{IcmpFlowType, PortSpec, Protocol, ProtocolDetails};
-use crate::ptypes::{Attribute, Signal}; // TODO: remove refs to fabric
+use crate::ptypes::Signal;
+
+use zpr::policy_types::{Attribute, PFlags};
+use zpr::policy_types::{JoinPolicy, Scope, ScopeFlag};
+use zpr::policy_types::{Service, ServiceType};
+use zpr::policy_types::{WriteTo, write_attributes}; // TODO: remove refs to fabric
 
 #[derive(Default)]
 pub struct PolicyBinaryV2 {
@@ -37,21 +41,50 @@ struct BootstrapKey {
     keydata: Vec<u8>,
 }
 
-/// This scope flag mirrors what is in the capnp schema.
-#[derive(PartialEq, Eq, Debug)]
-#[allow(dead_code)]
-enum ScopeFlag {
-    UdpOneWay,
-    IcmpRequestReply,
-}
+fn new_scope_from_protocol(prot: &Protocol) -> Vec<Scope> {
+    let mut scopes = Vec::new();
 
-/// This struct mirrors what is in the capnp schema.
-/// Used in comm policies and join policies.
-struct Scope {
-    protocol: u8,
-    flag: Option<ScopeFlag>,
-    port: Option<u16>,
-    port_range: Option<(u16, u16)>,
+    match prot.get_details() {
+        ProtocolDetails::TcpUdp(portspecs) => {
+            for spec in portspecs {
+                match spec {
+                    PortSpec::Range(low, high) => scopes.push(Scope {
+                        protocol: prot.get_layer4() as u8,
+                        flag: None,
+                        port: None,
+                        port_range: Some((*low, *high)),
+                    }),
+                    PortSpec::Single(port) => scopes.push(Scope {
+                        protocol: prot.get_layer4() as u8,
+                        flag: None,
+                        port: Some(*port),
+                        port_range: None,
+                    }),
+                }
+            }
+        }
+        ProtocolDetails::Icmp(flow) => match flow {
+            IcmpFlowType::OneShot(codes) => {
+                for code in codes {
+                    scopes.push(Scope {
+                        protocol: prot.get_layer4() as u8,
+                        flag: None,
+                        port: Some(*code as u16),
+                        port_range: None,
+                    });
+                }
+            }
+            IcmpFlowType::RequestResponse(req, resp) => {
+                scopes.push(Scope {
+                    protocol: prot.get_layer4() as u8,
+                    flag: Some(ScopeFlag::IcmpRequestReply),
+                    port: None,
+                    port_range: Some((*req as u16, *resp as u16)),
+                });
+            }
+        },
+    }
+    scopes
 }
 
 /// Organize our JoinPolicies as they are added to the policy.
@@ -60,102 +93,11 @@ struct JPBuilder {
     policies: HashMap<JPKey, JoinPolicy>,
 }
 
-struct JoinPolicy {
-    conditions: Vec<Attribute>,
-    flags: PFlags,
-    provides: Option<Vec<Service>>,
-}
-
-/// Service is part of a join policy.
-struct Service {
-    id: String,
-    endpoints: Vec<Scope>,
-    kind: ServiceType,
-}
-
 /// JoinPolicy key value. We construct these so that a given set of attributes
 /// maps to a unique key.
 #[derive(Debug, PartialEq, Eq, Hash)]
 struct JPKey {
     hashval: String,
-}
-
-impl Scope {
-    /// Create one or more Scopes from a Protocol struct.
-    fn new_from_protocol(prot: &Protocol) -> Vec<Self> {
-        let mut scopes = Vec::new();
-
-        match prot.get_details() {
-            ProtocolDetails::TcpUdp(portspecs) => {
-                for spec in portspecs {
-                    match spec {
-                        PortSpec::Range(low, high) => scopes.push(Scope {
-                            protocol: prot.get_layer4() as u8,
-                            flag: None,
-                            port: None,
-                            port_range: Some((*low, *high)),
-                        }),
-                        PortSpec::Single(port) => scopes.push(Scope {
-                            protocol: prot.get_layer4() as u8,
-                            flag: None,
-                            port: Some(*port),
-                            port_range: None,
-                        }),
-                    }
-                }
-            }
-            ProtocolDetails::Icmp(flow) => match flow {
-                IcmpFlowType::OneShot(codes) => {
-                    for code in codes {
-                        scopes.push(Scope {
-                            protocol: prot.get_layer4() as u8,
-                            flag: None,
-                            port: Some(*code as u16),
-                            port_range: None,
-                        });
-                    }
-                }
-                IcmpFlowType::RequestResponse(req, resp) => {
-                    scopes.push(Scope {
-                        protocol: prot.get_layer4() as u8,
-                        flag: Some(ScopeFlag::IcmpRequestReply),
-                        port: None,
-                        port_range: Some((*req as u16, *resp as u16)),
-                    });
-                }
-            },
-        }
-        scopes
-    }
-}
-
-impl JoinPolicy {
-    // Implementation for writing JoinPolicy to Cap'n Proto builder
-    fn write_to(&self, bldr: &mut policy_capnp::j_policy::Builder) {
-        let mut matches_bldr = bldr.reborrow().init_match(self.conditions.len() as u32);
-        write_attributes(&self.conditions, &mut matches_bldr);
-
-        if let Some(provides) = &self.provides {
-            let mut provides_bldr = bldr.reborrow().init_provides(provides.len() as u32);
-            write_services(provides, &mut provides_bldr);
-        }
-
-        if self.flags.count() > 0 {
-            let mut flags_bldr = bldr.reborrow().init_flags(self.flags.count() as u32);
-            let mut idx = 0;
-            if self.flags.node {
-                flags_bldr.set(idx, policy_capnp::JoinFlag::Node);
-                idx += 1;
-            }
-            if self.flags.vs {
-                flags_bldr.set(idx, policy_capnp::JoinFlag::Vs);
-                idx += 1;
-            }
-            if self.flags.vs_dock {
-                flags_bldr.set(idx, policy_capnp::JoinFlag::Vsdock);
-            }
-        }
-    }
 }
 
 impl JPBuilder {
@@ -265,77 +207,6 @@ impl PolicyBinaryV2 {
     }
 }
 
-/// Helper to write attributes into capnp AttrExpr list.
-/// We have to do this for client conditions and service conditions.
-fn write_attributes(
-    attrs: &[Attribute],
-    conds: &mut capnp::struct_list::Builder<'_, policy_capnp::attr_expr::Owned>,
-) {
-    for (j, attr) in attrs.iter().enumerate() {
-        let mut ccond = conds.reborrow().get(j as u32);
-        // foo:fee    (foo, eq, fee)
-        // foo:       (foo, has, "")
-        ccond.set_key(&attr.zpl_key());
-        let vals = attr.zpl_values();
-
-        if vals.is_empty() || vals[0].is_empty() || attr.is_multi_valued() {
-            ccond.set_op(policy_capnp::AttrOp::Has);
-        } else {
-            ccond.set_op(policy_capnp::AttrOp::Eq);
-        }
-        let mut cvals = ccond.init_value(vals.len() as u32);
-        for (i, val) in vals.iter().enumerate() {
-            cvals.set(i as u32, val);
-        }
-    }
-}
-
-/// Write a services list into capn proto List.
-fn write_services(
-    services: &[Service],
-    builder: &mut capnp::struct_list::Builder<'_, policy_capnp::service::Owned>,
-) {
-    for (i, service) in services.iter().enumerate() {
-        let mut s = builder.reborrow().get(i as u32);
-        s.set_id(&service.id);
-        let mut endpoints = s.reborrow().init_endpoints(service.endpoints.len() as u32);
-        for (j, endpoint) in service.endpoints.iter().enumerate() {
-            let mut scope_bldr = endpoints.reborrow().get(j as u32);
-            scope_bldr.set_protocol(endpoint.protocol as u8);
-            if let Some(flowtype) = &endpoint.flag {
-                match flowtype {
-                    ScopeFlag::IcmpRequestReply => {
-                        scope_bldr.set_flag(policy_capnp::ScopeFlag::IcmpRequestRepl);
-                    }
-                    ScopeFlag::UdpOneWay => {
-                        scope_bldr.set_flag(policy_capnp::ScopeFlag::UdpOneWay);
-                    }
-                }
-            }
-            if let Some(port) = endpoint.port {
-                let mut portnum_bldr = scope_bldr.reborrow().init_port();
-                portnum_bldr.set_port_num(port);
-            }
-            if let Some(port_range) = endpoint.port_range {
-                let mut port_range_bldr = scope_bldr.reborrow().init_port_range();
-                port_range_bldr.set_low(port_range.0);
-                port_range_bldr.set_high(port_range.1);
-            }
-        }
-        let mut kind_bldr = s.init_kind();
-        match &service.kind {
-            ServiceType::Authentication => kind_bldr.set_auth(()),
-            ServiceType::Regular => kind_bldr.set_regular(()),
-            ServiceType::BuiltIn => kind_bldr.set_builtin(()),
-            ServiceType::Visa => kind_bldr.set_visa(()),
-            ServiceType::Trusted(name) => kind_bldr.set_trusted(name),
-            ServiceType::Undefined => {
-                panic!("service with undefined type/kind"); // programming error
-            }
-        }
-    }
-}
-
 impl PolicyContainer for PolicyContainerV2 {
     fn contain_policy(
         &self,
@@ -415,7 +286,7 @@ impl PolicyWriter for PolicyBinaryV2 {
         if stype == &ServiceType::Undefined {
             panic!("service cannot have undefined type");
         }
-        let endpoints = Scope::new_from_protocol(endpoint);
+        let endpoints = new_scope_from_protocol(endpoint);
         let service = Service {
             id: svc_id.into(),
             endpoints,
@@ -506,7 +377,7 @@ impl PolicyWriter for PolicyBinaryV2 {
             .reborrow()
             .init_com_policies(self.communication_policies.len() as u32);
         for (i, cp) in self.communication_policies.iter().enumerate() {
-            let scopes = Scope::new_from_protocol(&cp.protocol);
+            let scopes = new_scope_from_protocol(&cp.protocol);
             let mut cpol = cpols.reborrow().get(i as u32);
             cpol.set_id(&cp.svc_id);
             cpol.set_service_id(&cp.svc_id);
@@ -585,7 +456,6 @@ impl PolicyWriter for PolicyBinaryV2 {
 mod test {
     use super::*;
     use crate::protocols::{IcmpFlowType, Protocol};
-    use crate::ptypes::Attribute;
 
     #[test]
     fn test_protocol_to_scopes_basic_tcp() {
@@ -593,7 +463,7 @@ mod test {
             .add_port(PortSpec::Single(80))
             .build()
             .unwrap();
-        let scopes1 = Scope::new_from_protocol(&prot1);
+        let scopes1 = new_scope_from_protocol(&prot1);
         assert_eq!(scopes1.len(), 1);
         assert_eq!(scopes1[0].protocol, 6);
         assert_eq!(scopes1[0].port, Some(80));
@@ -611,7 +481,7 @@ mod test {
             ])
             .build()
             .unwrap();
-        let scopes1 = Scope::new_from_protocol(&prot1);
+        let scopes1 = new_scope_from_protocol(&prot1);
         assert_eq!(scopes1.len(), 3);
         assert_eq!(scopes1[0].protocol, 6);
         assert_eq!(scopes1[0].port, Some(80));
@@ -631,7 +501,7 @@ mod test {
     fn test_protocol_to_scopes_icmp_request_reply() {
         let flow = IcmpFlowType::RequestResponse(128, 129);
         let prot1 = Protocol::icmp6("foo", flow).build().unwrap();
-        let scopes1 = Scope::new_from_protocol(&prot1);
+        let scopes1 = new_scope_from_protocol(&prot1);
         assert_eq!(scopes1.len(), 1);
         assert_eq!(scopes1[0].protocol, 58);
         assert_eq!(scopes1[0].port, None);
@@ -643,7 +513,7 @@ mod test {
     fn test_protocol_to_scopes_icmp_once() {
         let flow = IcmpFlowType::OneShot(vec![128]);
         let prot1 = Protocol::icmp6("foo", flow).build().unwrap();
-        let scopes1 = Scope::new_from_protocol(&prot1);
+        let scopes1 = new_scope_from_protocol(&prot1);
         assert_eq!(scopes1.len(), 1);
         assert_eq!(scopes1[0].protocol, 58);
         assert_eq!(scopes1[0].port, Some(128));
@@ -655,7 +525,7 @@ mod test {
     fn test_protocol_to_scopes_icmp_once_multiple() {
         let flow = IcmpFlowType::OneShot(vec![128, 129, 130]);
         let prot1 = Protocol::icmp6("foo", flow).build().unwrap();
-        let scopes1 = Scope::new_from_protocol(&prot1);
+        let scopes1 = new_scope_from_protocol(&prot1);
         assert_eq!(scopes1.len(), 3);
         assert_eq!(scopes1[0].protocol, 58);
         assert_eq!(scopes1[0].port, Some(128));
@@ -682,7 +552,7 @@ mod test {
             .build()
             .unwrap();
 
-        let scopes = Scope::new_from_protocol(&prot);
+        let scopes = new_scope_from_protocol(&prot);
         assert_eq!(scopes.len(), 3);
 
         match (&scopes[0].port, scopes[0].port_range) {
@@ -708,7 +578,7 @@ mod test {
             .build()
             .unwrap();
 
-        let scopes = Scope::new_from_protocol(&prot);
+        let scopes = new_scope_from_protocol(&prot);
         assert_eq!(scopes.len(), 3);
         for (idx, expected) in [1u16, 2, 3].into_iter().enumerate() {
             assert_eq!(scopes[idx].protocol, prot.get_layer4() as u8);
@@ -724,7 +594,7 @@ mod test {
             .build()
             .unwrap();
 
-        let scopes = Scope::new_from_protocol(&prot);
+        let scopes = new_scope_from_protocol(&prot);
         assert_eq!(scopes.len(), 1);
         assert_eq!(scopes[0].protocol, prot.get_layer4() as u8);
         assert_eq!(scopes[0].port, None);

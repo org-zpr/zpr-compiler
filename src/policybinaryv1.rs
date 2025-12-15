@@ -5,12 +5,12 @@ use prost::Message;
 
 use crate::compiler::get_compiler_version;
 use crate::errors::CompilationError;
-use crate::fabric::ServiceType; // TODO: remove refs to fabric
-use crate::policywriter::{PFlags, PolicyContainer, PolicyWriter, TSType};
+
+use crate::policywriter::{PolicyContainer, PolicyWriter, TSType};
 use crate::protocols::{IcmpFlowType, PortSpec, Protocol, ProtocolDetails};
 use crate::ptypes;
-use crate::ptypes::Attribute;
 use crate::zpl;
+use zpr::policy_types::{Attribute, PFlags, ServiceType};
 
 /// This value for a PROC in a connect record means NO PROC.  Binary format v1.
 pub const NO_PROC: u32 = u32::MAX; // 0xffffffff

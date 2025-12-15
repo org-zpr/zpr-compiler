@@ -16,8 +16,8 @@ use crate::errors::CompilationError;
 use crate::protocols::{
     IanaProtocol, IcmpFlowType, PortSpec, Protocol, ProtocolError, ZPR_L7_BUILTINS,
 };
-use crate::ptypes::Attribute;
 use crate::zpl;
+use zpr::policy_types::Attribute;
 
 /// Helper to create a ConfigError. Works with a single string (or &str) argument
 /// (really anything that has a to_string function), or with two args: a format string and arguments.
@@ -1132,6 +1132,7 @@ fn toml_as_u8(v: &toml::Value) -> Option<u8> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use zpr::policy_types::AttrDomain;
 
     #[test]
     fn test_parse_resolver_empty() {
@@ -1596,7 +1597,7 @@ mod test {
         let (service_key_name, attr) = result.unwrap();
 
         assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::Endpoint);
+        assert_eq!(*attr.get_domain_ref(), AttrDomain::Endpoint);
         assert_eq!(attr.zpl_value(), "endpoint.tag");
         assert_eq!(attr.get_values(), None);
         assert_eq!(attr.is_multi_valued(), false);
@@ -1613,7 +1614,7 @@ mod test {
         let (service_key_name, attr) = result.unwrap();
 
         assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::User);
+        assert_eq!(*attr.get_domain_ref(), AttrDomain::User);
         assert_eq!(attr.zpl_key(), "user.groups");
         assert_eq!(attr.get_values(), None);
         assert_eq!(attr.is_multi_valued(), true);
@@ -1630,7 +1631,7 @@ mod test {
         let (service_key_name, attr) = result.unwrap();
 
         assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::Service);
+        assert_eq!(*attr.get_domain_ref(), AttrDomain::Service);
         assert_eq!(attr.zpl_key(), "service.role");
         assert_eq!(attr.get_values(), None);
         assert_eq!(attr.is_multi_valued(), false);
@@ -1661,7 +1662,7 @@ mod test {
         let (service_key_name, attr) = result.unwrap();
 
         assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), crate::ptypes::AttrDomain::User);
+        assert_eq!(*attr.get_domain_ref(), AttrDomain::User);
         assert_eq!(attr.zpl_key(), "user.name");
         assert_eq!(attr.get_values(), None);
         assert_eq!(attr.is_multi_valued(), false);

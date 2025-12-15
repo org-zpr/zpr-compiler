@@ -5,9 +5,10 @@ use std::iter::Peekable;
 
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{AllowClause, AttrDomain, Attribute, Class, ClassFlavor, Clause, FPos, Signal};
+use crate::ptypes::{AllowClause, Class, ClassFlavor, Clause, FPos, Signal};
 use crate::putil;
 use crate::zpl;
+use zpr::policy_types::{AttrDomain, Attribute};
 
 #[derive(Debug, Default)]
 struct ParseAllowState {
@@ -310,7 +311,7 @@ pub fn parse_allow(
             if attr.is_unspecified_domain() {
                 let canonical_class_name = classes_idx.get(&client_clause.class).unwrap();
                 let flavor = classes_map.get(canonical_class_name).unwrap().flavor;
-                attr.set_domain(AttrDomain::from_flavor(flavor));
+                attr.set_domain(flavor.into());
             }
         }
     }
@@ -319,7 +320,7 @@ pub fn parse_allow(
             if attr.is_unspecified_domain() {
                 let canonical_class_name = classes_idx.get(&server_clause.class).unwrap();
                 let flavor = classes_map.get(canonical_class_name).unwrap().flavor;
-                attr.set_domain(AttrDomain::from_flavor(flavor));
+                attr.set_domain(flavor.into());
             }
         }
     }

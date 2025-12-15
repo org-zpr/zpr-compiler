@@ -1,59 +1,9 @@
 use std::collections::HashMap;
 
 use crate::errors::CompilationError;
-use crate::fabric::ServiceType;
 use crate::protocols::Protocol;
-use crate::ptypes::{Attribute, Signal}; // TODO: remove refs to fabric
-
-/// In V1 These flags are used to set the type of service in the PROC.
-/// TODO: Maybe switch to using the protocol buffer type directly?
-#[derive(Debug, Default, Clone, PartialEq, Eq, Hash, Copy)]
-pub struct PFlags {
-    pub node: bool,
-    pub vs: bool,
-    pub vs_dock: bool,
-}
-
-impl PFlags {
-    /// Create the set of flags for a node.
-    pub fn node(is_vs_dock: bool) -> PFlags {
-        PFlags {
-            node: true,
-            vs: false,
-            vs_dock: is_vs_dock,
-        }
-    }
-
-    /// Create the set of flags for a visa service.
-    pub fn vs() -> PFlags {
-        PFlags {
-            node: false,
-            vs: true,
-            vs_dock: false,
-        }
-    }
-
-    pub fn or(&mut self, other: Self) {
-        self.node |= other.node;
-        self.vs |= other.vs;
-        self.vs_dock |= other.vs_dock;
-    }
-
-    /// Returns number of "set" flags.
-    pub fn count(&self) -> usize {
-        let mut count = 0;
-        if self.node {
-            count += 1;
-        }
-        if self.vs {
-            count += 1;
-        }
-        if self.vs_dock {
-            count += 1;
-        }
-        count
-    }
-}
+use crate::ptypes::Signal;
+use zpr::policy_types::{Attribute, PFlags, ServiceType};
 
 pub enum TSType {
     VsAuth,    // trusted service <-> visa service

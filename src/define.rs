@@ -5,9 +5,10 @@ use std::iter::Peekable;
 
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{AttrDomain, Attribute, Class, ClassFlavor};
+use crate::ptypes::{Class, ClassFlavor};
 use crate::putil;
 use crate::zpl;
+use zpr::policy_types::Attribute;
 
 // First token exists and is a DEFINE which is checked by the caller.
 // `statement_num` must be unique for each statement.
@@ -243,14 +244,14 @@ where
                         .multi()
                         .values(value.to_vec())
                         .optional(optional)
-                        .domain_hint(AttrDomain::from_flavor(class.flavor))
+                        .domain_hint(class.flavor.into())
                         .build()?
                 } else {
                     Attribute::tuple(name)
                         .single()
                         .values(value.to_vec())
                         .optional(optional)
-                        .domain_hint(AttrDomain::from_flavor(class.flavor))
+                        .domain_hint(class.flavor.into())
                         .build()?
                 };
                 class.with_attrs.push(attr);
@@ -267,13 +268,13 @@ where
                 }
                 let attr = if tag || tags {
                     Attribute::tag(s)
-                        .domain_hint(AttrDomain::from_flavor(class.flavor))
+                        .domain_hint(class.flavor.into())
                         .optional(optional)
                         .build()?
                 } else {
                     Attribute::tuple(s)
                         .optional(optional)
-                        .domain_hint(AttrDomain::from_flavor(class.flavor))
+                        .domain_hint(class.flavor.into())
                         .multi_if(multiple)
                         .build()?
                 };

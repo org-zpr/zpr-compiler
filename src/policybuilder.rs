@@ -7,11 +7,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::context::CompilationCtx;
 use crate::errors::CompilationError;
-use crate::fabric::{Fabric, ServiceType};
-use crate::policywriter::{PFlags, PolicyWriter, TSType};
+use crate::fabric::Fabric;
+use crate::policywriter::{PolicyWriter, TSType};
 use crate::protocols::{PortSpec, Protocol};
-use crate::ptypes::Attribute;
 use crate::zpl;
+use zpr::policy_types::{Attribute, PFlags, ServiceType};
 
 #[allow(dead_code)]
 #[derive(Default)]

@@ -10,8 +10,9 @@ use crate::config_api::{ConfigApi, ConfigItem};
 use crate::errors::CompilationError;
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
 use crate::protocols::{PortSpec, Protocol};
-use crate::ptypes::{Attribute, FPos, Signal};
+use crate::ptypes::{FPos, Signal};
 use crate::zpl;
+use zpr::policy_types::{Attribute, ServiceType};
 
 /// A service oriented view of the network.
 #[derive(Debug, Clone, Default)]
@@ -36,18 +37,6 @@ pub struct FabricService {
     pub client_service_name: Option<String>, // For an AUTH service, the name of the optional client service.
     pub returns_attrs: Option<HashMap<String, Attribute>>, // list of attribute keys (with domains) -- only for trusted services
     pub identity_attrs: Option<Vec<String>>, // list of attribute keys (with domains) -- only for trusted services
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Default, Clone, PartialEq)]
-pub enum ServiceType {
-    #[default]
-    Undefined,
-    Trusted(String), // Takes the API name
-    Authentication,
-    Visa,
-    Regular,
-    BuiltIn, // eg, noode access to VS, or VS access to VSS
 }
 
 #[derive(Debug, Clone)]
