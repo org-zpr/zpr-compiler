@@ -13,7 +13,7 @@ use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, load_asn1data_from_pem, load_rsa_public_key};
 use crate::errors::CompilationError;
 use crate::protocols::{IanaProtocol, IcmpFlowType, PortSpec, Protocol};
-use crate::ptypes::Attribute;
+use zpr::policy_types::Attribute;
 
 /// ConfigApi wraps a pseudo RESTFUL api around the config data.
 /// Access is visa the [ConfigApi::get] method.

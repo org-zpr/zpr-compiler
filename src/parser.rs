@@ -6,7 +6,7 @@ use crate::define::{parse_define, resolve_class_flavors};
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
 use crate::never::parse_never;
-use crate::ptypes::{AttrDomain, Class, Policy};
+use crate::ptypes::{Class, Policy};
 
 #[derive(Default)]
 pub struct ParsingResult {
@@ -110,7 +110,7 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
     for (_, class) in classes.iter_mut() {
         for attr in class.with_attrs.iter_mut() {
             if attr.is_unspecified_domain() {
-                attr.set_domain(AttrDomain::from_flavor(class.flavor));
+                attr.set_domain(class.flavor.into());
             }
             if attr.is_unspecified_domain() {
                 return Err(CompilationError::ParseError(

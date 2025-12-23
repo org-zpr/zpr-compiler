@@ -38,11 +38,6 @@ pub const KATTR_ADDR: &str = "zpr.addr";
 /// Multi-valued "services" attribute.
 pub const KATTR_SERVICES: &str = "zpr.services";
 
-pub const ATTR_DOMAIN_SERVICE: &str = "service";
-pub const ATTR_DOMAIN_USER: &str = "user";
-pub const ATTR_DOMAIN_ENDPOINT: &str = "endpoint";
-pub const ATTR_DOMAIN_ZPR_INTERNAL: &str = "zpr";
-
 // For nodes to talk to VS
 pub const VISA_SERVICE_PORT: u16 = 5002; // TCP
 

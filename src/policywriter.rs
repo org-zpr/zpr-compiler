@@ -1,38 +1,9 @@
 use std::collections::HashMap;
 
 use crate::errors::CompilationError;
-use crate::fabric::ServiceType;
 use crate::protocols::Protocol;
-use crate::ptypes::{Attribute, Signal}; // TODO: remove refs to fabric
-
-/// In V1 These flags are used to set the type of service in the PROC.
-/// TODO: Maybe switch to using the protocol buffer type directly?
-#[derive(Debug, Clone, PartialEq, Copy)]
-pub struct PFlags {
-    pub node: bool,
-    pub vs: bool,
-    pub vs_dock: bool,
-}
-
-impl PFlags {
-    /// Create the set of flags for a node.
-    pub fn node() -> PFlags {
-        PFlags {
-            node: true,
-            vs: false,
-            vs_dock: true,
-        }
-    }
-
-    /// Create the set of flags for a visa service.
-    pub fn vs() -> PFlags {
-        PFlags {
-            node: false,
-            vs: true,
-            vs_dock: false,
-        }
-    }
-}
+use crate::ptypes::Signal;
+use zpr::policy_types::{Attribute, PFlags, ServiceType};
 
 pub enum TSType {
     VsAuth,    // trusted service <-> visa service
@@ -54,7 +25,8 @@ pub trait PolicyWriter {
         svc_attrs: &[Attribute],
         svc_id: &str,
         stype: &ServiceType,
-        endpoint: &str,
+        //endpoint: &str,
+        endpoint: &Protocol,
         flags: Option<PFlags>,
     );
 

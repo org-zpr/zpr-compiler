@@ -1,4 +1,5 @@
 use thiserror::Error;
+use zpr::policy_types::AttributeError;
 
 /// The various errors that may occur during parsing and compilation.
 #[derive(Debug, Error)]
@@ -93,16 +94,4 @@ pub enum CompilationError {
 
     #[error("attribute error: {0}")]
     AttributeError(#[from] AttributeError),
-}
-
-#[derive(Debug, Error)]
-pub enum AttributeError {
-    #[error("Invalid attribute domain: {0}")]
-    InvalidDomain(String),
-
-    #[error("Invalid attribute: {0}")]
-    ParseError(String),
-
-    #[error("Invalid operation: {0}")]
-    InvalidOperation(String),
 }

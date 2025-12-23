@@ -2,16 +2,17 @@
 
 use base64::prelude::*;
 use std::collections::{HashMap, HashSet};
+use zpr::policy_types::{Attribute, ServiceType};
 
 use crate::compilation::Compilation;
 use crate::config_api::{ConfigApi, ConfigItem};
 use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
-use crate::fabric::{Fabric, PLine, ServiceType};
+use crate::fabric::{Fabric, PLine};
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
 use crate::protocols::{PortSpec, Protocol, ZPR_OAUTH_RSA, ZPR_VALIDATION_2};
-use crate::ptypes::{AllowClause, Attribute, Class, ClassFlavor, FPos, Policy};
+use crate::ptypes::{AllowClause, Class, ClassFlavor, FPos, Policy};
 use crate::zpl;
 
 pub struct Weaver {
