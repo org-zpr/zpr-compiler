@@ -446,6 +446,55 @@ allow marketing-emps to access role:marketing services
         }
     }
 
+    // Defining the same class name twice in one policy must fail with a
+    // Redefinition error, not silently overwrite the first definition.
+    #[test]
+    fn test_redefinition_error() {
+        let input =
+            "define employee as a user with id \n define employee as a user with id";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        match parse(tz.tokens, &ctx) {
+            Ok(_) => panic!("should have failed: class defined twice"),
+            Err(e) => assert!(
+                matches!(e, CompilationError::Redefinition(_, _, _)),
+                "unexpected error: {e:?}"
+            ),
+        }
+    }
+
+    // A literal token that appears before any statement keyword (allow/define/never)
+    // has no valid enclosing statement and must be rejected immediately.
+    #[test]
+    fn test_token_before_keyword_fails() {
+        let input = "foo allow users to access services";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        match parse(tz.tokens, &ctx) {
+            Ok(_) => panic!("should have failed: literal before any keyword"),
+            Err(e) => assert!(
+                matches!(e, CompilationError::ParseError(_, _, _)),
+                "unexpected error: {e:?}"
+            ),
+        }
+    }
+
+    // A "never" statement not followed by "allow" must produce a NeverStmtParseError
+    // at the top-level parse stage (the error propagates up from parse_never).
+    #[test]
+    fn test_never_without_allow_at_parser_level() {
+        let input = "never users to access services";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        match parse(tz.tokens, &ctx) {
+            Ok(_) => panic!("should have failed: never without allow"),
+            Err(e) => assert!(
+                matches!(e, CompilationError::NeverStmtParseError(_, _, _)),
+                "unexpected error: {e:?}"
+            ),
+        }
+    }
+
     #[test]
     fn test_base_never() {
         let valids = vec!["never allow color:green users to access services"];
