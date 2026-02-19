@@ -846,6 +846,20 @@ mod test {
     use super::*;
     use crate::{context::CompilationCtx, lex::tokenize_str};
 
+    /// Build the default class registry and the canonical-name index (including AKAs).
+    fn default_classes() -> (HashMap<String, String>, HashMap<String, Class>) {
+        let mut classes: HashMap<String, Class> = HashMap::new();
+        for defclass in Class::defaults() {
+            classes.insert(defclass.name.clone(), defclass);
+        }
+        let mut class_index: HashMap<String, String> = HashMap::new();
+        for (name, class) in classes.iter() {
+            class_index.insert(name.clone(), name.clone());
+            class_index.insert(class.aka.clone(), name.clone());
+        }
+        (class_index, classes)
+    }
+
     #[test]
     fn test_parses_valid_on_clause() {
         let valids = vec![
@@ -1234,5 +1248,126 @@ mod test {
             }
         }
         assert!(matched_service, "failed to locate service clause in RHS");
+    }
+
+    // Pointing a signal clause at a non-service class (e.g. the built-in "user")
+    // must fail because signals can only target services.
+    #[test]
+    fn test_signal_non_service_target() {
+        let statement = r#"allow users to access services and signal "x" to user"#;
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        match parse_allow(&tz.tokens, 1, &class_index, &classes) {
+            Ok(c) => panic!("should have failed: signal target is not a service: {c:?}"),
+            Err(e) => assert!(
+                e.to_string().contains("not a service"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // Pointing a signal clause at a class name that does not exist at all must
+    // fail with an "Invalid service name" error.
+    #[test]
+    fn test_signal_unknown_service() {
+        let statement = r#"allow users to access services and signal "x" to nosuchclass"#;
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        match parse_allow(&tz.tokens, 1, &class_index, &classes) {
+            Ok(c) => panic!("should have failed: unknown signal target: {c:?}"),
+            Err(e) => assert!(
+                e.to_string().contains("Invalid service name"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // A signal clause that has no message payload (the literal between "signal"
+    // and "to") must fail with an informative error.
+    #[test]
+    fn test_signal_missing_message() {
+        // "to" immediately follows "signal" — no string literal for the message
+        let statement = "allow users to access services and signal to service";
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        match parse_allow(&tz.tokens, 1, &class_index, &classes) {
+            Ok(c) => panic!("should have failed: signal has no message: {c:?}"),
+            Err(e) => assert!(
+                e.to_string().contains("Literal"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // A signal clause that has a message but no "to" keyword before the service
+    // name must fail because "to" is required syntax.
+    #[test]
+    fn test_signal_missing_to() {
+        let statement = r#"allow users to access services and signal "x" service"#;
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        match parse_allow(&tz.tokens, 1, &class_index, &classes) {
+            Ok(c) => panic!("should have failed: signal missing TO: {c:?}"),
+            Err(e) => assert!(
+                e.to_string().contains("TO") || e.to_string().contains("expected"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // A signal clause that ends after "to" with no service name must fail
+    // because the target service is required.
+    #[test]
+    fn test_signal_missing_service() {
+        let statement = r#"allow users to access services and signal "x" to"#;
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        match parse_allow(&tz.tokens, 1, &class_index, &classes) {
+            Ok(c) => panic!("should have failed: signal missing service name: {c:?}"),
+            Err(e) => assert!(
+                e.to_string().contains("service"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // Extra tokens after the signal clause (which must be the last clause) must
+    // be rejected because the grammar does not allow anything after the signal.
+    #[test]
+    fn test_signal_trailing_tokens() {
+        let statement = r#"allow users to access services and signal "x" to service extra"#;
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        match parse_allow(&tz.tokens, 1, &class_index, &classes) {
+            Ok(c) => panic!("should have failed: tokens after signal clause: {c:?}"),
+            Err(e) => assert!(
+                e.to_string().contains("signal"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // Using a non-endpoint class (e.g. "users") in the ON clause on the RHS of
+    // an allow statement (after the service) must fail because only endpoint
+    // classes are valid there.
+    #[test]
+    fn test_service_on_non_endpoint_class() {
+        let statement = "allow blue users to access services on users";
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        match parse_allow(&tz.tokens, 1, &class_index, &classes) {
+            Ok(c) => panic!("should have failed: ON clause class is not an endpoint: {c:?}"),
+            Err(e) => assert!(
+                e.to_string().contains("endpoint"),
+                "unexpected error: {e}"
+            ),
+        }
     }
 }

@@ -446,6 +446,76 @@ allow marketing-emps to access role:marketing services
         }
     }
 
+    // A custom class defined with "define" must be usable as the subject class
+    // in an allow statement by its canonical name.  This exercises the class
+    // registry lookup path in parse_allow.
+    #[test]
+    fn test_custom_class_in_allow() {
+        let input = "define employee as a user with id\nallow employees to access services";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        assert_eq!(pr.policy.defines.len(), 1);
+        assert_eq!(pr.policy.allows.len(), 1);
+
+        // The user clause on the LHS must name the custom class, not the base "user".
+        let allow = &pr.policy.allows[0];
+        let user_clause = allow
+            .client
+            .iter()
+            .find(|c| c.flavor == ClassFlavor::User)
+            .expect("user clause missing from LHS");
+        assert_eq!(user_clause.class, "employee");
+    }
+
+    // The AKA name of a custom class must be accepted wherever the canonical
+    // name is accepted in an allow statement and must resolve to the canonical name.
+    #[test]
+    fn test_aka_name_in_allow() {
+        // "mice" is the AKA for "mouse"; the allow statement uses the AKA.
+        let input =
+            "define mouse AKA mice as a user with device-id\nallow mice to access services";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        assert_eq!(pr.policy.allows.len(), 1);
+
+        let allow = &pr.policy.allows[0];
+        let user_clause = allow
+            .client
+            .iter()
+            .find(|c| c.flavor == ClassFlavor::User)
+            .expect("user clause missing from LHS");
+        // The AKA "mice" must resolve to the canonical class name "mouse".
+        assert_eq!(user_clause.class, "mouse");
+    }
+
+    // resolve_class_flavors must iterate until all classes are resolved, even
+    // when the inheritance chain is more than two levels deep.  This tests a
+    // three-level chain: engineer → employee → worker → user (built-in).
+    #[test]
+    fn test_multi_level_inheritance() {
+        let input = "\
+            define worker as a user with id\n\
+            define employee as a worker with role\n\
+            define engineer as an employee with specialty";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        assert_eq!(pr.policy.defines.len(), 3);
+
+        // After multi-pass flavor resolution every class must end up as User.
+        for class in &pr.policy.defines {
+            assert_eq!(
+                class.flavor,
+                ClassFlavor::User,
+                "class '{}' should have User flavor but got {:?}",
+                class.name,
+                class.flavor
+            );
+        }
+    }
+
     // Defining the same class name twice in one policy must fail with a
     // Redefinition error, not silently overwrite the first definition.
     #[test]
