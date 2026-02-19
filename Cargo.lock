@@ -1280,7 +1280,7 @@ dependencies = [
 
 [[package]]
 name = "zplc"
-version = "0.10.0"
+version = "0.11.0"
 dependencies = [
  "base64",
  "bytes",
@@ -1297,7 +1297,6 @@ dependencies = [
  "thiserror 2.0.16",
  "toml",
  "zpr",
- "zpr-policy",
 ]
 
 [[package]]
@@ -1312,12 +1311,4 @@ dependencies = [
  "thiserror 1.0.69",
  "url",
  "zerocopy",
-]
-
-[[package]]
-name = "zpr-policy"
-version = "0.14.0"
-source = "git+https://github.com/org-zpr/zpr-policy-rs.git?tag=v0.9.1#1192ff85110b4c01da432b7ace485d9a283720e6"
-dependencies = [
- "prost",
 ]

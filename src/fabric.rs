@@ -153,26 +153,34 @@ impl fmt::Display for Fabric {
                 writeln!(f, "      (none)")?;
             }
             for (i, cp) in s.client_policies.iter().enumerate() {
-                writeln!(
-                    f,
-                    "      {}.client)  {}",
-                    i + 1,
-                    cp.cli_condition
-                        .iter()
-                        .map(|a| a.to_instance_string())
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                )?;
-                writeln!(
-                    f,
-                    "      {}.service)  {}",
-                    i + 1,
-                    cp.svc_condition
-                        .iter()
-                        .map(|a| a.to_instance_string())
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                )?;
+                if cp.cli_condition.is_empty() {
+                    writeln!(f, "      {}.client)  (NONE)", i + 1)?;
+                } else {
+                    writeln!(
+                        f,
+                        "      {}.client)  {}",
+                        i + 1,
+                        cp.cli_condition
+                            .iter()
+                            .map(|a| a.to_instance_string())
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    )?;
+                }
+                if cp.svc_condition.is_empty() {
+                    writeln!(f, "      {}.service)  (NONE)", i + 1)?;
+                } else {
+                    writeln!(
+                        f,
+                        "      {}.service)  {}",
+                        i + 1,
+                        cp.svc_condition
+                            .iter()
+                            .map(|a| a.to_instance_string())
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    )?;
+                }
                 if cp.signal.is_some() {
                     writeln!(f, "      {}.signal) {}", i + 1, cp.signal.as_ref().unwrap())?;
                 }
