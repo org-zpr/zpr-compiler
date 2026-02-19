@@ -29,7 +29,7 @@ struct Cli {
     #[arg(short = 'd', long = "outdir", value_name = "DIR")]
     outdir: Option<PathBuf>,
 
-    /// Specify the output format: v1 (default) or v2.
+    /// Specify the output format: v2 (default) - Reserved for future use.
     #[arg(short = 'f', long = "outfmt", value_name = "OUTPUT_FORMAT")]
     outfmt: Option<String>,
 
@@ -68,14 +68,10 @@ fn main() {
     if let Some(outfname) = cli.outfname {
         cb = cb.output_filename(&outfname);
     }
+    cb = cb.output_format(OutputFormat::V2);
     if let Some(outfmt) = cli.outfmt {
         match outfmt.as_str() {
-            "v1" => {
-                cb = cb.output_format(OutputFormat::V1);
-            }
-            "v2" => {
-                cb = cb.output_format(OutputFormat::V2);
-            }
+            "v2" => (), // we only support v2
             _ => {
                 println!(
                     "{}{} invalid output format: {}",

@@ -11,7 +11,6 @@ use crate::crypto::{sha256_of_file, sign_pkcs1v15_sha256};
 use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
-use crate::policybinaryv1::{PolicyBinaryV1, PolicyContainerV1};
 use crate::policybinaryv2::{PolicyBinaryV2, PolicyContainerV2};
 use crate::policybuilder::PolicyBuilder;
 use crate::policywriter::PolicyContainer;
@@ -63,11 +62,14 @@ impl Compilation {
         cctx.info("build successful");
         if let Some(pol) = pol {
             let container_bytes = match self.output_format {
-                OutputFormat::V1 => {
-                    self.contain_policy(pol, &cctx, PolicyContainerV1::default())?
-                }
                 OutputFormat::V2 => {
                     self.contain_policy(pol, &cctx, PolicyContainerV2::default())?
+                }
+                _ => {
+                    return Err(CompilationError::FileError(format!(
+                        "unsupported output format for policy container: {:?}",
+                        self.output_format
+                    )));
                 }
             };
             self.write_container(&container_bytes, &self.output_file, &cctx)?;
@@ -263,13 +265,6 @@ impl Compilation {
         }
 
         let policy_bytes = match self.output_format {
-            OutputFormat::V1 => {
-                let writer = PolicyBinaryV1::new();
-                let mut builder = PolicyBuilder::new(self.verbose, writer);
-                builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
-                builder.with_fabric(&fabric, &cctx)?;
-                builder.build()?
-            }
             OutputFormat::V2 => {
                 let writer = PolicyBinaryV2::new();
                 let mut builder = PolicyBuilder::new(self.verbose, writer);
@@ -277,6 +272,7 @@ impl Compilation {
                 builder.with_fabric(&fabric, &cctx)?;
                 builder.build()?
             }
+            _ => panic!("unsupported output format for policy binary"),
         };
         cctx.info("build successful");
         Ok(Some(policy_bytes))
@@ -327,8 +323,9 @@ impl Compilation {
 
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
 pub enum OutputFormat {
+    #[deprecated(since = "0.11.0", note = "use V2 instead")]
+    V1, // Legacy format
     #[default]
-    V1,
     V2,
 }
 
@@ -416,8 +413,8 @@ impl CompilationBuilder {
         };
 
         let default_extension = match self.output_format {
-            OutputFormat::V1 => "bin",
             OutputFormat::V2 => "bin2",
+            _ => panic!("unsupported output format"),
         };
 
         let mut output_file = match self.output_directory {
@@ -459,11 +456,11 @@ impl CompilationBuilder {
 mod test {
     use super::*;
 
-    use polio::polio;
-    use prost::Message;
+    use bytes::{Buf, Bytes};
     use std::env;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use zpr::policy::v1 as policy_capnp;
 
     struct TempDir {
         path: PathBuf,
@@ -773,8 +770,17 @@ mod test {
         match result {
             Ok(pol) => {
                 let pol_bin = pol.unwrap();
-                let pol: polio::Policy = polio::Policy::decode(pol_bin.as_slice())
-                    .expect("failed to decode binary policy file");
+
+                let policy_bytes = Bytes::from(pol_bin);
+                let policy_rdr = capnp::serialize::read_message(
+                    policy_bytes.reader(),
+                    capnp::message::ReaderOptions::new(),
+                )
+                .unwrap();
+
+                let pol = policy_rdr
+                    .get_root::<policy_capnp::policy::Reader>()
+                    .unwrap();
 
                 let mut pcount = 0;
 
@@ -784,70 +790,87 @@ mod test {
                 // 00000100 = found the color:green condition
                 let mut matched: u8 = 0;
 
-                for plcy in &pol.policies {
-                    if plcy.service_id != "Webby" {
+                assert!(pol.has_com_policies()); // we are checking communication policies.
+
+                for (_i, plcy) in pol.get_com_policies().unwrap().iter().enumerate() {
+                    let svc_id = plcy.get_service_id().unwrap().to_string().unwrap();
+                    if svc_id != "Webby" {
                         continue;
                     }
                     pcount += 1;
-                    if plcy.svc_conditions.is_empty() {
+
+                    // TODO: look into this.  Why does has_service_conds return true but len() == 0?
+                    let has_service_conds = plcy.get_service_conds().unwrap().len() > 0;
+
+                    if !has_service_conds {
                         // Then there should be a cli condition on color:red
-                        if plcy.cli_conditions.len() != 1 {
+                        if !plcy.has_client_conds() {
+                            assert!(false, "expected cli condition for color:red, got none");
+                        }
+
+                        let mut cond_count = 0;
+
+                        for cond in plcy.get_client_conds().unwrap() {
+                            cond_count += 1;
+
+                            let attr_str = attr_exp_v2_to_string(&cond);
+
+                            assert_eq!(attr_str, "user.color EQ red");
+                            matched |= 0b00000001;
+                        }
+                        if cond_count != 1 {
                             assert!(
                                 false,
                                 "expected 1 cli condition for color:red, got {}",
-                                plcy.cli_conditions.len()
+                                cond_count
                             );
                         }
-                        let cond = &plcy.cli_conditions[0];
-                        let expr = &cond.attr_exprs[0];
-                        let kval = pol.attr_key_index[expr.key as usize].clone();
-                        let vval = pol.attr_val_index[expr.val as usize].clone();
-                        assert!(
-                            kval == "user.color" && vval == "red",
-                            "expected user.color:purple, got {}:{}",
-                            kval,
-                            vval
-                        );
-                        matched |= 0b00000001;
                     } else {
                         // The other two policies should each have one cli_conditiona and one svc_condition.
                         // The expected values are:
                         //    - user.color EQ green WITH service.content EQ green
                         //    - user.color EQ brown WITH service.content EQ brown
-                        let svc_cond = &plcy.svc_conditions[0];
-                        let svc_expr = &svc_cond.attr_exprs[0];
-                        let svc_kval = pol.attr_key_index[svc_expr.key as usize].clone();
-                        let svc_vval = pol.attr_val_index[svc_expr.val as usize].clone();
-                        assert!(
-                            svc_kval == "service.content",
-                            "expected service.content, got {}",
-                            svc_kval
-                        );
-                        if svc_vval == "brown" {
-                            // Then there should be a cli condition on color:brown
-                            let cond = &plcy.cli_conditions[0];
-                            let expr = &cond.attr_exprs[0];
-                            let kval = pol.attr_key_index[expr.key as usize].clone();
-                            let vval = pol.attr_val_index[expr.val as usize].clone();
-                            assert!(
-                                kval == "user.color" && vval == "brown",
-                                "expected user.color:brown, got {}:{}",
-                                kval,
-                                vval
-                            );
+
+                        let svc_attr_str = {
+                            let mut attr_str = String::new();
+                            let mut scount = 0;
+                            for cond in plcy.get_service_conds().unwrap() {
+                                scount += 1;
+                                attr_str = attr_exp_v2_to_string(&cond);
+                            }
+                            if scount != 1 {
+                                assert!(
+                                    false,
+                                    "expected 1 svc condition for color:brown/green, got {}",
+                                    scount
+                                );
+                            }
+                            attr_str
+                        };
+
+                        let cli_attr_str = {
+                            let mut attr_str = String::new();
+                            let mut ccount = 0;
+                            for cond in plcy.get_client_conds().unwrap() {
+                                ccount += 1;
+                                attr_str = attr_exp_v2_to_string(&cond);
+                            }
+                            if ccount != 1 {
+                                assert!(
+                                    false,
+                                    "expected 1 cli condition for color:brown/green, got {}",
+                                    ccount
+                                );
+                            }
+                            attr_str
+                        };
+
+                        if svc_attr_str == "service.content EQ brown" {
+                            assert_eq!(cli_attr_str, "user.color EQ brown");
                             matched |= 0b00000010;
                         } else {
-                            // Then there should be a cli condition on color:green
-                            let cond = &plcy.cli_conditions[0];
-                            let expr = &cond.attr_exprs[0];
-                            let kval = pol.attr_key_index[expr.key as usize].clone();
-                            let vval = pol.attr_val_index[expr.val as usize].clone();
-                            assert!(
-                                kval == "user.color" && vval == "green",
-                                "expected user.color:green, got {}:{}",
-                                kval,
-                                vval
-                            );
+                            assert_eq!(svc_attr_str, "service.content EQ green");
+                            assert_eq!(cli_attr_str, "user.color EQ green");
                             matched |= 0b00000100;
                         }
                     }
@@ -863,5 +886,38 @@ mod test {
                 assert!(false, "compilation failed: {}", err);
             }
         }
+    }
+
+    fn attr_exp_v2_to_string(exp: &policy_capnp::attr_expr::Reader) -> String {
+        let mut s = String::new();
+        s.push_str(&exp.get_key().unwrap().to_str().unwrap());
+        let opstr = match exp.get_op().unwrap() {
+            policy_capnp::AttrOp::Eq => "EQ",
+            policy_capnp::AttrOp::Ne => "NE",
+            policy_capnp::AttrOp::Has => "HAS",
+            policy_capnp::AttrOp::Excludes => "EXCLUDES",
+        };
+        s.push_str(&format!(" {} ", opstr));
+        if exp.has_value() {
+            let vals = exp.get_value().unwrap();
+            if vals.len() > 1 {
+                s.push_str("[");
+                s.push_str(
+                    &vals
+                        .iter()
+                        .map(|v| v.unwrap().to_str().unwrap())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+                s.push_str("]");
+            } else if vals.len() == 1 {
+                s.push_str(&vals.get(0).unwrap().to_str().unwrap());
+            } else {
+                s.push_str("\"\"");
+            }
+        } else {
+            s.push_str("(no value)")
+        }
+        s
     }
 }

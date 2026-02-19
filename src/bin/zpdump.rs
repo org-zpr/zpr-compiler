@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use clap::Parser;
 use std::path::PathBuf;
-use zplc::dumpv1::dump_v1;
 use zplc::dumpv2::dump_v2;
 
 /// ZPL Policy Dumper
@@ -17,7 +16,7 @@ struct Cli {
 }
 
 fn main() {
-    let exit_code = 0;
+    let mut exit_code = 0;
     let cli = Cli::parse();
 
     let fname = cli.zpl.display().to_string();
@@ -26,7 +25,8 @@ fn main() {
     if fname.ends_with(".bin2") {
         dump_v2(&fname, encoded_buf);
     } else {
-        dump_v1(&fname, encoded_buf);
+        exit_code = 1;
+        println!("unexpected file extension; only .bin2 is supported");
     }
     std::process::exit(exit_code);
 }
