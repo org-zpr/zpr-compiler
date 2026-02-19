@@ -586,4 +586,50 @@ allow marketing-emps to access role:marketing services
             assert_eq!(pol.policy.allows.len(), 0);
         }
     }
+
+    // DEFINE statements are collected in a first pass before any ALLOW or NEVER
+    // statements are processed, so a class reference in an allow that appears
+    // before its define in the source file must still resolve correctly.
+    #[test]
+    fn test_forward_reference_in_allow() {
+        let input = "allow employees to access services\ndefine employee as a user with id";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("forward reference should resolve");
+        assert_eq!(pr.policy.allows.len(), 1);
+        assert_eq!(pr.policy.defines.len(), 1);
+    }
+
+    // A signal clause must survive the full parse() pipeline intact and be
+    // accessible on the resulting AllowClause with the correct message and target.
+    #[test]
+    fn test_signal_clause_through_full_parse() {
+        let input = r#"allow users to access services and signal "hello" to service"#;
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        assert_eq!(pr.policy.allows.len(), 1);
+
+        let signal = pr.policy.allows[0]
+            .signal
+            .as_ref()
+            .expect("signal clause should be present on the allow");
+        assert_eq!(signal.message, "hello");
+        assert_eq!(signal.service_class_name, "service");
+    }
+
+    // A policy containing multiple allows and a never must produce the correct
+    // counts in each respective vector of the Policy struct.
+    #[test]
+    fn test_multi_statement_counts() {
+        let input = "\
+            allow users to access services\n\
+            allow color:green users to access services\n\
+            never allow color:red users to access services";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        assert_eq!(pr.policy.allows.len(), 2, "expected 2 allow clauses");
+        assert_eq!(pr.policy.nevers.len(), 1, "expected 1 never clause");
+    }
 }

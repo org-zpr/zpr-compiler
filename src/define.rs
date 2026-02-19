@@ -588,4 +588,59 @@ mod test {
             ),
         }
     }
+
+    // The AKA clause must be captured in class.aka; without it, the parser
+    // auto-pluralises, so an explicit AKA must override that default.
+    #[test]
+    fn test_aka_is_set() {
+        let statement = "define mouse AKA mice as a user with device-id";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        let class = parse_define(&tz.tokens, 1).unwrap();
+        assert_eq!(class.name, "mouse");
+        assert_eq!(class.aka, "mice");
+    }
+
+    // The "optional" modifier must set attr.optional = true on the resulting
+    // attribute; that flag is separate from multi-valued and must be checked
+    // independently.
+    #[test]
+    fn test_optional_attr_flag() {
+        let statement = "define employee as a user with optional nickname";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        let class = parse_define(&tz.tokens, 1).unwrap();
+        assert_eq!(class.with_attrs.len(), 1);
+        assert!(
+            class.with_attrs[0].optional,
+            "attribute should be marked optional"
+        );
+    }
+
+    // The "multiple" modifier must produce a multi-valued attribute; that flag
+    // is distinct from optional and must be independently asserted.
+    #[test]
+    fn test_multiple_attr_flag() {
+        let statement = "define employee as a user with multiple roles";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        let class = parse_define(&tz.tokens, 1).unwrap();
+        assert_eq!(class.with_attrs.len(), 1);
+        assert!(
+            class.with_attrs[0].is_multi_valued(),
+            "attribute should be marked multi-valued"
+        );
+    }
+
+    // A define statement with no "with" clause is valid — the clause is optional.
+    // The resulting class must have an empty attribute list.
+    #[test]
+    fn test_no_with_clause() {
+        let statement = "define alien as a user";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        let class = parse_define(&tz.tokens, 1).unwrap();
+        assert_eq!(class.name, "alien");
+        assert!(class.with_attrs.is_empty(), "expected no attributes");
+    }
 }
