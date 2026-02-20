@@ -446,6 +446,125 @@ allow marketing-emps to access role:marketing services
         }
     }
 
+    // A custom class defined with "define" must be usable as the subject class
+    // in an allow statement by its canonical name.  This exercises the class
+    // registry lookup path in parse_allow.
+    #[test]
+    fn test_custom_class_in_allow() {
+        let input = "define employee as a user with id\nallow employees to access services";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        assert_eq!(pr.policy.defines.len(), 1);
+        assert_eq!(pr.policy.allows.len(), 1);
+
+        // The user clause on the LHS must name the custom class, not the base "user".
+        let allow = &pr.policy.allows[0];
+        let user_clause = allow
+            .client
+            .iter()
+            .find(|c| c.flavor == ClassFlavor::User)
+            .expect("user clause missing from LHS");
+        assert_eq!(user_clause.class, "employee");
+    }
+
+    // The AKA name of a custom class must be accepted wherever the canonical
+    // name is accepted in an allow statement and must resolve to the canonical name.
+    #[test]
+    fn test_aka_name_in_allow() {
+        // "mice" is the AKA for "mouse"; the allow statement uses the AKA.
+        let input =
+            "define mouse AKA mice as a user with device-id\nallow mice to access services";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        assert_eq!(pr.policy.allows.len(), 1);
+
+        let allow = &pr.policy.allows[0];
+        let user_clause = allow
+            .client
+            .iter()
+            .find(|c| c.flavor == ClassFlavor::User)
+            .expect("user clause missing from LHS");
+        // The AKA "mice" must resolve to the canonical class name "mouse".
+        assert_eq!(user_clause.class, "mouse");
+    }
+
+    // resolve_class_flavors must iterate until all classes are resolved, even
+    // when the inheritance chain is more than two levels deep.  This tests a
+    // three-level chain: engineer → employee → worker → user (built-in).
+    #[test]
+    fn test_multi_level_inheritance() {
+        let input = "\
+            define worker as a user with id\n\
+            define employee as a worker with role\n\
+            define engineer as an employee with specialty";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        assert_eq!(pr.policy.defines.len(), 3);
+
+        // After multi-pass flavor resolution every class must end up as User.
+        for class in &pr.policy.defines {
+            assert_eq!(
+                class.flavor,
+                ClassFlavor::User,
+                "class '{}' should have User flavor but got {:?}",
+                class.name,
+                class.flavor
+            );
+        }
+    }
+
+    // Defining the same class name twice in one policy must fail with a
+    // Redefinition error, not silently overwrite the first definition.
+    #[test]
+    fn test_redefinition_error() {
+        let input =
+            "define employee as a user with id \n define employee as a user with id";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        match parse(tz.tokens, &ctx) {
+            Ok(_) => panic!("should have failed: class defined twice"),
+            Err(e) => assert!(
+                matches!(e, CompilationError::Redefinition(_, _, _)),
+                "unexpected error: {e:?}"
+            ),
+        }
+    }
+
+    // A literal token that appears before any statement keyword (allow/define/never)
+    // has no valid enclosing statement and must be rejected immediately.
+    #[test]
+    fn test_token_before_keyword_fails() {
+        let input = "foo allow users to access services";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        match parse(tz.tokens, &ctx) {
+            Ok(_) => panic!("should have failed: literal before any keyword"),
+            Err(e) => assert!(
+                matches!(e, CompilationError::ParseError(_, _, _)),
+                "unexpected error: {e:?}"
+            ),
+        }
+    }
+
+    // A "never" statement not followed by "allow" must produce a NeverStmtParseError
+    // at the top-level parse stage (the error propagates up from parse_never).
+    #[test]
+    fn test_never_without_allow_at_parser_level() {
+        let input = "never users to access services";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        match parse(tz.tokens, &ctx) {
+            Ok(_) => panic!("should have failed: never without allow"),
+            Err(e) => assert!(
+                matches!(e, CompilationError::NeverStmtParseError(_, _, _)),
+                "unexpected error: {e:?}"
+            ),
+        }
+    }
+
     #[test]
     fn test_base_never() {
         let valids = vec!["never allow color:green users to access services"];
@@ -466,5 +585,51 @@ allow marketing-emps to access role:marketing services
             assert_eq!(pol.policy.nevers.len(), 1);
             assert_eq!(pol.policy.allows.len(), 0);
         }
+    }
+
+    // DEFINE statements are collected in a first pass before any ALLOW or NEVER
+    // statements are processed, so a class reference in an allow that appears
+    // before its define in the source file must still resolve correctly.
+    #[test]
+    fn test_forward_reference_in_allow() {
+        let input = "allow employees to access services\ndefine employee as a user with id";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("forward reference should resolve");
+        assert_eq!(pr.policy.allows.len(), 1);
+        assert_eq!(pr.policy.defines.len(), 1);
+    }
+
+    // A signal clause must survive the full parse() pipeline intact and be
+    // accessible on the resulting AllowClause with the correct message and target.
+    #[test]
+    fn test_signal_clause_through_full_parse() {
+        let input = r#"allow users to access services and signal "hello" to service"#;
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        assert_eq!(pr.policy.allows.len(), 1);
+
+        let signal = pr.policy.allows[0]
+            .signal
+            .as_ref()
+            .expect("signal clause should be present on the allow");
+        assert_eq!(signal.message, "hello");
+        assert_eq!(signal.service_class_name, "service");
+    }
+
+    // A policy containing multiple allows and a never must produce the correct
+    // counts in each respective vector of the Policy struct.
+    #[test]
+    fn test_multi_statement_counts() {
+        let input = "\
+            allow users to access services\n\
+            allow color:green users to access services\n\
+            never allow color:red users to access services";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        assert_eq!(pr.policy.allows.len(), 2, "expected 2 allow clauses");
+        assert_eq!(pr.policy.nevers.len(), 1, "expected 1 never clause");
     }
 }

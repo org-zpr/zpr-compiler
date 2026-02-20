@@ -745,4 +745,351 @@ mod test {
             super::TokenType::Literal("database".to_string())
         );
     }
+
+    // --- Keywords not directly asserted elsewhere ---
+
+    #[test]
+    fn test_remaining_keywords() {
+        // Covers keyword token types not explicitly asserted in other tests.
+        let cases: &[(&str, super::TokenType)] = &[
+            ("allow", super::TokenType::Allow),
+            ("define", super::TokenType::Define),
+            ("with", super::TokenType::With),
+            ("without", super::TokenType::Without),
+            ("to", super::TokenType::To),
+            ("access", super::TokenType::Access),
+            ("and", super::TokenType::And),
+            ("as", super::TokenType::As),
+            ("aka", super::TokenType::AkA),
+            ("from", super::TokenType::From),
+            ("tag", super::TokenType::Tag),
+            ("tags", super::TokenType::Tags),
+            ("optional", super::TokenType::Optional),
+            ("multiple", super::TokenType::Multiple),
+        ];
+        for (word, expected) in cases {
+            let tz = super::tokenize_str(word, &CompilationCtx::default()).unwrap();
+            assert_eq!(tz.tokens.len(), 1, "expected 1 token for '{word}'");
+            assert_eq!(&tz.tokens[0].tt, expected, "wrong token type for '{word}'");
+        }
+    }
+
+    #[test]
+    fn test_comma_token() {
+        // A bare comma emits a Comma token.
+        let tz = super::tokenize_str(",", &CompilationCtx::default()).unwrap();
+        assert_eq!(tz.tokens.len(), 1);
+        assert_eq!(tz.tokens[0].tt, super::TokenType::Comma);
+    }
+
+    // --- Case insensitivity ---
+
+    #[test]
+    fn test_keyword_case_insensitive() {
+        // Keywords must be matched regardless of case.
+        let cases: &[(&str, super::TokenType)] = &[
+            ("NEVER", super::TokenType::Never),
+            ("Allow", super::TokenType::Allow),
+            ("DEFINE", super::TokenType::Define),
+            ("WITH", super::TokenType::With),
+            ("WITHOUT", super::TokenType::Without),
+            ("TO", super::TokenType::To),
+            ("ACCESS", super::TokenType::Access),
+            ("AND", super::TokenType::And),
+            ("AS", super::TokenType::As),
+            ("AKA", super::TokenType::AkA),
+            ("FROM", super::TokenType::From),
+            ("TAG", super::TokenType::Tag),
+            ("TAGS", super::TokenType::Tags),
+            ("ON", super::TokenType::On),
+            ("OPTIONAL", super::TokenType::Optional),
+            ("MULTIPLE", super::TokenType::Multiple),
+            ("SIGNAL", super::TokenType::Signal),
+        ];
+        for (word, expected) in cases {
+            let tz = super::tokenize_str(word, &CompilationCtx::default()).unwrap();
+            assert_eq!(tz.tokens.len(), 1, "expected 1 token for '{word}'");
+            assert_eq!(&tz.tokens[0].tt, expected, "wrong token type for '{word}'");
+        }
+    }
+
+    #[test]
+    fn test_literal_case_preserved() {
+        // Non-keyword identifiers preserve their original casing.
+        let zpl = "FooBar BazQux";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(
+            tokens[0].tt,
+            super::TokenType::Literal("FooBar".to_string())
+        );
+        assert_eq!(
+            tokens[1].tt,
+            super::TokenType::Literal("BazQux".to_string())
+        );
+    }
+
+    // --- Article sugar filtering ---
+
+    #[test]
+    fn test_article_sugar_filtered() {
+        // "a" and "an" are syntactic sugar and must not appear as tokens.
+        let zpl = "define foo as a user";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        // define, foo, as, user — "a" is dropped
+        assert_eq!(tz.tokens.len(), 4);
+        assert_eq!(tz.tokens[0].tt, super::TokenType::Define);
+        assert_eq!(tz.tokens[3].tt, super::TokenType::Literal("user".to_string()));
+
+        let zpl2 = "define foo as an entity";
+        let tz2 = super::tokenize_str(zpl2, &CompilationCtx::default()).unwrap();
+        // define, foo, as, entity — "an" is dropped
+        assert_eq!(tz2.tokens.len(), 4);
+        assert_eq!(tz2.tokens[3].tt, super::TokenType::Literal("entity".to_string()));
+    }
+
+    // --- Empty / whitespace input ---
+
+    #[test]
+    fn test_empty_input() {
+        let tz = super::tokenize_str("", &CompilationCtx::default()).unwrap();
+        assert_eq!(tz.tokens.len(), 0);
+    }
+
+    #[test]
+    fn test_whitespace_only() {
+        let tz = super::tokenize_str("   \t  ", &CompilationCtx::default()).unwrap();
+        assert_eq!(tz.tokens.len(), 0);
+    }
+
+    // --- Tab as delimiter ---
+
+    #[test]
+    fn test_tab_as_delimiter() {
+        let zpl = "allow\tusers\tto\taccess\tservices";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens.len(), 5);
+        assert_eq!(tokens[0].tt, super::TokenType::Allow);
+        assert_eq!(tokens[1].tt, super::TokenType::Literal("users".to_string()));
+        assert_eq!(tokens[2].tt, super::TokenType::To);
+        assert_eq!(tokens[3].tt, super::TokenType::Access);
+        assert_eq!(tokens[4].tt, super::TokenType::Literal("services".to_string()));
+    }
+
+    // --- Token position tracking ---
+
+    #[test]
+    fn test_token_positions() {
+        // Tokens report the line and column at which they start.
+        let zpl = "allow users";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens[0].line, 1);
+        assert_eq!(tokens[0].col, 1); // "allow" starts at col 1
+        assert_eq!(tokens[1].line, 1);
+        assert_eq!(tokens[1].col, 7); // "users" starts at col 7 (after "allow ")
+    }
+
+    #[test]
+    fn test_multiline_positions() {
+        // Column counter resets to 1 after a newline.
+        let zpl = "allow\nusers";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens[0].line, 1);
+        assert_eq!(tokens[0].col, 1);
+        assert_eq!(tokens[1].line, 2);
+        assert_eq!(tokens[1].col, 1);
+    }
+
+    // --- Namespace literal (period as part of a word) ---
+
+    #[test]
+    fn test_namespace_literal() {
+        // A period not followed by whitespace is part of the token (namespace syntax).
+        let zpl = "foo.bar";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(
+            tokens[0].tt,
+            super::TokenType::Literal("foo.bar".to_string())
+        );
+    }
+
+    #[test]
+    fn test_namespace_tuple_key() {
+        // A tuple key may contain a period (namespace-qualified attribute name).
+        let zpl = "define foo as user with ns.color:purple.";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        let attr = tokens
+            .iter()
+            .find(|t| matches!(&t.tt, super::TokenType::Tuple(_)));
+        assert!(attr.is_some(), "expected a Tuple token");
+        if let super::TokenType::Tuple((name, vals)) = &attr.unwrap().tt {
+            assert_eq!(name, "ns.color");
+            assert_eq!(vals, &["purple"]);
+        }
+    }
+
+    // --- Standalone period ---
+
+    #[test]
+    fn test_period_standalone() {
+        // A period with no preceding word (or only whitespace) emits a Period token.
+        let zpl = ".";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].tt, super::TokenType::Period);
+    }
+
+    // --- Comment-only input ---
+
+    #[test]
+    fn test_comment_only_hash() {
+        let tz =
+            super::tokenize_str("# nothing to see here", &CompilationCtx::default()).unwrap();
+        assert_eq!(tz.tokens.len(), 0);
+    }
+
+    #[test]
+    fn test_comment_only_double_slash() {
+        let tz =
+            super::tokenize_str("// nothing to see here", &CompilationCtx::default()).unwrap();
+        assert_eq!(tz.tokens.len(), 0);
+    }
+
+    #[test]
+    fn test_comment_mid_program() {
+        // A comment line in the middle of a multi-line program is ignored.
+        let zpl = "allow users\n# comment line\nto access services";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens.len(), 5);
+        assert_eq!(tokens[0].tt, super::TokenType::Allow);
+        assert_eq!(tokens[2].tt, super::TokenType::To);
+        assert_eq!(tokens[2].line, 3);
+        assert_eq!(tokens[2].col, 1);
+    }
+
+    // --- Warnings as errors (werror) ---
+
+    #[test]
+    fn test_double_period_warning_werror() {
+        // With werror enabled the "multiple unquoted periods" warning becomes an error.
+        let ctx = CompilationCtx::new(false, true);
+        let zpl = "foo..bar";
+        let tz = super::tokenize_str(zpl, &ctx);
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::Warning(_)
+        ));
+    }
+
+    // --- Error: unterminated quote at EOF ---
+
+    #[test]
+    fn test_unterminated_quote_eof() {
+        // A quoted string that reaches EOF without a closing quote is an error.
+        let zpl = "\"unterminated";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::UnterminatedQuote(_, _)
+        ));
+    }
+
+    // --- Error: illegal colon ---
+
+    #[test]
+    fn test_illegal_colon_at_start() {
+        // A colon at the very start of input (no preceding name) is illegal.
+        let zpl = ":foo";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::IllegalColon(_, _)
+        ));
+    }
+
+    #[test]
+    fn test_illegal_colon_double() {
+        // A second colon after a key:value pair has already started is illegal.
+        let zpl = "foo::bar";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::IllegalColon(_, _)
+        ));
+    }
+
+    // --- Error: illegal set delimiters ---
+
+    #[test]
+    fn test_illegal_set_start_no_colon() {
+        // '{' without a preceding ':' (i.e. not inside a tuple value) is illegal.
+        let zpl = "foo{bar}";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::IllegalSetStart(_, _)
+        ));
+    }
+
+    #[test]
+    fn test_illegal_set_start_at_input_start() {
+        // '{' with no current word at all is illegal.
+        let zpl = "{bar}";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::IllegalSetStart(_, _)
+        ));
+    }
+
+    #[test]
+    fn test_illegal_set_nested() {
+        // A second '{' while already inside a set is illegal.
+        let zpl = "foo:{{bar}}";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::IllegalSetStart(_, _)
+        ));
+    }
+
+    #[test]
+    fn test_illegal_set_end_unmatched() {
+        // '}' without a matching '{' is illegal.
+        let zpl = "foo}";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::IllegalSetEnd(_, _)
+        ));
+    }
+
+    #[test]
+    fn test_unterminated_set() {
+        // A period (statement terminator) inside an open set is illegal.
+        let zpl = "foo:{bar.";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::UnterminatedSet(_, _)
+        ));
+    }
 }

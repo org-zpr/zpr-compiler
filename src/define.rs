@@ -397,4 +397,250 @@ mod test {
             }
         }
     }
+
+    // Using "tags" a second time (after names have already been consumed under the
+    // first "tags") must fail because there can only be one tags-section per attribute list.
+    #[test]
+    fn test_double_tags_errors() {
+        let statement = "define foo as a user with tags bar tags baz";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: duplicate 'tags'"),
+            Err(e) => assert!(
+                e.to_string().contains("TAGS"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // "tags" immediately following "tag" (before the tag name is consumed) must
+    // fail because you cannot mix the two forms without a name in between.
+    #[test]
+    fn test_tags_after_tag_errors() {
+        let statement = "define foo as a user with tag tags bar";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: 'tags' following 'tag'"),
+            Err(e) => assert!(
+                e.to_string().contains("TAGS"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // "tag" immediately following "tags" must fail — "tags" is the greedy variant
+    // and "tag" inside it is nonsensical.
+    #[test]
+    fn test_tag_after_tags_errors() {
+        let statement = "define foo as a user with tags tag bar";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: 'tag' following 'tags'"),
+            Err(e) => assert!(
+                e.to_string().contains("TAG"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // "optional" is not a valid modifier inside a tags clause; it must appear
+    // before "tags"/"tag", not after.
+    #[test]
+    fn test_optional_after_tags_errors() {
+        let statement = "define foo as a user with tags optional bar";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: 'optional' after 'tags'"),
+            Err(e) => assert!(
+                e.to_string().contains("OPTIONAL"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // Two consecutive "optional" keywords without an attribute name between them
+    // must fail because "optional" is a one-shot modifier.
+    #[test]
+    fn test_double_optional_errors() {
+        let statement = "define foo as a user with optional optional id";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: duplicate 'optional'"),
+            Err(e) => assert!(
+                e.to_string().contains("OPTIONAL"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // "multiple" is not allowed inside a tags clause and must be rejected.
+    #[test]
+    fn test_multiple_after_tags_errors() {
+        let statement = "define foo as a user with tags multiple bar";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: 'multiple' after 'tags'"),
+            Err(e) => assert!(
+                e.to_string().contains("MULTIPLE"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // Two consecutive "multiple" keywords without an attribute name between them
+    // must fail because "multiple" is a one-shot modifier.
+    #[test]
+    fn test_double_multiple_errors() {
+        let statement = "define foo as a user with multiple multiple id";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: duplicate 'multiple'"),
+            Err(e) => assert!(
+                e.to_string().contains("MULTIPLE"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // "multiple" set before "tags", then a literal name, must fail because the
+    // literal sees both (tags=true, multiple=true) simultaneously.
+    #[test]
+    fn test_multiple_combined_with_tags_errors() {
+        let statement = "define foo as a user with multiple tags foo";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: 'multiple' combined with 'tags'"),
+            Err(e) => assert!(
+                e.to_string().contains("MULTIPLE"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // Two consecutive "and" keywords must fail — "and" is reset only when a
+    // literal or "with" consumes it.
+    #[test]
+    fn test_double_and_errors() {
+        let statement = "define foo as a user with bar and and baz";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: duplicate 'and'"),
+            Err(e) => assert!(
+                e.to_string().contains("AND"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // "and" immediately after "tag" (before the tag name) must fail because
+    // "tag" requires a name token next, not a conjunction.
+    #[test]
+    fn test_and_after_tag_errors() {
+        let statement = "define foo as a user with tag and bar";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: 'and' immediately after 'tag'"),
+            Err(e) => assert!(
+                e.to_string().contains("AND"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // "with" not preceded by "and" must fail — "and with" is the valid
+    // two-token form that opens an additional attribute group; bare "with" is not.
+    #[test]
+    fn test_with_without_and_errors() {
+        let statement = "define foo as a user with bar with baz";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: 'with' without preceding 'and'"),
+            Err(e) => assert!(
+                e.to_string().contains("WITH"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // A key:value tuple attribute inside a "tags" clause must fail because
+    // tags only accept plain names, not structured attributes.
+    #[test]
+    fn test_tuple_attr_in_tags_errors() {
+        let statement = "define foo as a user with tags color:purple";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: tuple attribute inside 'tags'"),
+            Err(e) => assert!(
+                e.to_string().contains("tag"),
+                "unexpected error: {e}"
+            ),
+        }
+    }
+
+    // The AKA clause must be captured in class.aka; without it, the parser
+    // auto-pluralises, so an explicit AKA must override that default.
+    #[test]
+    fn test_aka_is_set() {
+        let statement = "define mouse AKA mice as a user with device-id";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        let class = parse_define(&tz.tokens, 1).unwrap();
+        assert_eq!(class.name, "mouse");
+        assert_eq!(class.aka, "mice");
+    }
+
+    // The "optional" modifier must set attr.optional = true on the resulting
+    // attribute; that flag is separate from multi-valued and must be checked
+    // independently.
+    #[test]
+    fn test_optional_attr_flag() {
+        let statement = "define employee as a user with optional nickname";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        let class = parse_define(&tz.tokens, 1).unwrap();
+        assert_eq!(class.with_attrs.len(), 1);
+        assert!(
+            class.with_attrs[0].optional,
+            "attribute should be marked optional"
+        );
+    }
+
+    // The "multiple" modifier must produce a multi-valued attribute; that flag
+    // is distinct from optional and must be independently asserted.
+    #[test]
+    fn test_multiple_attr_flag() {
+        let statement = "define employee as a user with multiple roles";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        let class = parse_define(&tz.tokens, 1).unwrap();
+        assert_eq!(class.with_attrs.len(), 1);
+        assert!(
+            class.with_attrs[0].is_multi_valued(),
+            "attribute should be marked multi-valued"
+        );
+    }
+
+    // A define statement with no "with" clause is valid — the clause is optional.
+    // The resulting class must have an empty attribute list.
+    #[test]
+    fn test_no_with_clause() {
+        let statement = "define alien as a user";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        let class = parse_define(&tz.tokens, 1).unwrap();
+        assert_eq!(class.name, "alien");
+        assert!(class.with_attrs.is_empty(), "expected no attributes");
+    }
 }
