@@ -2,6 +2,7 @@ use openssl::sha;
 use std::collections::HashMap;
 use std::hash::Hash;
 use zpr::policy::v1 as policy_capnp;
+use zpr::write_to::WriteTo;
 
 use crate::compiler::get_compiler_version;
 use crate::errors::CompilationError;
@@ -9,10 +10,10 @@ use crate::policywriter::{PolicyContainer, PolicyWriter, TSType};
 use crate::protocols::{IcmpFlowType, PortSpec, Protocol, ProtocolDetails};
 use crate::ptypes::Signal;
 
+use zpr::policy_types::write_attributes;
 use zpr::policy_types::{Attribute, PFlags};
 use zpr::policy_types::{JoinPolicy, Scope, ScopeFlag};
-use zpr::policy_types::{Service, ServiceType};
-use zpr::policy_types::{WriteTo, write_attributes}; // TODO: remove refs to fabric
+use zpr::policy_types::{Service, ServiceType}; // TODO: remove refs to fabric
 
 #[derive(Default)]
 pub struct PolicyBinaryV2 {
