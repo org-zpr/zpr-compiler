@@ -1295,10 +1295,7 @@ mod test {
         let tz = tokenize_str(statement, &cctx).unwrap();
         match parse_allow(&tz.tokens, 1, &class_index, &classes) {
             Ok(c) => panic!("should have failed: signal has no message: {c:?}"),
-            Err(e) => assert!(
-                e.to_string().contains("Literal"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("Literal"), "unexpected error: {e}"),
         }
     }
 
@@ -1329,10 +1326,7 @@ mod test {
         let tz = tokenize_str(statement, &cctx).unwrap();
         match parse_allow(&tz.tokens, 1, &class_index, &classes) {
             Ok(c) => panic!("should have failed: signal missing service name: {c:?}"),
-            Err(e) => assert!(
-                e.to_string().contains("service"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("service"), "unexpected error: {e}"),
         }
     }
 
@@ -1346,10 +1340,7 @@ mod test {
         let tz = tokenize_str(statement, &cctx).unwrap();
         match parse_allow(&tz.tokens, 1, &class_index, &classes) {
             Ok(c) => panic!("should have failed: tokens after signal clause: {c:?}"),
-            Err(e) => assert!(
-                e.to_string().contains("signal"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("signal"), "unexpected error: {e}"),
         }
     }
 
@@ -1364,10 +1355,7 @@ mod test {
         let tz = tokenize_str(statement, &cctx).unwrap();
         match parse_allow(&tz.tokens, 1, &class_index, &classes) {
             Ok(c) => panic!("should have failed: ON clause class is not an endpoint: {c:?}"),
-            Err(e) => assert!(
-                e.to_string().contains("endpoint"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("endpoint"), "unexpected error: {e}"),
         }
     }
 }

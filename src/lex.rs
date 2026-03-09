@@ -840,13 +840,19 @@ mod test {
         // define, foo, as, user — "a" is dropped
         assert_eq!(tz.tokens.len(), 4);
         assert_eq!(tz.tokens[0].tt, super::TokenType::Define);
-        assert_eq!(tz.tokens[3].tt, super::TokenType::Literal("user".to_string()));
+        assert_eq!(
+            tz.tokens[3].tt,
+            super::TokenType::Literal("user".to_string())
+        );
 
         let zpl2 = "define foo as an entity";
         let tz2 = super::tokenize_str(zpl2, &CompilationCtx::default()).unwrap();
         // define, foo, as, entity — "an" is dropped
         assert_eq!(tz2.tokens.len(), 4);
-        assert_eq!(tz2.tokens[3].tt, super::TokenType::Literal("entity".to_string()));
+        assert_eq!(
+            tz2.tokens[3].tt,
+            super::TokenType::Literal("entity".to_string())
+        );
     }
 
     // --- Empty / whitespace input ---
@@ -875,7 +881,10 @@ mod test {
         assert_eq!(tokens[1].tt, super::TokenType::Literal("users".to_string()));
         assert_eq!(tokens[2].tt, super::TokenType::To);
         assert_eq!(tokens[3].tt, super::TokenType::Access);
-        assert_eq!(tokens[4].tt, super::TokenType::Literal("services".to_string()));
+        assert_eq!(
+            tokens[4].tt,
+            super::TokenType::Literal("services".to_string())
+        );
     }
 
     // --- Token position tracking ---
@@ -951,15 +960,13 @@ mod test {
 
     #[test]
     fn test_comment_only_hash() {
-        let tz =
-            super::tokenize_str("# nothing to see here", &CompilationCtx::default()).unwrap();
+        let tz = super::tokenize_str("# nothing to see here", &CompilationCtx::default()).unwrap();
         assert_eq!(tz.tokens.len(), 0);
     }
 
     #[test]
     fn test_comment_only_double_slash() {
-        let tz =
-            super::tokenize_str("// nothing to see here", &CompilationCtx::default()).unwrap();
+        let tz = super::tokenize_str("// nothing to see here", &CompilationCtx::default()).unwrap();
         assert_eq!(tz.tokens.len(), 0);
     }
 
