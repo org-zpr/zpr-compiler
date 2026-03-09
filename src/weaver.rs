@@ -151,7 +151,7 @@ impl Weaver {
         // Visa service has policy that allows nodes to access it.  We use a node role attribute so
         // we don't care about individual node names.
         let pline = PLine::new_builtin("allow node access to visa service");
-        let vs_access_attrs = vec![Attribute::must_zpr_internal_attr(zpl::KATTR_ROLE, "node")];
+        let vs_access_attrs = vec![Attribute::try_zpr_internal_attr(zpl::KATTR_ROLE, "node")?];
         self.fabric.add_condition_to_service(
             false,
             &fab_svc_id,
@@ -649,11 +649,11 @@ impl Weaver {
                     // a provider of ANY service.
                     if lhs_class.flavor == ClassFlavor::Service {
                         let svc_attr = if lhs_class.class == zpl::DEF_CLASS_SERVICE_NAME {
-                            Attribute::must_zpr_internal_attr_mv(zpl::KATTR_SERVICES, "")
+                            Attribute::try_zpr_internal_attr_mv(zpl::KATTR_SERVICES, "")?
                         } else {
                             let fab_svc_name =
                                 self.service_clause_name_to_fabric_id(class_idx, &lhs_class.class);
-                            Attribute::must_zpr_internal_attr_mv(zpl::KATTR_SERVICES, &fab_svc_name)
+                            Attribute::try_zpr_internal_attr_mv(zpl::KATTR_SERVICES, &fab_svc_name)?
                         };
                         attrs.push(svc_attr);
                     }
