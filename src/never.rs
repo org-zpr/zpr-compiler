@@ -86,10 +86,7 @@ mod test {
         let (class_index, classes) = make_classes();
         let err = parse_never(&tz.tokens, 1, &class_index, &classes)
             .expect_err("expected error for 'never' without 'allow'");
-        assert!(
-            err.to_string().contains("allow"),
-            "unexpected error: {err}"
-        );
+        assert!(err.to_string().contains("allow"), "unexpected error: {err}");
     }
 
     // A well-formed "never allow ..." statement must parse without error and

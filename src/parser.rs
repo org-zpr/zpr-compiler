@@ -473,8 +473,7 @@ allow marketing-emps to access role:marketing services
     #[test]
     fn test_aka_name_in_allow() {
         // "mice" is the AKA for "mouse"; the allow statement uses the AKA.
-        let input =
-            "define mouse AKA mice as a user with device-id\nallow mice to access services";
+        let input = "define mouse AKA mice as a user with device-id\nallow mice to access services";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");
@@ -520,8 +519,7 @@ allow marketing-emps to access role:marketing services
     // Redefinition error, not silently overwrite the first definition.
     #[test]
     fn test_redefinition_error() {
-        let input =
-            "define employee as a user with id \n define employee as a user with id";
+        let input = "define employee as a user with id \n define employee as a user with id";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {

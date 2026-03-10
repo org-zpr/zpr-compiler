@@ -407,10 +407,7 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         match parse_define(&tz.tokens, 1) {
             Ok(_) => panic!("should have failed: duplicate 'tags'"),
-            Err(e) => assert!(
-                e.to_string().contains("TAGS"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("TAGS"), "unexpected error: {e}"),
         }
     }
 
@@ -423,10 +420,7 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         match parse_define(&tz.tokens, 1) {
             Ok(_) => panic!("should have failed: 'tags' following 'tag'"),
-            Err(e) => assert!(
-                e.to_string().contains("TAGS"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("TAGS"), "unexpected error: {e}"),
         }
     }
 
@@ -439,10 +433,7 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         match parse_define(&tz.tokens, 1) {
             Ok(_) => panic!("should have failed: 'tag' following 'tags'"),
-            Err(e) => assert!(
-                e.to_string().contains("TAG"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("TAG"), "unexpected error: {e}"),
         }
     }
 
@@ -455,10 +446,7 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         match parse_define(&tz.tokens, 1) {
             Ok(_) => panic!("should have failed: 'optional' after 'tags'"),
-            Err(e) => assert!(
-                e.to_string().contains("OPTIONAL"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("OPTIONAL"), "unexpected error: {e}"),
         }
     }
 
@@ -471,10 +459,7 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         match parse_define(&tz.tokens, 1) {
             Ok(_) => panic!("should have failed: duplicate 'optional'"),
-            Err(e) => assert!(
-                e.to_string().contains("OPTIONAL"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("OPTIONAL"), "unexpected error: {e}"),
         }
     }
 
@@ -486,10 +471,7 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         match parse_define(&tz.tokens, 1) {
             Ok(_) => panic!("should have failed: 'multiple' after 'tags'"),
-            Err(e) => assert!(
-                e.to_string().contains("MULTIPLE"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("MULTIPLE"), "unexpected error: {e}"),
         }
     }
 
@@ -502,10 +484,7 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         match parse_define(&tz.tokens, 1) {
             Ok(_) => panic!("should have failed: duplicate 'multiple'"),
-            Err(e) => assert!(
-                e.to_string().contains("MULTIPLE"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("MULTIPLE"), "unexpected error: {e}"),
         }
     }
 
@@ -518,10 +497,7 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         match parse_define(&tz.tokens, 1) {
             Ok(_) => panic!("should have failed: 'multiple' combined with 'tags'"),
-            Err(e) => assert!(
-                e.to_string().contains("MULTIPLE"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("MULTIPLE"), "unexpected error: {e}"),
         }
     }
 
@@ -534,10 +510,7 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         match parse_define(&tz.tokens, 1) {
             Ok(_) => panic!("should have failed: duplicate 'and'"),
-            Err(e) => assert!(
-                e.to_string().contains("AND"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("AND"), "unexpected error: {e}"),
         }
     }
 
@@ -550,10 +523,7 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         match parse_define(&tz.tokens, 1) {
             Ok(_) => panic!("should have failed: 'and' immediately after 'tag'"),
-            Err(e) => assert!(
-                e.to_string().contains("AND"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("AND"), "unexpected error: {e}"),
         }
     }
 
@@ -566,10 +536,7 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         match parse_define(&tz.tokens, 1) {
             Ok(_) => panic!("should have failed: 'with' without preceding 'and'"),
-            Err(e) => assert!(
-                e.to_string().contains("WITH"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("WITH"), "unexpected error: {e}"),
         }
     }
 
@@ -582,10 +549,7 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         match parse_define(&tz.tokens, 1) {
             Ok(_) => panic!("should have failed: tuple attribute inside 'tags'"),
-            Err(e) => assert!(
-                e.to_string().contains("tag"),
-                "unexpected error: {e}"
-            ),
+            Err(e) => assert!(e.to_string().contains("tag"), "unexpected error: {e}"),
         }
     }
 

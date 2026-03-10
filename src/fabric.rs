@@ -404,10 +404,10 @@ impl Fabric {
                 )));
             }
         };
-        node_attrs.push(Attribute::must_zpr_internal_attr(
+        node_attrs.push(Attribute::try_zpr_internal_attr(
             zpl::KATTR_ADDR,
             &naddr.to_string(),
-        ));
+        )?);
 
         // Note that we do not have line/col info from the config file.
         let attr_map = squash_attributes(&node_attrs, &FPos::default())?;
