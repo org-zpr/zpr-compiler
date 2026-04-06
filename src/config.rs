@@ -94,29 +94,26 @@ impl Default for Resolver {
 }
 
 /// Node table.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Node {
     pub id: String,
     pub provider: Vec<(String, String)>,
     pub zpr_address: String,
-    pub interfaces: Vec<Interface>,
+    pub substrate_addrs: Option<HashMap<String, Interface>>,
 }
 
 /// Interface is part of a node.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Interface {
-    pub name: String,
     pub host: String, // host or IP
     pub port: u16,
 }
 
 /// Visa Service table ("visa_service")
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct VisaService {
-    pub dock_node_id: String,
+    pub dock_node_id: Option<String>,
 }
 
 pub struct Bootstrap {
@@ -176,18 +173,7 @@ impl ConfigParse {
 
         let visa_service = match self.parse_visa_service(ctx)? {
             Some(vs) => vs,
-            None => {
-                // There can only be one node.
-                if nodes.len() != 1 {
-                    return Err(err_config!(
-                        "visa_service section missing and there is not exactly one node"
-                    ));
-                }
-                let one_node = nodes.values().next().unwrap();
-                VisaService {
-                    dock_node_id: one_node.id.clone(),
-                }
-            }
+            None => VisaService::default(),
         };
 
         let bootstrap = self.parse_bootstrap(ctx)?;
@@ -300,12 +286,26 @@ impl ConfigParse {
                     return Err(err_config!("node ID '{}' is reserved", node_id));
                 }
             }
-            let n = parse_node(
+            let mut n = parse_node(
                 node_id,
                 v.as_table()
                     .ok_or(err_config!("node {} is not a table", node_id))?,
                 ctx,
             )?;
+
+            if let Some(addr_val) = v.get("substrate_addrs") {
+                if let Some(tbl) = addr_val.as_table() {
+                    let substrate_addrs = parse_substrate_addrs(node_id, tbl, ctx)?;
+                    if !substrate_addrs.is_empty() {
+                        n.substrate_addrs = Some(substrate_addrs);
+                    } else {
+                        ctx.warn(
+                            format!("node {} has empty substrate_addrs section", node_id).as_str(),
+                        )?;
+                    }
+                }
+            }
+
             node_map.insert(node_id.to_string(), n);
         }
         Ok(node_map)
@@ -316,6 +316,8 @@ impl ConfigParse {
     /// The only thing in here is dock_node with the node ID.
     /// As we currently only support one node user can just skip
     /// this and we will fill it in automatically.
+    ///
+    /// TODO: See https://github.com/org-zpr/zpr-compiler/issues/100
     fn parse_visa_service(
         &mut self,
         ctx: &CompilationCtx,
@@ -342,7 +344,9 @@ impl ConfigParse {
             .ok_or(err_config!("visa_service missing dock_node"))?
             .to_string();
 
-        Ok(Some(VisaService { dock_node_id }))
+        Ok(Some(VisaService {
+            dock_node_id: Some(dock_node_id),
+        }))
     }
 
     // Parse optional boostrap section. Each entry in the table is of the form: `<CN> = <KEYFILE>`.
@@ -515,48 +519,35 @@ fn parse_node(node_id: &str, node: &Table, ctx: &CompilationCtx) -> Result<Node,
         .ok_or(err_config!("node {} invalid zpr_address", node_id))?
         .to_string();
 
-    // In order to parse the interfaces, we need the interface names.
-    // TODO: Interfaces are not required and will only be useful later for
-    //       creating lans and bridges and also for adding interface properties.
-    let mut interfaces = Vec::new();
-    if node.contains_key("interfaces") {
-        let ifnames = node["interfaces"]
-            .as_array()
-            .ok_or(err_config!("node {} missing interfaces", node_id))?;
-        for ifname in ifnames {
-            let ifname = ifname.as_str().ok_or(err_config!(
-                "node {} interface name is not a string",
-                node_id
-            ))?;
-
-            // The node contains a table entry for each interface name.
-            if !node.contains_key(ifname) {
-                return Err(err_config!(
-                    "node {} missing entry for interface {}",
-                    node_id,
-                    ifname
-                ));
-            }
-            let iface = parse_interface(
-                ifname,
-                node[ifname].as_table().ok_or(err_config!(
-                    "node {} interface {} is not a table",
-                    node_id,
-                    ifname
-                ))?,
-            )?;
-            interfaces.push(iface);
-        }
-    }
-
     let provider = parse_provider(&format!("node {}", node_id), node)?;
 
     Ok(Node {
         id: node_id.to_string(),
         zpr_address,
-        interfaces,
+        substrate_addrs: None, // filled in later if present
         provider,
     })
+}
+
+/// Parse a node substrate addrs table.
+fn parse_substrate_addrs(
+    node_id: &str,
+    addrs: &Table,
+    _ctx: &CompilationCtx,
+) -> Result<HashMap<String, Interface>, CompilationError> {
+    let mut substrate_addrs = HashMap::new();
+    for (ifname, v) in addrs {
+        let iface = parse_interface(
+            ifname,
+            v.as_str().ok_or(err_config!(
+                "node {} substrate_addr {} should be a \"HOST:PORT\" formatted string",
+                node_id,
+                ifname
+            ))?,
+        )?;
+        substrate_addrs.insert(ifname.to_string(), iface);
+    }
+    Ok(substrate_addrs)
 }
 
 fn warn_unknown_node_property(node: &Table, ctx: &CompilationCtx) -> Result<(), CompilationError> {
@@ -566,6 +557,7 @@ fn warn_unknown_node_property(node: &Table, ctx: &CompilationCtx) -> Result<(), 
             "zpr_address" => (),
             "interfaces" => (),
             "in1" => (),
+            "substrate_addrs" => (),
             _ => ctx.warn(&format!(
                 "unknown property '{elem}' detected while parsing node",
             ))?,
@@ -588,16 +580,8 @@ fn parse_provider(ctx: &str, table: &Table) -> Result<Vec<(String, String)>, Com
     Ok(provider)
 }
 
-/// Parse the nodes interface entry.
-fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, CompilationError> {
-    if !iface.contains_key("netaddr") {
-        return Err(err_config!("interface {} missing netaddr", ifname));
-    }
-    let netaddr = iface["netaddr"]
-        .as_str()
-        .ok_or(err_config!("interface {} missing netaddr", ifname))?
-        .to_string();
-
+/// Parse the nodes interface entry which is just "HOST:PORT"
+fn parse_interface(ifname: &str, netaddr: &str) -> Result<Interface, CompilationError> {
     // Form of `netaddr` is HOST:PORT, host may be a hostname (which may need to be run through the resolver)
     // or an IPv4 or IPv6 address.
 
@@ -605,7 +589,6 @@ fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, Compilation
     //let saddr: std::net::SocketAddr = netaddr.parse();
     match netaddr.parse::<std::net::SocketAddr>() {
         Ok(saddr) => Ok(Interface {
-            name: ifname.to_string(),
             host: saddr.ip().to_string(),
             port: saddr.port(),
         }),
@@ -626,7 +609,6 @@ fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, Compilation
                 )
             })?;
             Ok(Interface {
-                name: ifname.to_string(),
                 host: parts[0].to_string(),
                 port: portnum,
             })
@@ -1180,9 +1162,9 @@ mod test {
         [nodes.n0]
         zpr_address = "foo.zpr"
         provider = [["zpr.foo", "bar"], ["baz", 99]]
-        interfaces = ["eth0", "eth1"]
-        eth0.netaddr = "1.2.3.4:2000"
-        eth1.netaddr = "foo.addr:9000"
+        [nodes.n0.substrate_addrs]
+        "eth0" = "1.2.3.4:2000"
+        "eth1" = "foo.addr:9000"
         "#;
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
         let nodes = cparser.parse_nodes(&CompilationCtx::new(false, false));
@@ -1192,9 +1174,10 @@ mod test {
         let n0 = nodes.get("n0").unwrap();
         assert_eq!(n0.id, "n0");
         assert_eq!(n0.zpr_address, "foo.zpr");
-        assert_eq!(n0.interfaces.len(), 2);
-        for iface in &n0.interfaces {
-            match iface.name.as_str() {
+        let sub_addrs = n0.substrate_addrs.as_ref().unwrap();
+        assert_eq!(sub_addrs.len(), 2);
+        for (ifname, iface) in sub_addrs {
+            match ifname.as_str() {
                 "eth0" => {
                     assert_eq!(iface.host, "1.2.3.4");
                     assert_eq!(iface.port, 2000);
@@ -1244,7 +1227,7 @@ mod test {
         let vs = cparser.parse_visa_service(&ctx);
         assert!(vs.is_ok());
         let vs = vs.unwrap();
-        assert_eq!(vs.unwrap().dock_node_id, "n0");
+        assert_eq!(vs.unwrap().dock_node_id, Some("n0".to_string()));
     }
 
     #[test]

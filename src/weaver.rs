@@ -66,7 +66,7 @@ pub fn weave(
     }
 
     weaver.init_services(comp, &class_idx, policy, config, ctx)?;
-    weaver.init_nodes(config)?;
+    weaver.init_nodes(config, ctx)?;
     weaver.add_client_deny_policies(comp, &class_idx, policy, config)?;
     weaver.add_client_allow_policies(comp, &class_idx, policy, config)?;
     // By the time we get here, we have resolved all attributes and so know which trusted
@@ -235,7 +235,7 @@ impl Weaver {
         }
         if condition_count == 0 {
             // TODO: is this an error?
-            ctx.warn("no policy granting VisaService admin access")?;
+            ctx.warn("no policy granting admin access to VisaService")?;
         }
 
         // TODO: When we get around to trusted services, we need to add builtin rules
@@ -527,17 +527,16 @@ impl Weaver {
                     }
                 }
             }
-
-            if attr_name == zpl::KATTR_CN {
-            } else if attr_name == zpl::DEFAULT_ATTR {
-            } else {
-            }
         }
         Ok(resolved_attrs)
     }
 
     /// Must init_services before init_nodes.
-    fn init_nodes(&mut self, config: &ConfigApi) -> Result<(), CompilationError> {
+    fn init_nodes(
+        &mut self,
+        config: &ConfigApi,
+        ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
         let node_keys = match config.get("zpr/nodes") {
             Some(ConfigItem::KeySet(node_ids)) => node_ids,
             _ => {
@@ -547,26 +546,12 @@ impl Weaver {
             }
         };
 
-        if node_keys.len() > 1 {
-            return Err(CompilationError::ConfigError(
-                "multiple nodes defined in configuration".to_string(),
-            ));
-        }
-        let vs_dock_node = match config.get("zpr/visa_services/default/dock_node_id") {
-            Some(ConfigItem::StrVal(node_id)) => node_id,
-            _ => {
-                return Err(CompilationError::ConfigError(
-                    "visa service docking node not defined for default VS in configuration"
-                        .to_string(),
-                ));
+        match config.get("zpr/visa_services/default/dock_node_id") {
+            Some(ConfigItem::StrVal(_node_id)) => {
+                ctx.warn("visa service has docking node set but is not enforced")?;
             }
+            _ => (),
         };
-        if vs_dock_node != node_keys[0] {
-            return Err(CompilationError::ConfigError(format!(
-                "visa service docking node must be the only node in configuration: '{}' != '{}'",
-                vs_dock_node, node_keys[0]
-            )));
-        }
 
         // Before handing off to fabric, we need to check the node provider attributes to see
         // if they reference any trusted services.
@@ -584,7 +569,10 @@ impl Weaver {
             let _ = self.resolve_attributes(&node_attrs, config)?;
         }
 
-        self.fabric.add_node(&vs_dock_node, config)
+        for node_key in &node_keys {
+            self.fabric.add_node(node_key, config)?;
+        }
+        Ok(())
     }
 
     /// Process the ZPL policy into conditions for accessing fabric services.

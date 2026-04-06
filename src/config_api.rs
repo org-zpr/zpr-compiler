@@ -351,7 +351,7 @@ impl ConfigApi {
     //
     // - zpr/visa_services -> returns list of visa service IDs (KeySet)
     // - zpr/visa_services/<id> -> returns (?)
-    // - zpr/visa_services/<id>/dock_node_id -> returns (docking node id)
+    // - zpr/visa_services/<id>/dock_node_id -> returns (docking node i or none)
     //
     //
     pub fn get(&self, key: &str) -> Option<ConfigItem> {
@@ -623,6 +623,8 @@ impl ConfigApi {
     }
 
     /// `key_path` here is everything after "zpr/visa_services"
+    ///
+    /// Note that `dock_node_id` may return None if not set in config.
     fn get_zpr_visa_service(&self, key_path: Vec<&str>) -> Option<ConfigItem> {
         if key_path.len() == 1 {
             // visa_services/<id> -> <id>
@@ -633,9 +635,13 @@ impl ConfigApi {
         }
         let key = key_path[1];
         match key {
-            "dock_node_id" => Some(ConfigItem::StrVal(
-                self.config.visa_service.dock_node_id.clone(),
-            )),
+            "dock_node_id" => {
+                if let Some(dock_node_id) = &self.config.visa_service.dock_node_id {
+                    Some(ConfigItem::StrVal(dock_node_id.clone()))
+                } else {
+                    None
+                }
+            }
             _ => panic!("unknown key {}", key),
         }
     }
@@ -667,24 +673,26 @@ impl ConfigApi {
                 .or_else(|| Some(ConfigItem::StrVal(node.zpr_address.clone()))),
             "interfaces" => {
                 if key_path.len() == 3 {
-                    // nodes/<id>/interfaces -> list of interface names
-                    return Some(ConfigItem::KeySet(
-                        node.interfaces
-                            .iter()
-                            .map(|iface| iface.name.clone())
-                            .collect(),
-                    ));
+                    // nodes/<id>/interfaces -> list of interface "names"
+                    if let Some(ref ifaces) = node.substrate_addrs {
+                        return Some(ConfigItem::KeySet(ifaces.keys().cloned().collect()));
+                    } else {
+                        return None;
+                    }
+                } else if key_path.len() > 3 {
+                    let ifname = key_path[3];
+                    // The only attribute on an interface is the netaddr (host & port), so we return that here ignoring
+                    // any further key path.
+                    let iface = node.substrate_addrs.as_ref()?.get(ifname)?;
+                    // The hostname value may be a mapping.
+                    let hostname = match self.config.resolve(&iface.host) {
+                        Some(mapping) => mapping.to_string(),
+                        None => iface.host.clone(),
+                    };
+                    Some(ConfigItem::NetAddr(hostname, iface.port))
+                } else {
+                    None
                 }
-                let ifname = key_path[3];
-                // The only attribute on an interface is the netaddr, so we return that here ignoring
-                // any further key path.
-                let iface = node.interfaces.iter().find(|iface| iface.name == ifname)?;
-                // The hostname value may be a mapping.
-                let hostname = match self.config.resolve(&iface.host) {
-                    Some(mapping) => mapping.to_string(),
-                    None => iface.host.clone(),
-                };
-                Some(ConfigItem::NetAddr(hostname, iface.port))
             }
             _ => panic!("unknown key: {}", key),
         }
@@ -709,10 +717,11 @@ mod test {
         [nodes.n0]
         key = "none"
         zpr_address = "node.zpr"
-        interfaces = [ "in1", "in2" ]
-        in1.netaddr = "127.0.0.1:5000"
-        in2.netaddr = "foo.bah:5000"
         provider = [["foo", "fee"]]
+
+        [nodes.n0.substrate_addrs]
+        in1 = "127.0.0.1:5000"
+        in2 = "foo.bah:5000"
 
         [visa_service]
         dock_node = "n0"
@@ -744,10 +753,8 @@ mod test {
             api.get("zpr/nodes/n0/zpr_addr").unwrap(),
             ConfigItem::StrVal("fd5a:5052:90de::1".to_string())
         );
-        assert_eq!(
-            api.get("zpr/nodes/n0/interfaces").unwrap().to_string(),
-            "[in1, in2]"
-        );
+        let ifnames = api.get("zpr/nodes/n0/interfaces").unwrap().to_string();
+        assert!(ifnames == "[in1, in2]" || ifnames == "[in2, in1]",);
         {
             let (poe_host, poe_port) = match api.get("zpr/nodes/n0/interfaces/in1/netaddr").unwrap()
             {
