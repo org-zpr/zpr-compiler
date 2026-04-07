@@ -884,6 +884,186 @@ mod test {
         assert_eq!(proto, reconstituted);
     }
 
+    fn links_api_config() -> &'static str {
+        r#"
+        [resolver]
+        order = [ "hosts", "dns" ]
+
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["endpoint.zpr.adapter.cn", "n0.zpr.org"]]
+
+        [nodes.n0.substrate_addrs]
+        eth0 = "10.0.0.1:5000"
+
+        [nodes.n1]
+        zpr_address = "fd5a:5052:90de::2"
+        provider = [["endpoint.zpr.adapter.cn", "n1.zpr.org"]]
+
+        [nodes.n1.substrate_addrs]
+        eth0 = "10.0.0.2:5000"
+        eth1 = "10.0.1.2:5001"
+
+        [links.link0]
+        peers = [{node="n0"}, {node="n1", interface="eth0"}]
+        attributes = [["zpr.cost", "10"], ["location", "us"]]
+
+        [visa_service]
+        dock_node = "n0"
+        "#
+    }
+
+    #[test]
+    fn test_get_zpr_links_list() {
+        let ctx = CompilationCtx::default();
+        let api =
+            ConfigApi::new_from_toml_content(links_api_config(), Path::new(""), &ctx).unwrap();
+
+        let item = api.get("zpr/links").unwrap();
+        match item {
+            ConfigItem::KeySet(keys) => {
+                assert_eq!(keys.len(), 1);
+                assert_eq!(keys[0], "link0");
+            }
+            _ => panic!("expected KeySet"),
+        }
+    }
+
+    #[test]
+    fn test_get_zpr_links_by_id() {
+        let ctx = CompilationCtx::default();
+        let api =
+            ConfigApi::new_from_toml_content(links_api_config(), Path::new(""), &ctx).unwrap();
+
+        let item = api.get("zpr/links/link0").unwrap();
+        match item {
+            ConfigItem::KeySet(tuple) => {
+                assert_eq!(tuple.len(), 4);
+                assert_eq!(tuple[0], "n0");
+                assert_eq!(tuple[1], "eth0");
+                assert_eq!(tuple[2], "n1");
+                assert_eq!(tuple[3], "eth0");
+            }
+            _ => panic!("expected KeySet"),
+        }
+    }
+
+    #[test]
+    fn test_get_zpr_links_unknown_id_returns_none() {
+        let ctx = CompilationCtx::default();
+        let api =
+            ConfigApi::new_from_toml_content(links_api_config(), Path::new(""), &ctx).unwrap();
+
+        assert!(api.get("zpr/links/nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_get_zpr_links_attributes() {
+        let ctx = CompilationCtx::default();
+        let api =
+            ConfigApi::new_from_toml_content(links_api_config(), Path::new(""), &ctx).unwrap();
+
+        let item = api.get("zpr/links/link0/attributes").unwrap();
+        match item {
+            ConfigItem::AttrList(attrs) => {
+                assert_eq!(attrs.len(), 2);
+                assert!(attrs.contains(&("zpr.cost".to_string(), "10".to_string())));
+                assert!(attrs.contains(&("location".to_string(), "us".to_string())));
+            }
+            _ => panic!("expected AttrList"),
+        }
+    }
+
+    #[test]
+    fn test_get_zpr_links_no_attributes() {
+        let cfg = r#"
+        [resolver]
+        order = [ "hosts", "dns" ]
+
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["endpoint.zpr.adapter.cn", "n0.zpr.org"]]
+
+        [nodes.n0.substrate_addrs]
+        eth0 = "10.0.0.1:5000"
+
+        [nodes.n1]
+        zpr_address = "fd5a:5052:90de::2"
+        provider = [["endpoint.zpr.adapter.cn", "n1.zpr.org"]]
+
+        [nodes.n1.substrate_addrs]
+        eth0 = "10.0.0.2:5000"
+
+        [links.bare]
+        peers = [{node="n0"}, {node="n1"}]
+
+        [visa_service]
+        dock_node = "n0"
+        "#;
+        let ctx = CompilationCtx::default();
+        let api = ConfigApi::new_from_toml_content(cfg, Path::new(""), &ctx).unwrap();
+
+        let item = api.get("zpr/links/bare/attributes").unwrap();
+        match item {
+            ConfigItem::AttrList(attrs) => {
+                // links always get a default zpr.cost attribute if not specified
+                assert_eq!(attrs.len(), 1);
+                assert_eq!(attrs[0], ("zpr.cost".to_string(), "1".to_string()));
+            }
+            _ => panic!("expected AttrList"),
+        }
+    }
+
+    #[test]
+    fn test_get_zpr_links_multiple() {
+        let cfg = r#"
+        [resolver]
+        order = [ "hosts", "dns" ]
+
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["endpoint.zpr.adapter.cn", "n0.zpr.org"]]
+
+        [nodes.n0.substrate_addrs]
+        eth0 = "10.0.0.1:5000"
+
+        [nodes.n1]
+        zpr_address = "fd5a:5052:90de::2"
+        provider = [["endpoint.zpr.adapter.cn", "n1.zpr.org"]]
+
+        [nodes.n1.substrate_addrs]
+        eth0 = "10.0.0.2:5000"
+
+        [nodes.n2]
+        zpr_address = "fd5a:5052:90de::3"
+        provider = [["endpoint.zpr.adapter.cn", "n2.zpr.org"]]
+
+        [nodes.n2.substrate_addrs]
+        eth0 = "10.0.0.3:5000"
+
+        [links.link0]
+        peers = [{node="n0"}, {node="n1"}]
+
+        [links.link1]
+        peers = [{node="n1"}, {node="n2"}]
+
+        [visa_service]
+        dock_node = "n0"
+        "#;
+        let ctx = CompilationCtx::default();
+        let api = ConfigApi::new_from_toml_content(cfg, Path::new(""), &ctx).unwrap();
+
+        let item = api.get("zpr/links").unwrap();
+        match item {
+            ConfigItem::KeySet(keys) => {
+                assert_eq!(keys.len(), 2);
+                assert!(keys.contains(&"link0".to_string()));
+                assert!(keys.contains(&"link1".to_string()));
+            }
+            _ => panic!("expected KeySet"),
+        }
+    }
+
     #[test]
     fn test_convert_to_from_protocol_lossy_l7() {
         let proto = Protocol::udp("fee")
