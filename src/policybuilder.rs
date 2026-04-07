@@ -89,7 +89,8 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
         fabric: &Fabric,
         ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
-        self.policy_writer.write_policy_revision(&fabric.revision);
+        self.policy_writer
+            .write_policy_revision(&fabric.get_revision());
 
         // V1 policy puts all the attribute keys and values used by the
         // policy into a lookup table and then refers to them by index
@@ -121,11 +122,10 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
         fabric: &Fabric,
         _ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
-        if fabric.default_auth_cert_asn.is_empty() {
-            return Ok(());
+        if let Some(cert_data) = fabric.get_default_auth_cert() {
+            self.policy_writer
+                .write_service_cert(&zpl::DEFAULT_TS_PREFIX, cert_data);
         }
-        self.policy_writer
-            .write_service_cert(&zpl::DEFAULT_TS_PREFIX, &fabric.default_auth_cert_asn);
         Ok(())
     }
 
@@ -216,7 +216,7 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
         fabric: &Fabric,
         _ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
-        for (cnval, keydata) in &fabric.bootstrap_records {
+        for (cnval, keydata) in fabric.get_bootstrap_records() {
             self.policy_writer.write_bootstrap_key(&cnval, keydata);
         }
         Ok(())

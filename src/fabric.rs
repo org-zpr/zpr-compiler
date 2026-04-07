@@ -13,11 +13,11 @@ use zpr::policy_types::{Attribute, ServiceType};
 /// A service oriented view of the network.
 #[derive(Debug, Clone, Default)]
 pub struct Fabric {
-    pub revision: String,
+    revision: String,
+    default_auth_cert_asn: Vec<u8>, // CA cert for default/builtin trusted auth
+    bootstrap_records: HashMap<String, Vec<u8>>, // bootstrap records maps a CN to a der-encoded public key
     pub services: Vec<FabricService>,
     pub nodes: Vec<FabricNode>,
-    pub default_auth_cert_asn: Vec<u8>, // CA cert for default/builtin trusted auth
-    pub bootstrap_records: HashMap<String, Vec<u8>>, // bootstrap records maps a CN to a der-encoded public key
 }
 
 #[allow(dead_code)]
@@ -194,6 +194,34 @@ impl fmt::Display for Fabric {
 }
 
 impl Fabric {
+    pub fn set_revision(&mut self, rev: &str) {
+        self.revision = rev.to_string();
+    }
+
+    pub fn get_revision(&self) -> &str {
+        &self.revision
+    }
+
+    pub fn set_default_auth_cert(&mut self, cert_asn: Vec<u8>) {
+        self.default_auth_cert_asn = cert_asn;
+    }
+
+    pub fn get_default_auth_cert(&self) -> Option<&[u8]> {
+        if self.default_auth_cert_asn.is_empty() {
+            None
+        } else {
+            Some(&self.default_auth_cert_asn)
+        }
+    }
+
+    pub fn push_bootstrap_record(&mut self, cn: &str, pubkey_asn: Vec<u8>) {
+        self.bootstrap_records.insert(cn.to_string(), pubkey_asn);
+    }
+
+    pub fn get_bootstrap_records(&self) -> &HashMap<String, Vec<u8>> {
+        &self.bootstrap_records
+    }
+
     /// You must add client services associated with the trusted service before adding a trusted service.
     pub fn add_trusted_service(
         &mut self,

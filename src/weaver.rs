@@ -99,7 +99,8 @@ impl Weaver {
         revhash.extend_from_slice(policy_digest);
         revhash.extend_from_slice(config_digest);
         let policy_revision_dig = sha256_of_bytes(&revhash);
-        self.fabric.revision = digest_as_hex(&policy_revision_dig);
+        self.fabric
+            .set_revision(&digest_as_hex(&policy_revision_dig));
         Ok(())
     }
 
@@ -857,7 +858,7 @@ impl Weaver {
             }
         };
 
-        self.fabric.default_auth_cert_asn = cert_data;
+        self.fabric.set_default_auth_cert(cert_data);
         Ok(())
     }
 
@@ -1095,9 +1096,7 @@ impl Weaver {
             match config.get(&format!("zpr/bootstrap/{cnval}")) {
                 Some(ConfigItem::BytesB64(b64data)) => match BASE64_STANDARD.decode(b64data) {
                     Ok(cert_data) => {
-                        self.fabric
-                            .bootstrap_records
-                            .insert(cnval.clone(), cert_data.clone());
+                        self.fabric.push_bootstrap_record(cnval, cert_data);
                     }
                     Err(e) => {
                         return Err(CompilationError::ConfigError(format!(
