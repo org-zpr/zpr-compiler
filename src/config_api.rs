@@ -348,11 +348,16 @@ impl ConfigApi {
     // - zpr/nodes/<id> -> returns (?)
     // - zpr/nodes/<id>/zpr_addr -> returns zpr address (string?) - pre resolving (ie, so might be a domain name that needs resolving)
     // - zpr/nodes/<id>/provider -> returns list of k/v tuples
+    // - zpr/nodes/<id>/interfaces -> returns list of interface "names" (KeySet)
+    // - zpr/nodes/<id>/interfaces/<ifname> -> returns substrate netaddr (host & port) for the interface. Host may be a hostname or IP addr.
     //
     // - zpr/visa_services -> returns list of visa service IDs (KeySet)
     // - zpr/visa_services/<id> -> returns (?)
     // - zpr/visa_services/<id>/dock_node_id -> returns (docking node i or none)
     //
+    // - zpr/links -> list of link identifiers (KeySet)
+    // - zpr/links/<id> -> KeySet of (node1, if1, node2, if2)
+    // - zpr/links/<id>/attributes -> list of k/v tuples (AttrList)
     //
     pub fn get(&self, key: &str) -> Option<ConfigItem> {
         if key.is_empty() {
@@ -455,6 +460,7 @@ impl ConfigApi {
                 self.resolve_hostname(key_path[1])
             }
             "nodes" => self.get_zpr_nodes(key_path),
+            "links" => self.get_zpr_links(key_path),
             "visa_services" => {
                 if key_path.len() == 1 {
                     // visa_services -> list of visa service IDs
@@ -694,6 +700,31 @@ impl ConfigApi {
                     None
                 }
             }
+            _ => panic!("unknown key: {}", key),
+        }
+    }
+
+    fn get_zpr_links(&self, key_path: Vec<&str>) -> Option<ConfigItem> {
+        if key_path.len() == 1 {
+            // links -> list of link IDs
+            return Some(ConfigItem::KeySet(
+                self.config.links.keys().cloned().collect(),
+            ));
+        }
+        let link_id = key_path[1];
+        let link = self.config.links.get(link_id)?;
+        if key_path.len() == 2 {
+            // links/<id> -> 4-tuple of (node1, if1, node2, if2)
+            return Some(ConfigItem::KeySet(vec![
+                link.peer_a_id.clone(),
+                link.peer_a_interface.clone(),
+                link.peer_b_id.clone(),
+                link.peer_b_interface.clone(),
+            ]));
+        }
+        let key = key_path[2];
+        match key {
+            "attributes" => Some(ConfigItem::AttrList(link.attributes.clone())),
             _ => panic!("unknown key: {}", key),
         }
     }
