@@ -39,6 +39,7 @@ pub struct Config {
     pub digest: Digest,
     resolver: Resolver,
     pub nodes: HashMap<String, Node>,
+    pub links: HashMap<String, Link>,
     pub visa_service: VisaService,
     pub bootstrap_cfg: Bootstrap,
     pub trusted_services: Vec<TrustedService>,
@@ -100,6 +101,21 @@ pub struct Node {
     pub provider: Vec<(String, String)>,
     pub zpr_address: String,
     pub substrate_addrs: Option<HashMap<String, Interface>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Link {
+    // ID's map to node ID's.
+    pub peer_a_id: String,
+
+    // Interfaces map to Node substrate interface IDs.
+    pub peer_a_interface: Option<String>,
+
+    pub peer_b_id: String,
+    pub peer_b_interface: Option<String>,
+
+    // Link always gets 'zpr.cost' attribute at least.
+    pub attributes: Vec<(String, String)>,
 }
 
 /// Interface is part of a node.
@@ -171,6 +187,9 @@ impl ConfigParse {
         let resolver = self.parse_resolver(ctx)?;
         let nodes = self.parse_nodes(ctx)?;
 
+        // Links if present tie node interfaces together.
+        let links = self.parse_links(ctx, &nodes)?;
+
         let visa_service = match self.parse_visa_service(ctx)? {
             Some(vs) => vs,
             None => VisaService::default(),
@@ -185,6 +204,7 @@ impl ConfigParse {
             digest: self.digest,
             resolver,
             nodes,
+            links,
             visa_service,
             bootstrap_cfg: bootstrap,
             trusted_services,
@@ -309,6 +329,50 @@ impl ConfigParse {
             node_map.insert(node_id.to_string(), n);
         }
         Ok(node_map)
+    }
+
+    /// Parse the links data from the toml configuration.
+    ///
+    /// Links look like this:
+    /// ```toml
+    /// [links.link1]
+    /// attributes = [["zpr.cost", "10"]]
+    /// peers = [{ node = "node1", interface = "if1" }, { node = "node2", interface = "if2" }]
+    /// ```
+    fn parse_links(
+        &self,
+        ctx: &CompilationCtx,
+        nodes: &HashMap<String, Node>,
+    ) -> Result<HashMap<String, Link>, CompilationError> {
+        if !self.ctoml.contains_key("links") {
+            return Ok(HashMap::new());
+        }
+        let links = self.ctoml["links"]
+            .as_table()
+            .ok_or(err_config!("error reading links section"))?;
+        let mut link_map = HashMap::new();
+        for (link_id, v) in links {
+            let mut link = parse_link(
+                link_id,
+                v.as_table()
+                    .ok_or(err_config!("link {} is not a table", link_id))?,
+                ctx,
+                nodes,
+            )?;
+
+            // If link does not have a cost attribute we add it.
+            if !link
+                .attributes
+                .iter()
+                .any(|(k, _)| k == zpl::KATTR_LINK_COST)
+            {
+                link.attributes
+                    .push((zpl::KATTR_LINK_COST.to_string(), "1".to_string()));
+            }
+
+            link_map.insert(link_id.to_string(), link);
+        }
+        Ok(link_map)
     }
 
     /// Parse the very basic visa_service section.
@@ -488,6 +552,7 @@ impl ConfigParse {
             match elem.as_str() {
                 "resolver" => (),
                 "nodes" => (),
+                "links" => (),
                 "visa_service" => (),
                 "bootstrap" => (),
                 "trusted_services" => (),
@@ -529,6 +594,135 @@ fn parse_node(node_id: &str, node: &Table, ctx: &CompilationCtx) -> Result<Node,
     })
 }
 
+/// Parses the "link.<LINKID>" table from the toml config.
+/// This should include a peers entry (2 element array) and an optional attributes entry.
+pub fn parse_link(
+    link_id: &str,
+    link_tbl: &Table,
+    ctx: &CompilationCtx,
+    nodes: &HashMap<String, Node>,
+) -> Result<Link, CompilationError> {
+    warn_unknown_link_property(link_tbl, ctx)?;
+
+    require_key(&format!("links.{}", link_id), link_tbl, "peers")?;
+    let peers = link_tbl["peers"]
+        .as_array()
+        .ok_or(err_config!("link {} peers should be an array", link_id))?;
+
+    if peers.len() != 2 {
+        return Err(err_config!("link {} must have exactly two peers", link_id));
+    }
+
+    let mut peer_a_id = None;
+    let mut peer_a_interface = None;
+    let mut peer_b_id = None;
+    let mut peer_b_interface = None;
+
+    for (i, peer) in peers.iter().enumerate() {
+        let peer_tbl =
+            peer.as_table()
+                .ok_or(err_config!("link {} peer {} should be a table", link_id, i))?;
+
+        require_key(&format!("links.{}.peers[{}]", link_id, i), peer_tbl, "node")?;
+        let node_id = peer_tbl["node"]
+            .as_str()
+            .ok_or(err_config!(
+                "link {} peer {} node should be a string",
+                link_id,
+                i
+            ))?
+            .to_string();
+
+        let refnode = nodes.get(&node_id);
+        if !refnode.is_some() {
+            return Err(err_config!(
+                "link {} peer {} references unknown node '{}'",
+                link_id,
+                i,
+                node_id
+            ));
+        }
+        let refnode = refnode.unwrap();
+
+        if refnode.substrate_addrs.is_none() {
+            return Err(err_config!(
+                "link {} peer {} references node '{}' with no substrate_addrs",
+                link_id,
+                i,
+                node_id
+            ));
+        }
+
+        let interface = if peer_tbl.contains_key("interface") {
+            let iname = peer_tbl["interface"]
+                .as_str()
+                .ok_or(err_config!(
+                    "link {} peer {} interface should be a string",
+                    link_id,
+                    i
+                ))?
+                .to_string();
+            // Interface name must exist on node.
+            if !refnode
+                .substrate_addrs
+                .as_ref()
+                .unwrap()
+                .contains_key(&iname)
+            {
+                return Err(err_config!(
+                    "link {} peer {} references interface '{}' which does not exist on node '{}'",
+                    link_id,
+                    i,
+                    iname,
+                    node_id
+                ));
+            }
+            Some(iname)
+        } else {
+            // Interface can be omitted if node has single substreate address.
+            if refnode.substrate_addrs.as_ref().unwrap().len() == 1 {
+                // Just take the single interface.
+                refnode
+                    .substrate_addrs
+                    .as_ref()
+                    .unwrap()
+                    .keys()
+                    .next()
+                    .cloned()
+            } else {
+                return Err(err_config!(
+                    "link {} peer {} missing interface and node '{}' has multiple substrate_addrs",
+                    link_id,
+                    i,
+                    node_id
+                ));
+            }
+        };
+
+        if i == 0 {
+            peer_a_id = Some(node_id);
+            peer_a_interface = interface;
+        } else {
+            peer_b_id = Some(node_id);
+            peer_b_interface = interface;
+        }
+    }
+
+    let attrs = match parse_attribute_tuples(&format!("links.{}", link_id), link_tbl, "attributes")?
+    {
+        Some(attrs) => attrs,
+        None => Vec::new(),
+    };
+
+    Ok(Link {
+        peer_a_id: peer_a_id.unwrap(),
+        peer_a_interface,
+        peer_b_id: peer_b_id.unwrap(),
+        peer_b_interface,
+        attributes: attrs,
+    })
+}
+
 /// Parse a node substrate addrs table.
 fn parse_substrate_addrs(
     node_id: &str,
@@ -555,8 +749,6 @@ fn warn_unknown_node_property(node: &Table, ctx: &CompilationCtx) -> Result<(), 
         match elem.as_str() {
             "provider" => (),
             "zpr_address" => (),
-            "interfaces" => (),
-            "in1" => (),
             "substrate_addrs" => (),
             _ => ctx.warn(&format!(
                 "unknown property '{elem}' detected while parsing node",
@@ -567,17 +759,54 @@ fn warn_unknown_node_property(node: &Table, ctx: &CompilationCtx) -> Result<(), 
     Ok(())
 }
 
-fn parse_provider(ctx: &str, table: &Table) -> Result<Vec<(String, String)>, CompilationError> {
-    // The provider is an array of tuples (array of arrays).
-    if !table.contains_key("provider") {
-        return Err(err_config!("{} missing provider", ctx));
+fn warn_unknown_link_property(link: &Table, ctx: &CompilationCtx) -> Result<(), CompilationError> {
+    for elem in link.keys() {
+        match elem.as_str() {
+            "peers" => (),
+            "attributes" => (),
+            _ => ctx.warn(&format!(
+                "unknown property '{elem}' detected while parsing link",
+            ))?,
+        }
     }
-    let provider_tuples = table["provider"]
-        .as_array()
-        .ok_or(err_config!("{} provider is not an array", ctx))?;
+    Ok(())
+}
 
-    let provider = tuples_to_tuple_str_vec(ctx, provider_tuples)?;
-    Ok(provider)
+fn parse_provider(ctx: &str, table: &Table) -> Result<Vec<(String, String)>, CompilationError> {
+    match parse_attribute_tuples(ctx, table, "provider")? {
+        Some(attrs) => Ok(attrs),
+        None => Err(err_config!("{} missing provider", ctx)),
+    }
+}
+
+/// Parse attribute tuples from a TOML table field.
+///
+/// This is how we generally encode ZPR attriutes into the toml, for example:
+///
+/// ```toml
+/// attributes = [["some.key","some value"], ["other.key", "other value"]]
+/// ```
+///
+/// `ctx` is a helpful string to help user understand where in the config we are.
+///
+/// Pass the field name (in above example that would be `attributes`)
+/// and this will return a vector of (key, value) tuples.
+///
+/// If key is not found, returns None.
+fn parse_attribute_tuples(
+    ctx: &str,
+    table: &Table,
+    field_name: &str,
+) -> Result<Option<Vec<(String, String)>>, CompilationError> {
+    if !table.contains_key(field_name) {
+        return Ok(None);
+    }
+    let attr_tuples = table[field_name]
+        .as_array()
+        .ok_or(err_config!("{} {field_name} is not an array", ctx))?;
+
+    let attrs = tuples_to_tuple_str_vec(ctx, attr_tuples)?;
+    Ok(Some(attrs))
 }
 
 /// Parse the nodes interface entry which is just "HOST:PORT"
@@ -1156,6 +1385,46 @@ mod test {
     }
 
     #[test]
+    fn test_parse_attribute_tuples() {
+        let tstr = r#"
+        [foo]
+        provider = [["k1", "v1"], ["k2", 99]]
+
+        [fee]
+        # should return empty vector.
+        attrs = []
+
+        [fox]
+        nope = "no attrs here"
+        "#;
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        {
+            let foo_tbl = cparser.ctoml["foo"].as_table().unwrap();
+            let attrs = parse_attribute_tuples("foo", foo_tbl, "provider");
+            assert!(attrs.is_ok(), "{:?}", attrs);
+            let attrs = attrs.unwrap();
+            assert!(attrs.is_some());
+            let attrs = attrs.unwrap();
+            assert_eq!(attrs.len(), 2);
+            assert!(attrs.contains(&("k1".to_string(), "v1".to_string())));
+        }
+        {
+            let fee_tbl = cparser.ctoml["fee"].as_table().unwrap();
+            let attrs = parse_attribute_tuples("fee", fee_tbl, "attrs");
+            assert!(attrs.is_ok(), "{:?}", attrs);
+            let attrs = attrs.unwrap();
+            assert!(attrs.is_some());
+        }
+        {
+            let fox_tbl = cparser.ctoml["fox"].as_table().unwrap();
+            let attrs = parse_attribute_tuples("fox", fox_tbl, "missing");
+            assert!(attrs.is_ok(), "{:?}", attrs);
+            let attrs = attrs.unwrap();
+            assert!(attrs.is_none());
+        }
+    }
+
+    #[test]
     fn test_parse_node() {
         let tstr = r#"
         [nodes]
@@ -1195,6 +1464,214 @@ mod test {
                 .contains(&("zpr.foo".to_string(), "bar".to_string()))
         );
         assert!(n0.provider.contains(&("baz".to_string(), "99".to_string())));
+    }
+
+    #[test]
+    fn test_parse_links() {
+        let tstr = r#"
+        [nodes]
+
+        [nodes.n0]
+        zpr_address = "foo.zpr"
+        provider = [["zpr.foo", "bar"], ["baz", 99]]
+        [nodes.n0.substrate_addrs]
+        "i0" = "1.2.3.4:2000"
+
+        [nodes.n1]
+        zpr_address = "fee.zpr"
+        provider = [["zpr.foo", "barf"], ["buz", 100]]
+        [nodes.n1.substrate_addrs]
+        "j0" = "4.5.6.7:2000"
+
+        [links.n0n1]
+        peers = [{ node = "n0" }, { node = "n1" }]
+        "#;
+
+        let ctx = CompilationCtx::new(false, false);
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let nodes = cparser.parse_nodes(&ctx);
+        assert!(nodes.is_ok(), "{:?}", nodes);
+        let nodes = nodes.unwrap();
+        assert_eq!(nodes.len(), 2);
+        let n0 = nodes.get("n0").unwrap();
+        assert_eq!(n0.id, "n0");
+        let n1 = nodes.get("n1").unwrap();
+        assert_eq!(n1.id, "n1");
+
+        let links = cparser.parse_links(&ctx, &nodes);
+        assert!(links.is_ok(), "{:?}", links);
+
+        let links = links.unwrap();
+        assert_eq!(links.len(), 1);
+        let l0 = links.get("n0n1").unwrap();
+        assert_eq!(l0.peer_a_id, "n0");
+        assert_eq!(l0.peer_b_id, "n1");
+
+        assert_eq!(l0.peer_a_interface, Some("i0".to_string()));
+        assert_eq!(l0.peer_b_interface, Some("j0".to_string()));
+
+        assert_eq!(l0.attributes.len(), 1);
+        assert_eq!(l0.attributes[0].0, zpl::KATTR_LINK_COST);
+    }
+
+    #[test]
+    fn test_parse_links_multi_iface_missing_iface_spec() {
+        let tstr = r#"
+        [nodes]
+
+        [nodes.n0]
+        zpr_address = "foo.zpr"
+        provider = [["zpr.foo", "bar"], ["baz", 99]]
+        [nodes.n0.substrate_addrs]
+        "i0" = "1.2.3.4:2000"
+        "i1" = "1.2.3.5:2000"
+        "i2" = "1.2.3.6:2000"
+
+        [nodes.n1]
+        zpr_address = "fee.zpr"
+        provider = [["zpr.foo", "barf"], ["buz", 100]]
+        [nodes.n1.substrate_addrs]
+        "j0" = "4.5.6.7:2000"
+        "j1" = "4.5.6.8:2000"
+
+        [links.n0n1]
+        # will fail since missing intercace names
+        peers = [{ node = "n0" }, { node = "n1" }]
+        "#;
+
+        let ctx = CompilationCtx::new(false, false);
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let nodes = cparser.parse_nodes(&ctx);
+        assert!(nodes.is_ok(), "{:?}", nodes);
+        let nodes = nodes.unwrap();
+        assert_eq!(nodes.len(), 2);
+        let n0 = nodes.get("n0").unwrap();
+        assert_eq!(n0.id, "n0");
+        let n1 = nodes.get("n1").unwrap();
+        assert_eq!(n1.id, "n1");
+
+        let links = cparser.parse_links(&ctx, &nodes);
+        assert!(
+            links.is_err(),
+            "expected error due to missing interface spec, got: {:?}",
+            links
+        );
+    }
+
+    #[test]
+    fn test_parse_links_multi_iface_requires_iface_spec() {
+        let tstr = r#"
+        [nodes]
+
+        [nodes.n0]
+        zpr_address = "foo.zpr"
+        provider = [["zpr.foo", "bar"], ["baz", 99]]
+        [nodes.n0.substrate_addrs]
+        "i0" = "1.2.3.4:2000"
+        "i1" = "1.2.3.5:2000"
+        "i2" = "1.2.3.6:2000"
+
+        [nodes.n1]
+        zpr_address = "fee.zpr"
+        provider = [["zpr.foo", "barf"], ["buz", 100]]
+        [nodes.n1.substrate_addrs]
+        "j0" = "4.5.6.7:2000"
+        "j1" = "4.5.6.8:2000"
+
+        [links.n0n1]
+        # Also override cost
+        attributes = [["zpr.cost", "5"]]
+        peers = [{ node = "n0", interface = "i2"}, { node = "n1", interface = "j1" }]
+        "#;
+
+        let ctx = CompilationCtx::new(false, false);
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let nodes = cparser.parse_nodes(&ctx);
+        assert!(nodes.is_ok(), "{:?}", nodes);
+        let nodes = nodes.unwrap();
+        assert_eq!(nodes.len(), 2);
+        let n0 = nodes.get("n0").unwrap();
+        assert_eq!(n0.id, "n0");
+        let n1 = nodes.get("n1").unwrap();
+        assert_eq!(n1.id, "n1");
+
+        let links = cparser.parse_links(&ctx, &nodes);
+        assert!(links.is_ok(), "{:?}", links);
+
+        let links = links.unwrap();
+        assert_eq!(links.len(), 1);
+        let l0 = links.get("n0n1").unwrap();
+        assert_eq!(l0.peer_a_id, "n0");
+        assert_eq!(l0.peer_b_id, "n1");
+
+        assert_eq!(l0.peer_a_interface, Some("i2".to_string()));
+        assert_eq!(l0.peer_b_interface, Some("j1".to_string()));
+
+        assert_eq!(l0.attributes.len(), 1);
+        assert_eq!(l0.attributes[0].0, zpl::KATTR_LINK_COST);
+        assert_eq!(l0.attributes[0].1, "5");
+    }
+
+    #[test]
+    fn test_parse_links_multiple() {
+        let tstr = r#"
+        [nodes]
+
+        [nodes.n0]
+        zpr_address = "foo.zpr"
+        provider = [["zpr.foo", "bar"], ["baz", 99]]
+
+        [nodes.n0.substrate_addrs]
+        "i0" = "1.2.3.4:2000"
+
+        [nodes.n1]
+        zpr_address = "fee.zpr"
+        provider = [["zpr.foo", "barf"], ["buz", 100]]
+
+        [nodes.n1.substrate_addrs]
+        "j0" = "4.5.6.7:2000"
+        "j1" = "4.5.6.8:2000"
+
+        [nodes.n2]
+        zpr_address = "fee.zpr"
+        provider = [["zpr.foo", "barf"], ["buz", 100]]
+
+        [nodes.n2.substrate_addrs]
+        "k0" = "4.5.6.7:2000"
+        "k1" = "4.5.6.8:2000"
+
+
+        [links.n0n1]
+        peers = [{ node = "n0"}, { node = "n1", interface = "j0" }]
+
+        [links.n1n2]
+        peers = [{ node = "n1", interface = "j1"}, { node = "n2", interface = "k0" }]
+
+        [links.n0n2]
+        peers = [{ node = "n0"}, { node = "n2", interface = "k1" }]
+        "#;
+
+        let ctx = CompilationCtx::new(false, false);
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let nodes = cparser.parse_nodes(&ctx);
+        assert!(nodes.is_ok(), "{:?}", nodes);
+        let nodes = nodes.unwrap();
+        assert_eq!(nodes.len(), 3);
+
+        let links = cparser.parse_links(&ctx, &nodes);
+        assert!(links.is_ok(), "{:?}", links);
+
+        let links = links.unwrap();
+        assert_eq!(links.len(), 3);
+        let l0 = links.get("n0n1").unwrap();
+        assert_eq!(l0.peer_a_id, "n0");
+        assert_eq!(l0.peer_b_id, "n1");
+        let l1 = links.get("n1n2").unwrap();
+        assert_eq!(l1.peer_a_id, "n1");
+        assert_eq!(l1.peer_b_id, "n2");
+        let l2 = links.get("n0n2").unwrap();
+        assert_eq!(l2.peer_a_id, "n0");
+        assert_eq!(l2.peer_b_id, "n2");
     }
 
     #[test]
