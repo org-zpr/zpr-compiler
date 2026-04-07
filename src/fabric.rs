@@ -393,47 +393,26 @@ impl Fabric {
                 service_id
             )));
         }
-        // TODO check that service signal wants to signal to exists?
         let svc = svc.unwrap();
+
+        // For the service attributes, only add a policy if the attributes are not
+        // already present in the provider attributes.
+        let unique_svc_attrs: Vec<Attribute> = svc_attrs
+            .iter()
+            .filter(|a| !svc.provider_attrs.contains(a))
+            .cloned()
+            .collect();
+
+        // TODO check that service signal wants to signal to exists?
+
         svc.client_policies.push(ClientPolicy {
             never_allow: never_allow,
             cli_condition: cli_attrs.to_vec(),
-            svc_condition: svc_attrs.to_vec(),
+            svc_condition: unique_svc_attrs.to_vec(),
             access_only,
             signal,
             zpl_line: pline.clone(),
         });
-        Ok(())
-    }
-
-    /// Add a condition (aka plicy aka rule) to all services -- EXCEPT nodes, trusted services, and visa services.
-    pub fn add_condition_to_all_services(
-        &mut self,
-        never_allow: bool,
-        cli_attrs: &[Attribute],
-        svc_attrs: &[Attribute],
-        signal: Option<Signal>,
-        pline: &PLine,
-    ) -> Result<(), CompilationError> {
-        for svc in &mut self.services {
-            if svc.service_type == ServiceType::Regular {
-                // For the service attributes, only add a policy if the attributes are not
-                // already present in the provider attributes.
-                let unique_svc_attrs: Vec<Attribute> = svc_attrs
-                    .iter()
-                    .filter(|a| !svc.provider_attrs.contains(a))
-                    .cloned()
-                    .collect();
-                svc.client_policies.push(ClientPolicy {
-                    never_allow: never_allow,
-                    access_only: false, // TODO: this is a guess
-                    cli_condition: cli_attrs.to_vec(),
-                    svc_condition: unique_svc_attrs.to_vec(),
-                    signal: signal.clone(),
-                    zpl_line: pline.clone(),
-                });
-            }
-        }
         Ok(())
     }
 }

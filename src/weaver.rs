@@ -783,13 +783,24 @@ impl Weaver {
 
             if server_service.class == zpl::DEF_CLASS_SERVICE_NAME {
                 // Add to all services (not nodes or trusted services or visa service)
-                self.fabric.add_condition_to_all_services(
-                    never_allow,
-                    &required_attrs,
-                    &svc_required_attrs,
-                    ac.signal.clone(),
-                    &pline,
-                )?;
+                let regular_svc_ids = self
+                    .fabric
+                    .services
+                    .iter()
+                    .filter(|s| s.service_type == ServiceType::Regular)
+                    .map(|s| s.fabric_id.clone())
+                    .collect::<Vec<String>>();
+                for svc_id in &regular_svc_ids {
+                    self.fabric.add_condition_to_service(
+                        never_allow,
+                        &svc_id,
+                        &required_attrs,
+                        &svc_required_attrs,
+                        false, // guessing
+                        ac.signal.clone(),
+                        &pline,
+                    )?;
+                }
             } else {
                 let fab_svc_id =
                     self.service_clause_name_to_fabric_id(class_idx, &server_service.class)?;
