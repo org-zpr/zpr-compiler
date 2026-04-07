@@ -213,6 +213,9 @@ impl Fabric {
                 )));
             }
         }
+
+        println!("XXX fabric::add_trusted_service {id}");
+
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: id.to_string(),
@@ -280,6 +283,10 @@ impl Fabric {
             }
         }
         let fabric_id = self.fabric_id_from_config_id_and_count(id, svc_instance);
+        println!(
+            "XXX fabric::add_service {fabric_id} with provider attrs: {:?}",
+            attrs
+        );
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: fabric_id.clone(),
@@ -328,6 +335,7 @@ impl Fabric {
             }
         }
         let fabric_id = self.fabric_id_from_config_id_and_count(id, svc_instance);
+        println!("XXX fabric::add_buildin_service: {fabric_id}");
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: fabric_id.clone(),
@@ -358,19 +366,6 @@ impl Fabric {
     /// Get a reference to one of the services.
     pub fn get_service(&self, fabric_id: &str) -> Option<&FabricService> {
         self.services.iter().find(|s| s.fabric_id == fabric_id)
-    }
-
-    pub fn update_service(
-        &mut self,
-        svc_id: &str,
-        mutator: impl FnOnce(&mut FabricService),
-    ) -> bool {
-        if let Some(svc) = self.services.iter_mut().find(|s| s.fabric_id == svc_id) {
-            mutator(svc);
-            true
-        } else {
-            false
-        }
     }
 
     /// Add a node to the fabric

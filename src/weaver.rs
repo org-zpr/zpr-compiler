@@ -314,7 +314,7 @@ impl Weaver {
         };
 
         // service must have a protocol
-        let prot = match config.get(&format!("/services/{}/protocol", matched_service_name)) {
+        let mut prot = match config.get(&format!("/services/{}/protocol", matched_service_name)) {
             Some(citem) => match &citem {
                 ConfigItem::Protocol(_, _, _) => citem.try_into_protocol()?,
                 _ => {
@@ -339,6 +339,22 @@ impl Weaver {
                     match config.get(&format!("/trusted_services/{nam}/client_service")) {
                         Some(ConfigItem::StrVal(cs_name)) if cs_name == matched_service_name => {
                             svc_type = ServiceType::Authentication;
+
+                            // Also this service is actually provided by the trusted service, so:
+                            let ts_provider_attrs =
+                                match config.get(&format!("/trusted_services/{nam}/provider")) {
+                                    Some(ConfigItem::AttrList(attrs)) => vec_to_attributes(&attrs)?,
+                                    _ => {
+                                        return Err(CompilationError::ConfigError(format!(
+                                            "trusted service {nam} missing provider attributes",
+                                        )));
+                                    }
+                                };
+                            attrs.extend_from_slice(&ts_provider_attrs);
+
+                            // And also has a special protocol layer 7 designation:
+                            // TODO: Really should come from config api.
+                            prot.set_layer7(ZPR_OAUTH_RSA.to_string());
                             break;
                         }
                         _ => (),
@@ -923,15 +939,8 @@ impl Weaver {
                     }
                 };
 
-            let vs_svc_protocol = self.check_ts_components(
-                config,
-                ctx,
-                &ts_name,
-                &client_svc,
-                &vs_svc,
-                &ts_api,
-                &ts_provider_attrs,
-            )?;
+            let vs_svc_protocol =
+                self.check_ts_components(config, ctx, &ts_name, &client_svc, &vs_svc, &ts_api)?;
 
             // The trusted service must return some attributes, and may return some identity attributes.
             let ts_returns_attrs =
@@ -999,20 +1008,16 @@ impl Weaver {
     ///
     /// Returns the protocol for the visa-facing component of the trusted service (if found).
     ///
-    /// As a side effect this also will update the actor/adapter facing service record in the fabric
-    /// with the protocol and provider attributes.
-    ///
     /// `vs_svc` - the visa service facing service name.
     /// `client_svc` - the actor/adapter facing service name.
     fn check_ts_components(
-        &mut self,
+        &self,
         config: &ConfigApi,
         ctx: &CompilationCtx,
         ts_name: &str,
         client_svc: &str,
         vs_svc: &str,
         ts_api: &str,
-        ts_provider_attrs: &Vec<Attribute>,
     ) -> Result<Option<Protocol>, CompilationError> {
         let mut vs_svc_protocol: Option<Protocol> = None;
         for svc_name in [client_svc, vs_svc] {
@@ -1061,20 +1066,6 @@ impl Weaver {
                     )));
                 }
                 vs_svc_protocol = Some(vsp);
-            } else {
-                // Fold in additional details about the client facing authentication service.
-                let mut auth_prot = prot.clone();
-                auth_prot.set_layer7(ZPR_OAUTH_RSA.to_string()); // TODO: Return layer7 name from config_api. Hardcoded to "zpr-oauthrsa" for now.
-                let found = self.fabric.update_service(svc_name, |svc| {
-                    svc.protocol = Some(auth_prot.clone());
-                    svc.provider_attrs = ts_provider_attrs.clone();
-                    svc.service_type = ServiceType::Authentication;
-                });
-                if !found {
-                    return Err(CompilationError::BuildError(format!(
-                        "service not found in fabric: {svc_name}"
-                    )));
-                }
             }
         }
         Ok(vs_svc_protocol)
