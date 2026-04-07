@@ -2,6 +2,7 @@
 
 use base64::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::net::Ipv6Addr;
 use zpr::policy_types::{Attribute, ServiceType};
 
 use crate::compilation::Compilation;
@@ -9,7 +10,7 @@ use crate::config_api::{ConfigApi, ConfigItem};
 use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
-use crate::fabric::{Fabric, PLine};
+use crate::fabric::{Fabric, FabricNode, PLine};
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
 use crate::protocols::{PortSpec, Protocol, ZPR_OAUTH_RSA, ZPR_VALIDATION_2};
 use crate::ptypes::{AllowClause, Class, ClassFlavor, FPos, Policy};
@@ -553,10 +554,8 @@ impl Weaver {
             _ => (),
         };
 
-        // Before handing off to fabric, we need to check the node provider attributes to see
-        // if they reference any trusted services.
         for node_key in &node_keys {
-            let node_attrs = match config.get(&format!("zpr/nodes/{node_key}/provider")) {
+            let raw_node_attrs = match config.get(&format!("zpr/nodes/{node_key}/provider")) {
                 Some(ConfigItem::AttrList(attrs)) => vec_to_attributes(&attrs)?,
                 _ => {
                     return Err(CompilationError::ConfigError(format!(
@@ -564,13 +563,80 @@ impl Weaver {
                     )));
                 }
             };
-            // We don't care here what the attributes are (the fabric calls for them itself), we just want
-            // to make sure they all resolve.
-            let _ = self.resolve_attributes(&node_attrs, config)?;
-        }
+            let mut resolved_node_attrs = self.resolve_attributes(&raw_node_attrs, config)?;
 
-        for node_key in &node_keys {
-            self.fabric.add_node(node_key, config)?;
+            let zpr_addr = match config.get(&format!("zpr/nodes/{node_key}/zpr_addr")) {
+                Some(ConfigItem::StrVal(s)) => s,
+                _ => {
+                    return Err(CompilationError::ConfigError(format!(
+                        "missing zpr address for node {}",
+                        node_key
+                    )));
+                }
+            };
+
+            // The address returned from config-api has already gone though the resolver.
+            // We require an IPv6 address.
+            let naddr: Ipv6Addr = match zpr_addr.parse() {
+                // TODO: Should be parsed to an IpAddr in config.rs
+                Ok(a) => a,
+                Err(e) => {
+                    return Err(CompilationError::ConfigError(format!(
+                        "invalid zpr IPv6 address for node: {}: {}",
+                        zpr_addr, e
+                    )));
+                }
+            };
+
+            resolved_node_attrs.push(Attribute::try_zpr_internal_attr(
+                zpl::KATTR_ADDR,
+                &naddr.to_string(),
+            )?);
+
+            // Note that we do not have line/col info from the config file.
+            let attr_map = squash_attributes(&resolved_node_attrs, &FPos::default())?;
+            let provider_attrs = attr_map.into_values().collect::<Vec<Attribute>>();
+
+            let fabn = FabricNode {
+                node_id: node_key.to_string(),
+                provider_attrs: provider_attrs.clone(),
+            };
+
+            self.fabric.push_node(fabn);
+
+            // Now create the visa support service for this node and an access rule.
+            let vs = self
+                .fabric
+                .get_visa_service()
+                .expect("visa service must be added before add_node is called");
+            let vs_provider_attrs = vs.provider_attrs.clone();
+            let svc_name = format!("/zpr/{}/vss", node_key);
+
+            // There cannot be a service with this id already.
+            if self.fabric.has_service(&svc_name) {
+                return Err(CompilationError::ConfigError(format!(
+                    "unabled to configure node VSS because service {} already exists in fabric",
+                    &svc_name
+                )));
+            }
+
+            let vss_prot = Protocol::tcp("zpr-vss")
+                .add_port(PortSpec::Single(zpl::VISA_SUPPORT_SEVICE_PORT))
+                .build()
+                .unwrap();
+            let vss_id = self
+                .fabric
+                .add_builtin_service(&svc_name, &vss_prot, &provider_attrs)?;
+            let pline = PLine::new_builtin("allow visa service to access node visa support");
+            self.fabric.add_condition_to_service(
+                false,
+                &vss_id,
+                &vs_provider_attrs,
+                &[],
+                false,
+                None,
+                &pline,
+            )?;
         }
         Ok(())
     }
