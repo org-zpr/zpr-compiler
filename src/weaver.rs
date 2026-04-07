@@ -18,7 +18,11 @@ use crate::zpl;
 
 pub struct Weaver {
     fabric: Fabric,
+    wctx: WeavingContext,
+}
 
+#[derive(Default)]
+pub struct WeavingContext {
     // Map the allow clause ID to the fabric service ID.
     allowid_to_fab_svc: HashMap<usize, String>,
 
@@ -33,7 +37,7 @@ pub fn weave(
     policy: &Policy,
     ctx: &CompilationCtx,
 ) -> Result<Fabric, CompilationError> {
-    let mut weaver = Weaver::new();
+    let mut weaver = Weaver::new(WeavingContext::default());
 
     let pdig = policy.digest.ok_or(CompilationError::BuildError(
         "missing policy digest".to_string(),
@@ -81,12 +85,27 @@ pub fn weave(
     Ok(weaver.fabric)
 }
 
+impl WeavingContext {
+    /// Map the allow clause ID to the fabric service ID.
+    fn map_allow_id_to_fabric_id<S: Into<String>>(&mut self, allow_id: usize, fab_svc_id: S) {
+        self.allowid_to_fab_svc.insert(allow_id, fab_svc_id.into());
+    }
+
+    /// Get the fabric service ID for a given allow clause ID.
+    fn fabric_id_for_allow_id(&self, allow_id: &usize) -> Option<&String> {
+        self.allowid_to_fab_svc.get(allow_id)
+    }
+
+    fn add_used_trusted_service<S: Into<String>>(&mut self, ts_id: S) {
+        self.used_trusted_services.insert(ts_id.into());
+    }
+}
+
 impl Weaver {
-    fn new() -> Self {
+    fn new(wctx: WeavingContext) -> Self {
         Self {
             fabric: Fabric::default(),
-            allowid_to_fab_svc: HashMap::new(),
-            used_trusted_services: HashSet::new(),
+            wctx,
         }
     }
 
@@ -384,8 +403,7 @@ impl Weaver {
         let fabric_svc_id =
             self.fabric
                 .add_service(&matched_service_name, &prot, &resolved_attrs, svc_type)?;
-        self.allowid_to_fab_svc.insert(svc_id, fabric_svc_id);
-
+        self.wctx.map_allow_id_to_fabric_id(svc_id, fabric_svc_id);
         Ok(())
     }
 
@@ -407,7 +425,7 @@ impl Weaver {
                 )));
             }
         };
-        let fab_svc_id = match self.allowid_to_fab_svc.get(&svc_id) {
+        let fab_svc_id = match self.wctx.fabric_id_for_allow_id(&svc_id) {
             Some(s) => s,
             None => {
                 // programming error
@@ -491,18 +509,18 @@ impl Weaver {
             match attr_name.as_str() {
                 zpl::KATTR_CN => {
                     resolved_attrs.push(zpl_attr.clone());
-                    self.used_trusted_services
-                        .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+                    self.wctx
+                        .add_used_trusted_service(zpl::DEFAULT_TRUSTED_SERVICE_ID);
                 }
                 zpl::DEFAULT_ATTR => {
                     resolved_attrs.push(zpl_attr.clone_with_new_name(zpl::KATTR_CN));
-                    self.used_trusted_services
-                        .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+                    self.wctx
+                        .add_used_trusted_service(zpl::DEFAULT_TRUSTED_SERVICE_ID);
                 }
                 zpl::KATTR_SERVICES => {
                     resolved_attrs.push(zpl_attr.clone());
-                    self.used_trusted_services
-                        .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+                    self.wctx
+                        .add_used_trusted_service(zpl::DEFAULT_TRUSTED_SERVICE_ID);
                 }
                 _ => {
                     // TODO: This should be cached
@@ -546,7 +564,7 @@ impl Weaver {
                                 new_attr.set_multi_valued()?;
                             }
                             resolved_attrs.push(new_attr);
-                            self.used_trusted_services.insert(ts_name.clone());
+                            self.wctx.add_used_trusted_service(ts_name.clone());
                             matched = true;
                         }
                     }
@@ -873,8 +891,8 @@ impl Weaver {
     ) -> Result<(), CompilationError> {
         let mut checked_services = HashSet::new();
         loop {
-            let active_set_count = self.used_trusted_services.len();
-            let active_trusted_services = self.used_trusted_services.clone();
+            let active_set_count = self.wctx.used_trusted_services.len();
+            let active_trusted_services = self.wctx.used_trusted_services.clone();
             for ts_name in &active_trusted_services {
                 if ts_name == zpl::DEFAULT_TRUSTED_SERVICE_ID {
                     continue;
@@ -896,7 +914,7 @@ impl Weaver {
                 // Call resolve which may add to the list of active trusted services.
                 let _ = self.resolve_attributes(&ts_provider_attrs, config)?;
             }
-            if self.used_trusted_services.len() == active_set_count {
+            if self.wctx.used_trusted_services.len() == active_set_count {
                 break; // no change? We are done.
             }
         }
@@ -913,7 +931,7 @@ impl Weaver {
 
         // Copy the used trusted service names into a stand alone vector to avoid
         // holding an immutable ref to self in the following loop.
-        let used_trusted_service_names = self.used_trusted_services.clone();
+        let used_trusted_service_names = self.wctx.used_trusted_services.clone();
 
         for ts_name in used_trusted_service_names {
             if ts_name == zpl::DEFAULT_TRUSTED_SERVICE_ID {
@@ -1203,7 +1221,7 @@ mod test {
         dock_node = "n0"
         "#;
 
-        let mut w = Weaver::new();
+        let mut w = Weaver::new(WeavingContext::default());
         let class_idx = HashMap::new();
         let policy = Policy::default();
         let config =
@@ -1271,7 +1289,7 @@ mod test {
         let comp = Compilation::builder(PathBuf::default()).build();
 
         {
-            let mut w = Weaver::new();
+            let mut w = Weaver::new(WeavingContext::default());
 
             let res = w.init_services(&comp, &class_idx, &policy, &config, &ctx);
             assert!(res.is_ok(), "init_services failed: {}", res.unwrap_err());
@@ -1327,7 +1345,7 @@ mod test {
         class_idx.insert("foo".to_string(), &foo_cls);
 
         {
-            let mut w = Weaver::new();
+            let mut w = Weaver::new(WeavingContext::default());
             let res = w.init_services(&comp, &class_idx, &policy, &config, &ctx);
             println!("{:?}", res);
             assert!(res.is_ok(), "init_services failed: {}", res.unwrap_err());
@@ -1370,8 +1388,10 @@ mod test {
         let config = ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), &ctx)
             .expect("failed to parse config");
 
-        let mut w = Weaver::new();
-        w.used_trusted_services.insert("bas".to_string()); // Add the trusted service to the used set.
+        let mut wctx = WeavingContext::default();
+        wctx.add_used_trusted_service("bas");
+
+        let mut w = Weaver::new(wctx);
         let res = w.add_trusted_services(&config, &ctx);
         assert!(
             res.is_ok(),
