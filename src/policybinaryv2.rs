@@ -1,3 +1,4 @@
+//! The "bin2" policy format.
 use openssl::sha;
 use std::collections::HashMap;
 use std::hash::Hash;

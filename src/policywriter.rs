@@ -10,6 +10,7 @@ pub enum TSType {
     ActorAuth, // trusted service <-> adapter
 }
 
+/// To support multiple policy output formats, this trait defines the interface for writing policies.
 pub trait PolicyWriter {
     fn print_stats(&self);
 
