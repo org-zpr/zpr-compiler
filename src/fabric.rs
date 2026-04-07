@@ -208,8 +208,9 @@ impl Fabric {
     ) -> Result<(), CompilationError> {
         for s in &self.services {
             if s.config_id == id {
-                // Caller should prevent this.
-                panic!("trusted service {} already exists in the fabric", id);
+                return Err(CompilationError::BuildError(format!(
+                    "cannot add duplicate trusted service: already exists: {id}"
+                )));
             }
         }
         let fs = FabricService {
@@ -243,9 +244,17 @@ impl Fabric {
         assert!(stype != ServiceType::Undefined); // programming error
         match &stype {
             ServiceType::BuiltIn => {
-                panic!("not allowed to explicity add a BUILTIN service: {}", id)
+                return Err(CompilationError::BuildError(format!(
+                    "illegal add of a BUILTIN service: {}",
+                    id
+                )));
             }
-            ServiceType::Trusted(_) => panic!("use add_trusted_service to add a TRUSTED service"),
+            ServiceType::Trusted(_) => {
+                return Err(CompilationError::BuildError(format!(
+                    "add_service cannot add a TRUSTED service -- use add_trusted_service('{}')",
+                    id
+                )));
+            }
             _ => {}
         }
         if stype == ServiceType::Regular && id.starts_with("/zpr") {
@@ -384,10 +393,10 @@ impl Fabric {
         let svc = self.services.iter_mut().find(|s| s.fabric_id == service_id);
         if svc.is_none() {
             // programming error
-            panic!(
-                "call add_condition_to_service but service {} not found",
+            return Err(CompilationError::BuildError(format!(
+                "add_condition_to_service: service not found: {}",
                 service_id
-            );
+            )));
         }
         // TODO check that service signal wants to signal to exists?
         let svc = svc.unwrap();

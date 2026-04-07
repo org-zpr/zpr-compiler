@@ -94,4 +94,7 @@ pub enum CompilationError {
 
     #[error("attribute error: {0}")]
     AttributeError(#[from] AttributeError),
+
+    #[error("build error: {0}")]
+    BuildError(String),
 }

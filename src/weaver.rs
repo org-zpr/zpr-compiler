@@ -35,15 +35,17 @@ pub fn weave(
 ) -> Result<Fabric, CompilationError> {
     let mut weaver = Weaver::new();
 
-    let pdig = policy
-        .digest
-        .expect("policy digest must be set prior to calling weave");
+    let pdig = policy.digest.ok_or(CompilationError::BuildError(
+        "missing policy digest".to_string(),
+    ))?;
 
     // Use config verison as its digest. Version is hex encoded hash.
     let cdig = match config.must_get("zpr/version") {
         ConfigItem::StrVal(ver) => {
             let mut d = [0u8; 32];
-            hex::decode_to_slice(ver, &mut d).expect("version must be a 32 byte hex string");
+            hex::decode_to_slice(ver, &mut d).map_err(|_e| {
+                CompilationError::BuildError("version must be a 32 byte hex string".to_string())
+            })?;
             d
         }
         _ => {
@@ -132,15 +134,13 @@ impl Weaver {
     ) -> Result<(), CompilationError> {
         let vs_protocol = Protocol::tcp("zpr-vs")
             .add_port(PortSpec::Single(zpl::VISA_SERVICE_PORT))
-            .build()
-            .unwrap();
+            .build()?;
 
         // The provider of the visa service is a hardcoded CN value.
         let vs_cn_attr = Attribute::tuple(zpl::KATTR_CN)
             .single()
             .value(zpl::VISA_SERVICE_CN)
-            .build()
-            .expect("invalid attribute");
+            .build()?;
         let vs_attrs = vec![vs_cn_attr];
         let fab_svc_id = self.fabric.add_service(
             zpl::VS_SERVICE_NAME,
@@ -208,7 +208,7 @@ impl Weaver {
 
                 // And add the attributes defined at class level
                 admin_access_attrs
-                    .extend_from_slice(&attrs_for_class(class_idx, &lhs_clause.class));
+                    .extend_from_slice(&attrs_for_class(class_idx, &lhs_clause.class)?);
             }
 
             let fp = FPos::from(&ac.server[0].class_tok);
@@ -263,7 +263,7 @@ impl Weaver {
             // TODO: If there are no allow rules that permit access to the service then
             // maybe we don't even allow it to connect?
             let mut attrs = Vec::new();
-            let svc_class_attrs = attrs_for_class(class_idx, &define.name);
+            let svc_class_attrs = attrs_for_class(class_idx, &define.name)?;
             attrs.extend_from_slice(&svc_class_attrs);
             self.add_service(class_idx, define, &attrs, define.class_id, config)?;
         }
@@ -303,7 +303,9 @@ impl Weaver {
                     attrs.extend_from_slice(&vec_to_attributes(&alist)?);
                 }
                 _ => {
-                    panic!("error: provider must be an attribute list");
+                    return Err(CompilationError::BuildError(format!(
+                        "provider not an attribute list: {matched_service_name}"
+                    )));
                 }
             },
             None => {
@@ -316,7 +318,9 @@ impl Weaver {
             Some(citem) => match &citem {
                 ConfigItem::Protocol(_, _, _) => citem.try_into_protocol()?,
                 _ => {
-                    panic!("error: protocol must be a protocol enum");
+                    return Err(CompilationError::BuildError(format!(
+                        "protocol not a protocol enum: {matched_service_name}"
+                    )));
                 }
             },
             None => {
@@ -370,29 +374,32 @@ impl Weaver {
 
     /// This requires that `add_services` has already been run.
     ///
-    /// Panics if
+    /// Errors out if:
     /// * `name` is not in the `class_idx`
     /// * the class ID for `name` is not in the fabric services map.
     fn service_clause_name_to_fabric_id(
         &self,
         class_idx: &HashMap<String, &Class>,
         name: &str,
-    ) -> String {
+    ) -> Result<String, CompilationError> {
         let svc_id = match class_idx.get(name) {
             Some(cls) => cls.class_id,
-            None => panic!("service class {} not found in class index", name),
+            None => {
+                return Err(CompilationError::BuildError(format!(
+                    "service class {name} not found in class index"
+                )));
+            }
         };
         let fab_svc_id = match self.allowid_to_fab_svc.get(&svc_id) {
             Some(s) => s,
             None => {
                 // programming error
-                panic!(
-                    "error - service {} with id {} not found in map",
-                    name, svc_id
-                );
+                return Err(CompilationError::BuildError(format!(
+                    "service {name} with id {svc_id} not found in fabric map"
+                )));
             }
         };
-        fab_svc_id.clone()
+        Ok(fab_svc_id.clone())
     }
 
     fn allow_clauses_to_services(
@@ -416,22 +423,28 @@ impl Weaver {
 
             let svc_id = match class_idx.get(&server_service.class) {
                 Some(cls) => cls.class_id,
-                None => panic!(
-                    "service class {} not found in class index",
-                    server_service.class
-                ),
+                None => {
+                    return Err(CompilationError::BuildError(format!(
+                        "service class {} not found in class index",
+                        server_service.class
+                    )));
+                }
             };
 
             // start with parent class attributes
-            let mut attrs = attrs_for_class(class_idx, &server_service.class);
+            let mut attrs = attrs_for_class(class_idx, &server_service.class)?;
 
             // And include any additionaal server side attributes from the RHS clause.
             for rhs_clause in &ac.server {
                 attrs.extend_from_slice(&rhs_clause.with);
             }
-            let svc_class = class_idx
-                .get(&server_service.class)
-                .expect("service class not found in class index");
+            let svc_class =
+                class_idx
+                    .get(&server_service.class)
+                    .ok_or(CompilationError::BuildError(format!(
+                        "service class {} not found in class index",
+                        server_service.class
+                    )))?;
             self.add_service(class_idx, svc_class, &attrs, svc_id, config)?;
         }
         Ok(())
@@ -608,7 +621,9 @@ impl Weaver {
             let vs = self
                 .fabric
                 .get_visa_service()
-                .expect("visa service must be added before add_node is called");
+                .ok_or(CompilationError::BuildError(
+                    "visa service must be added before add_node is called".to_string(),
+                ))?;
             let vs_provider_attrs = vs.provider_attrs.clone();
             let svc_name = format!("/zpr/{}/vss", node_key);
 
@@ -692,7 +707,7 @@ impl Weaver {
                     || lhs_class.flavor == ClassFlavor::Service
                 {
                     // Add attributes from parent
-                    attrs.extend_from_slice(&attrs_for_class(class_idx, &lhs_class.class));
+                    attrs.extend_from_slice(&attrs_for_class(class_idx, &lhs_class.class)?);
 
                     // Add non-optional instance attributes
                     attrs.extend(lhs_class.with.iter().filter(|a| !a.optional).cloned());
@@ -706,7 +721,7 @@ impl Weaver {
                             Attribute::try_zpr_internal_attr_mv(zpl::KATTR_SERVICES, "")?
                         } else {
                             let fab_svc_name =
-                                self.service_clause_name_to_fabric_id(class_idx, &lhs_class.class);
+                                self.service_clause_name_to_fabric_id(class_idx, &lhs_class.class)?;
                             Attribute::try_zpr_internal_attr_mv(zpl::KATTR_SERVICES, &fab_svc_name)?
                         };
                         attrs.push(svc_attr);
@@ -761,7 +776,7 @@ impl Weaver {
                 )?;
             } else {
                 let fab_svc_id =
-                    self.service_clause_name_to_fabric_id(class_idx, &server_service.class);
+                    self.service_clause_name_to_fabric_id(class_idx, &server_service.class)?;
                 self.fabric.add_condition_to_service(
                     never_allow,
                     &fab_svc_id,
@@ -960,8 +975,7 @@ impl Weaver {
             let cn_attr = Attribute::tuple(zpl::KATTR_CN)
                 .single()
                 .value(zpl::VISA_SERVICE_CN)
-                .build()
-                .expect("invalid attribute");
+                .build()?;
             let vs_access_attrs = vec![cn_attr];
             let pline = PLine::new_builtin(&format!(
                 "allow visa service access to trusted service {}",
@@ -987,6 +1001,9 @@ impl Weaver {
     ///
     /// As a side effect this also will update the actor/adapter facing service record in the fabric
     /// with the protocol and provider attributes.
+    ///
+    /// `vs_svc` - the visa service facing service name.
+    /// `client_svc` - the actor/adapter facing service name.
     fn check_ts_components(
         &mut self,
         config: &ConfigApi,
@@ -1001,7 +1018,9 @@ impl Weaver {
         for svc_name in [client_svc, vs_svc] {
             if self.fabric.has_service(svc_name) {
                 if svc_name == vs_svc {
-                    panic!("error: visa service should not yet exist in fabric");
+                    return Err(CompilationError::BuildError(format!(
+                        "VS facing service for {ts_name} already exists: {vs_svc}"
+                    )));
                 }
             } else if svc_name == client_svc {
                 // This implies that there is no ZPL allowing access to the client facing
@@ -1018,13 +1037,14 @@ impl Weaver {
                 Some(citem) => match &citem {
                     ConfigItem::Protocol(_, _, _) => citem.try_into_protocol()?,
                     _ => {
-                        panic!("error: protocol must be a protocol enum");
+                        return Err(CompilationError::ConfigError(format!(
+                            "protocol for service {svc_name} must be a valid protocol enum"
+                        )));
                     }
                 },
                 None => {
                     return Err(CompilationError::ConfigError(format!(
-                        "protocol for service {} not found in configuration",
-                        svc_name,
+                        "protocol for service {svc_name} not found in configuration"
                     )));
                 }
             };
@@ -1051,8 +1071,9 @@ impl Weaver {
                     svc.service_type = ServiceType::Authentication;
                 });
                 if !found {
-                    // Programming error we checked above that the service was in the fabcir.
-                    panic!("error: service {} not found in fabric", svc_name);
+                    return Err(CompilationError::BuildError(format!(
+                        "service not found in fabric: {svc_name}"
+                    )));
                 }
             }
         }
@@ -1122,11 +1143,14 @@ fn find_defined_service(
 
 /// Get all the WITH attributes on the named class, including any attributes on
 /// the parent classes.  We ignore optional attributes.
-fn attrs_for_class(class_idx: &HashMap<String, &Class>, class_name: &str) -> Vec<Attribute> {
+fn attrs_for_class(
+    class_idx: &HashMap<String, &Class>,
+    class_name: &str,
+) -> Result<Vec<Attribute>, CompilationError> {
     let mut attrs = Vec::new();
-    let mut cl = class_idx
-        .get(class_name)
-        .unwrap_or_else(|| panic!("class {} not found in class index", class_name));
+    let mut cl = class_idx.get(class_name).ok_or_else(|| {
+        CompilationError::BuildError(format!("class {} not found in class index", class_name))
+    })?;
 
     // If my parent name is not my name... grab all my attributes.
     while cl.parent != cl.name {
@@ -1137,9 +1161,12 @@ fn attrs_for_class(class_idx: &HashMap<String, &Class>, class_name: &str) -> Vec
             attrs.push(a.clone());
         }
         // Then move up to the parent class.
-        cl = class_idx
-            .get(&cl.parent)
-            .unwrap_or_else(|| panic!("error parent class {} of {} not found", cl.parent, cl.name));
+        cl = class_idx.get(&cl.parent).ok_or_else(|| {
+            CompilationError::BuildError(format!(
+                "error parent class {} of {} not found",
+                cl.parent, cl.name
+            ))
+        })?;
     }
     // WHEN parent name is my name, take my attributes
     for a in &cl.with_attrs {
@@ -1148,7 +1175,7 @@ fn attrs_for_class(class_idx: &HashMap<String, &Class>, class_name: &str) -> Vec
         }
         attrs.push(a.clone());
     }
-    attrs
+    Ok(attrs)
 }
 
 #[cfg(test)]
