@@ -54,7 +54,10 @@ pub struct FabricLink {
 }
 
 #[derive(Debug, Clone)]
-pub struct NodeLinkAddr(pub IpAddr, pub SubstrateAddr); // NODE "ID" -- for now is ZPR address, SUBSTRATE_ADDR
+pub struct NodeLinkAddr {
+    pub zpr_addr: IpAddr,
+    pub substrate: SubstrateAddr,
+} // NODE "ID" -- for now is ZPR address, SUBSTRATE_ADDR
 
 #[derive(Debug, Clone)]
 pub struct SubstrateAddr {

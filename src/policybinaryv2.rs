@@ -15,7 +15,7 @@ use crate::ptypes::Signal;
 use zpr::policy_types::write_attributes;
 use zpr::policy_types::{AttrExp, AttrOp, Attribute, PFlags};
 use zpr::policy_types::{JoinPolicy, Scope, ScopeFlag};
-use zpr::policy_types::{Peering, SubstrateAddr};
+use zpr::policy_types::{NetAddr, Peering};
 use zpr::policy_types::{Service, ServiceType}; // TODO: remove refs to fabric
 
 #[derive(Default)]
@@ -365,15 +365,9 @@ impl PolicyWriter for PolicyBinaryV2 {
         let peering = Peering {
             link_id: link_id.to_string(),
             node_a: *node_a_zpr_addr,
-            substrate_a: SubstrateAddr::new_for_ip_or_host(
-                node_a_substrate_host,
-                node_a_substrate_port,
-            ),
+            substrate_a: NetAddr::new_for_ip_or_host(node_a_substrate_host, node_a_substrate_port),
             node_b: *node_b_zpr_addr,
-            substrate_b: SubstrateAddr::new_for_ip_or_host(
-                node_b_substrate_host,
-                node_b_substrate_port,
-            ),
+            substrate_b: NetAddr::new_for_ip_or_host(node_b_substrate_host, node_b_substrate_port),
             attributes: attrs,
         };
 

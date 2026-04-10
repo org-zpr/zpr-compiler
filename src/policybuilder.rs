@@ -262,12 +262,12 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
         for link in &fabric.links {
             self.policy_writer.write_link(
                 &link.link_id,
-                &link.node_a.0,
-                &link.node_a.1.host,
-                link.node_a.1.port,
-                &link.node_b.0,
-                &link.node_b.1.host,
-                link.node_b.1.port,
+                &link.node_a.zpr_addr,
+                &link.node_a.substrate.host,
+                link.node_a.substrate.port,
+                &link.node_b.zpr_addr,
+                &link.node_b.substrate.host,
+                link.node_b.substrate.port,
                 &link.link_attrs,
             );
         }

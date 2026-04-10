@@ -745,7 +745,7 @@ impl Weaver {
                 "interface {if_id} not found for linked node {node_key}",
             )))?;
 
-        Ok(NodeLinkAddr(node.zpr_addr.clone(), if_addr.clone()))
+        Ok(NodeLinkAddr { zpr_addr: node.zpr_addr.clone(), substrate: if_addr.clone() })
     }
 
     /// Uses the Fabric nodes, so must be called after setting up the nodes in the fabric.
@@ -756,11 +756,7 @@ impl Weaver {
     ) -> Result<(), CompilationError> {
         let link_ids = match config.get("zpr/links") {
             Some(ConfigItem::KeySet(link_ids)) => link_ids,
-            _ => {
-                return Err(CompilationError::ConfigError(
-                    "no links defined in configuration".to_string(),
-                ));
-            }
+            _ => return Ok(()),
         };
         for link_id in &link_ids {
             let link_tuple = match config.get(&format!("zpr/links/{link_id}")) {
