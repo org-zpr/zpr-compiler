@@ -4,7 +4,7 @@ use openssl::rsa::Rsa;
 use std::convert::TryInto;
 
 use zpr::policy::v1 as policy_capnp;
-use zpr::policy_types::Peering;
+use zpr::policy_types::{AttrExp, AttrOp, Peering};
 
 use crate::compiler::get_compiler_version;
 use crate::dump;
@@ -232,6 +232,13 @@ pub fn dump_v2(fname: &str, encoded_buf: Bytes) {
                     peering.substrate_b.host.to_string().yellow().dimmed(),
                     peering.substrate_b.port.to_string().yellow().dimmed()
                 );
+                for attr in &peering.attributes {
+                    println!(
+                        "              {} {}",
+                        format!("{}", "󰞘").dimmed(),
+                        attr_exp_to_string(attr).yellow()
+                    );
+                }
             } else {
                 println!(
                     "{} peering: {}",
@@ -350,6 +357,32 @@ fn attr_exp_v2_to_string(exp: &policy_capnp::attr_expr::Reader) -> String {
             s.push_str("]");
         } else if vals.len() == 1 {
             s.push_str(&vals.get(0).unwrap().to_str().unwrap());
+        } else {
+            s.push_str("\"\"");
+        }
+    } else {
+        s.push_str("(no value)")
+    }
+    s
+}
+
+fn attr_exp_to_string(exp: &AttrExp) -> String {
+    let mut s = String::new();
+    s.push_str(exp.key.as_str());
+    let opstr = match exp.op {
+        AttrOp::Eq => "EQ",
+        AttrOp::Ne => "NE",
+        AttrOp::Has => "HAS",
+        AttrOp::Excludes => "EXCLUDES",
+    };
+    s.push_str(&format!(" {} ", opstr));
+    if !exp.value.is_empty() {
+        if exp.value.len() > 1 {
+            s.push_str("[");
+            s.push_str(&exp.value.join(", "));
+            s.push_str("]");
+        } else if exp.value.len() == 1 {
+            s.push_str(&exp.value[0]);
         } else {
             s.push_str("\"\"");
         }

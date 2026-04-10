@@ -3,7 +3,7 @@
 use base64::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::net::Ipv6Addr;
-use zpr::policy_types::{Attribute, ServiceType};
+use zpr::policy_types::{AttrDomain, Attribute, ServiceType};
 
 use crate::compilation::Compilation;
 use crate::config_api::{ConfigApi, ConfigItem};
@@ -11,7 +11,7 @@ use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
 use crate::fabric::{Fabric, FabricLink, FabricNode, NodeLinkAddr, PLine, SubstrateAddr};
-use crate::fabric_util::{squash_attributes, vec_to_attributes};
+use crate::fabric_util::{squash_attributes, vec_to_attributes, vec_to_attributes_in_domain};
 use crate::protocols::{PortSpec, Protocol, ZPR_OAUTH_RSA, ZPR_VALIDATION_2};
 use crate::ptypes::{AllowClause, Class, ClassFlavor, FPos, Policy};
 use crate::zpl;
@@ -778,11 +778,18 @@ impl Weaver {
                 )));
             }
 
+            let link_attrs = match config.get(&format!("zpr/links/{link_id}/attributes")) {
+                Some(ConfigItem::AttrList(attrs)) => {
+                    vec_to_attributes_in_domain(&attrs, AttrDomain::Link)?
+                }
+                _ => vec![],
+            };
+
             let flink = FabricLink {
                 link_id: link_id.to_string(),
                 node_a: self.get_node_link_addr(&link_tuple[0], &link_tuple[1])?,
                 node_b: self.get_node_link_addr(&link_tuple[2], &link_tuple[3])?,
-                link_attrs: vec![], // TODO: support link attributes in config
+                link_attrs: link_attrs,
             };
 
             self.fabric.push_link(flink);
