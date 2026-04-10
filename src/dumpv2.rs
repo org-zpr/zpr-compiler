@@ -2,7 +2,9 @@ use bytes::Bytes;
 use colored::Colorize;
 use openssl::rsa::Rsa;
 use std::convert::TryInto;
+
 use zpr::policy::v1 as policy_capnp;
+use zpr::policy_types::Peering;
 
 use crate::compiler::get_compiler_version;
 use crate::dump;
@@ -209,6 +211,33 @@ pub fn dump_v2(fname: &str, encoded_buf: Bytes) {
                         attr_exp_v2_to_string(&cond).yellow()
                     );
                 }
+            }
+            println!();
+        }
+    }
+    if policy.has_topology() {
+        dump::print_section_hdr("TOPOLOGY");
+        for (i, p_rdr) in policy.get_topology().unwrap().iter().enumerate() {
+            if let Ok(peering) = Peering::try_from(p_rdr) {
+                println!(
+                    "{} peering: {} <-> {}",
+                    format!("{:02}", i + 1).dimmed(),
+                    peering.node_a.to_string().yellow(),
+                    peering.node_b.to_string().yellow()
+                );
+                println!(
+                    "            {}:{} <-> {}:{}",
+                    peering.substrate_a.host.to_string().yellow().dimmed(),
+                    peering.substrate_a.port.to_string().yellow().dimmed(),
+                    peering.substrate_b.host.to_string().yellow().dimmed(),
+                    peering.substrate_b.port.to_string().yellow().dimmed()
+                );
+            } else {
+                println!(
+                    "{} peering: {}",
+                    format!("{:02}", i + 1).dimmed(),
+                    "(invalid)".red()
+                );
             }
             println!();
         }

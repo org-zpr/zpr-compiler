@@ -2,6 +2,7 @@
 use openssl::sha;
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::net::IpAddr;
 use zpr::policy::v1 as policy_capnp;
 use zpr::write_to::WriteTo;
 
@@ -12,8 +13,9 @@ use crate::protocols::{IcmpFlowType, PortSpec, Protocol, ProtocolDetails};
 use crate::ptypes::Signal;
 
 use zpr::policy_types::write_attributes;
-use zpr::policy_types::{Attribute, PFlags};
+use zpr::policy_types::{AttrExp, AttrOp, Attribute, PFlags};
 use zpr::policy_types::{JoinPolicy, Scope, ScopeFlag};
+use zpr::policy_types::{Peering, SubstrateAddr};
 use zpr::policy_types::{Service, ServiceType}; // TODO: remove refs to fabric
 
 #[derive(Default)]
@@ -24,6 +26,7 @@ pub struct PolicyBinaryV2 {
     communication_policies: Vec<CommunicationPolicy>,
     bootstrap_keys: Vec<BootstrapKey>,
     join_policies: JPBuilder,
+    topology: Vec<Peering>,
 }
 
 #[allow(dead_code)]
@@ -331,6 +334,52 @@ impl PolicyWriter for PolicyBinaryV2 {
         });
     }
 
+    fn write_link(
+        &mut self,
+        link_id: &str,
+        node_a_zpr_addr: &IpAddr,
+        node_a_substrate_host: &str,
+        node_a_substrate_port: u16,
+        node_b_zpr_addr: &IpAddr,
+        node_b_substrate_host: &str,
+        node_b_substrate_port: u16,
+        link_attrs: &[Attribute],
+    ) {
+        let mut attrs = Vec::new();
+        for lattr in link_attrs {
+            let k = lattr.zpl_key();
+            let vals = lattr.zpl_values();
+            let op_code = if vals.is_empty() || vals[0].is_empty() || lattr.is_multi_valued() {
+                AttrOp::Has
+            } else {
+                AttrOp::Eq
+            };
+            let exp = AttrExp {
+                key: k,
+                op: op_code,
+                value: vals,
+            };
+            attrs.push(exp);
+        }
+
+        let peering = Peering {
+            link_id: link_id.to_string(),
+            node_a: *node_a_zpr_addr,
+            substrate_a: SubstrateAddr::new_for_ip_or_host(
+                node_a_substrate_host,
+                node_a_substrate_port,
+            ),
+            node_b: *node_b_zpr_addr,
+            substrate_b: SubstrateAddr::new_for_ip_or_host(
+                node_b_substrate_host,
+                node_b_substrate_port,
+            ),
+            attributes: attrs,
+        };
+
+        self.topology.push(peering);
+    }
+
     fn write_trusted_service(
         &mut self,
         _svc_id: &str,
@@ -432,12 +481,22 @@ impl PolicyWriter for PolicyBinaryV2 {
             }
         }
 
-        let mut jpols = policy.init_join_policies(self.join_policies.len() as u32);
+        let mut jpols = policy
+            .reborrow()
+            .init_join_policies(self.join_policies.len() as u32);
         let mut jpidx = 0;
         for (_jp_key, jp) in self.join_policies.iter() {
             let mut jpol = jpols.reborrow().get(jpidx);
             jp.write_to(&mut jpol);
             jpidx += 1;
+        }
+
+        if !self.topology.is_empty() {
+            let mut topl = policy.init_topology(self.topology.len() as u32);
+            for (i, peering) in self.topology.iter().enumerate() {
+                let mut p_builder = topl.reborrow().get(i as u32);
+                peering.write_to(&mut p_builder);
+            }
         }
 
         let mut policy_bytes: Vec<u8> = Vec::new();

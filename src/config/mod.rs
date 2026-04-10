@@ -1,6 +1,6 @@
 //! Loads and parses a ZPL TOML configuration file into a `Config` struct.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
@@ -106,7 +106,7 @@ impl Default for Resolver {
 pub struct Node {
     pub id: String,
     pub provider: Vec<(String, String)>,
-    pub zpr_address: String,
+    pub zpr_address: IpAddr,
     pub substrate_addrs: Option<HashMap<String, Interface>>,
 }
 
@@ -164,7 +164,16 @@ impl Config {
     pub fn resolve(&self, hostname: &str) -> Option<IpAddr> {
         // TODO: I suppose the resolver table could map a name to another name.
         //       For now that is not supported.
-        self.resolver.hosts.as_ref()?.get(hostname)?.parse().ok()
+        self.resolver.resolve(hostname)
+    }
+}
+
+impl Resolver {
+    /// found in the table, then None is returned.
+    pub fn resolve(&self, hostname: &str) -> Option<IpAddr> {
+        // TODO: I suppose the resolver table could map a name to another name.
+        //       For now that is not supported.
+        self.hosts.as_ref()?.get(hostname)?.parse().ok()
     }
 }
 
@@ -192,7 +201,7 @@ impl ConfigParse {
 
     fn parse(&mut self, ctx: &CompilationCtx) -> Result<Config, CompilationError> {
         let resolver = self.parse_resolver(ctx)?;
-        let nodes = self.parse_nodes(ctx)?;
+        let nodes = self.parse_nodes(&resolver, ctx)?;
 
         // Links if present tie node interfaces together.
         let links = self.parse_links(ctx, &nodes)?;
@@ -298,10 +307,15 @@ impl ConfigParse {
     }
 
     /// Parse all the nodes.<ID> sections. There must be at least one.
-    fn parse_nodes(&self, ctx: &CompilationCtx) -> Result<HashMap<String, Node>, CompilationError> {
+    fn parse_nodes(
+        &self,
+        resolver: &Resolver,
+        ctx: &CompilationCtx,
+    ) -> Result<HashMap<String, Node>, CompilationError> {
         if !self.ctoml.contains_key("nodes") {
             return Err(err_config!("missing section: nodes"));
         }
+        let mut zpr_addr_idx = HashSet::new();
         let nodes = self.ctoml["nodes"]
             .as_table()
             .ok_or(err_config!("error reading nodes section"))?;
@@ -317,6 +331,7 @@ impl ConfigParse {
                 node_id,
                 v.as_table()
                     .ok_or(err_config!("node {} is not a table", node_id))?,
+                resolver,
                 ctx,
             )?;
 
@@ -332,6 +347,16 @@ impl ConfigParse {
                     }
                 }
             }
+
+            // Check that the node's ZPR address is unique across all nodes.
+            if zpr_addr_idx.contains(&n.zpr_address) {
+                return Err(err_config!(
+                    "duplicate ZPR address '{}' for node '{}'",
+                    n.zpr_address,
+                    node_id
+                ));
+            }
+            zpr_addr_idx.insert(n.zpr_address.clone());
 
             node_map.insert(node_id.to_string(), n);
         }
@@ -733,20 +758,23 @@ mod test {
         let tstr = r#"
         [nodes]
         [nodes.n0]
-        zpr_address = "foo.zpr"
+        zpr_address = "fd5a:5052:90de::1"
         provider = [["zpr.foo", "bar"], ["baz", 99]]
         [nodes.n0.substrate_addrs]
         "eth0" = "1.2.3.4:2000"
         "eth1" = "foo.addr:9000"
         "#;
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let nodes = cparser.parse_nodes(&CompilationCtx::new(false, false));
+        let nodes = cparser.parse_nodes(&Resolver::default(), &CompilationCtx::new(false, false));
         assert!(nodes.is_ok(), "{:?}", nodes);
         let nodes = nodes.unwrap();
         assert_eq!(nodes.len(), 1);
         let n0 = nodes.get("n0").unwrap();
         assert_eq!(n0.id, "n0");
-        assert_eq!(n0.zpr_address, "foo.zpr");
+        assert_eq!(
+            n0.zpr_address,
+            "fd5a:5052:90de::1".parse::<IpAddr>().unwrap()
+        );
         let sub_addrs = n0.substrate_addrs.as_ref().unwrap();
         assert_eq!(sub_addrs.len(), 2);
         for (ifname, iface) in sub_addrs {
@@ -776,13 +804,13 @@ mod test {
         [nodes]
 
         [nodes.n0]
-        zpr_address = "foo.zpr"
+        zpr_address = "fd5a:5052:90de::1"
         provider = [["zpr.foo", "bar"], ["baz", 99]]
         [nodes.n0.substrate_addrs]
         "i0" = "1.2.3.4:2000"
 
         [nodes.n1]
-        zpr_address = "fee.zpr"
+        zpr_address = "fd5a:5052:90de::2"
         provider = [["zpr.foo", "barf"], ["buz", 100]]
         [nodes.n1.substrate_addrs]
         "j0" = "4.5.6.7:2000"
@@ -793,7 +821,7 @@ mod test {
 
         let ctx = CompilationCtx::new(false, false);
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let nodes = cparser.parse_nodes(&ctx);
+        let nodes = cparser.parse_nodes(&Resolver::default(), &ctx);
         assert!(nodes.is_ok(), "{:?}", nodes);
         let nodes = nodes.unwrap();
         assert_eq!(nodes.len(), 2);
@@ -824,7 +852,7 @@ mod test {
         [nodes]
 
         [nodes.n0]
-        zpr_address = "foo.zpr"
+        zpr_address = "fd5a:5052:90de::1"
         provider = [["zpr.foo", "bar"], ["baz", 99]]
         [nodes.n0.substrate_addrs]
         "i0" = "1.2.3.4:2000"
@@ -832,7 +860,7 @@ mod test {
         "i2" = "1.2.3.6:2000"
 
         [nodes.n1]
-        zpr_address = "fee.zpr"
+        zpr_address = "fd5a:5052:90de::2"
         provider = [["zpr.foo", "barf"], ["buz", 100]]
         [nodes.n1.substrate_addrs]
         "j0" = "4.5.6.7:2000"
@@ -845,7 +873,7 @@ mod test {
 
         let ctx = CompilationCtx::new(false, false);
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let nodes = cparser.parse_nodes(&ctx);
+        let nodes = cparser.parse_nodes(&Resolver::default(), &ctx);
         assert!(nodes.is_ok(), "{:?}", nodes);
         let nodes = nodes.unwrap();
         assert_eq!(nodes.len(), 2);
@@ -868,7 +896,7 @@ mod test {
         [nodes]
 
         [nodes.n0]
-        zpr_address = "foo.zpr"
+        zpr_address = "fd5a:5052:90de::1"
         provider = [["zpr.foo", "bar"], ["baz", 99]]
         [nodes.n0.substrate_addrs]
         "i0" = "1.2.3.4:2000"
@@ -876,7 +904,7 @@ mod test {
         "i2" = "1.2.3.6:2000"
 
         [nodes.n1]
-        zpr_address = "fee.zpr"
+        zpr_address = "fd5a:5052:90de::2"
         provider = [["zpr.foo", "barf"], ["buz", 100]]
         [nodes.n1.substrate_addrs]
         "j0" = "4.5.6.7:2000"
@@ -890,7 +918,7 @@ mod test {
 
         let ctx = CompilationCtx::new(false, false);
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let nodes = cparser.parse_nodes(&ctx);
+        let nodes = cparser.parse_nodes(&Resolver::default(), &ctx);
         assert!(nodes.is_ok(), "{:?}", nodes);
         let nodes = nodes.unwrap();
         assert_eq!(nodes.len(), 2);
@@ -922,14 +950,14 @@ mod test {
         [nodes]
 
         [nodes.n0]
-        zpr_address = "foo.zpr"
+        zpr_address = "fd5a:5052:90de::1"
         provider = [["zpr.foo", "bar"], ["baz", 99]]
 
         [nodes.n0.substrate_addrs]
         "i0" = "1.2.3.4:2000"
 
         [nodes.n1]
-        zpr_address = "fee.zpr"
+        zpr_address = "fd5a:5052:90de::2"
         provider = [["zpr.foo", "barf"], ["buz", 100]]
 
         [nodes.n1.substrate_addrs]
@@ -937,7 +965,7 @@ mod test {
         "j1" = "4.5.6.8:2000"
 
         [nodes.n2]
-        zpr_address = "fee.zpr"
+        zpr_address = "fd5a:5052:90de::3"
         provider = [["zpr.foo", "barf"], ["buz", 100]]
 
         [nodes.n2.substrate_addrs]
@@ -957,7 +985,7 @@ mod test {
 
         let ctx = CompilationCtx::new(false, false);
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let nodes = cparser.parse_nodes(&ctx);
+        let nodes = cparser.parse_nodes(&Resolver::default(), &ctx);
         assert!(nodes.is_ok(), "{:?}", nodes);
         let nodes = nodes.unwrap();
         assert_eq!(nodes.len(), 3);
@@ -984,14 +1012,14 @@ mod test {
         [nodes]
         [nodes.visaservice]
         key = "somekey"
-        zpr_address = "foo.zpr"
+        zpr_address = "fd5a:5052:90de::1"
         provider = [["zpr.foo", "bar"], ["baz", 99]]
         interfaces = ["eth0", "eth1"]
         eth0.netaddr = "1.2.3.4:2000"
         eth1.netaddr = "foo.addr:9000"
         "#;
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let nodes = cparser.parse_nodes(&CompilationCtx::new(false, false));
+        let nodes = cparser.parse_nodes(&Resolver::default(), &CompilationCtx::new(false, false));
         assert!(nodes.is_err());
         let err = nodes.unwrap_err();
         assert!(err.to_string().contains("is reserved"));

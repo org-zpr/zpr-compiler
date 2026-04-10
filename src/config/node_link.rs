@@ -1,6 +1,7 @@
 //! Parsers for the `nodes` and `links` TOML sections and their sub-structures.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 
 use toml::Table;
 
@@ -8,7 +9,7 @@ use crate::context::CompilationCtx;
 use crate::err_config;
 use crate::errors::CompilationError;
 
-use super::{Interface, Link, Node, parse_attribute_tuples, parse_provider};
+use super::{Interface, Link, Node, Resolver, parse_attribute_tuples, parse_provider};
 
 fn require_key(ctx: &str, table: &Table, key: &str) -> Result<(), CompilationError> {
     if !table.contains_key(key) {
@@ -49,14 +50,32 @@ fn warn_unknown_link_property(link: &Table, ctx: &CompilationCtx) -> Result<(), 
 pub(super) fn parse_node(
     node_id: &str,
     node: &Table,
+    resolver: &Resolver,
     ctx: &CompilationCtx,
 ) -> Result<Node, CompilationError> {
     warn_unknown_node_property(node, ctx)?;
     require_key(&format!("nodes.{}", node_id), node, "zpr_address")?;
-    let zpr_address = node["zpr_address"]
+    let zpr_address_str = node["zpr_address"]
         .as_str()
         .ok_or(err_config!("node {} invalid zpr_address", node_id))?
         .to_string();
+
+    let zpr_address = match zpr_address_str.parse::<IpAddr>() {
+        Ok(ip) => ip,
+        Err(e) => {
+            // Not an IP address, so try to resolve as a hostname.
+            if let Some(ip) = resolver.resolve(&zpr_address_str) {
+                ip
+            } else {
+                return Err(err_config!(
+                    "node {} has invalid zpr_address '{}': {}",
+                    node_id,
+                    zpr_address_str,
+                    e
+                ));
+            }
+        }
+    };
 
     let provider = parse_provider(&format!("node {}", node_id), node)?;
 

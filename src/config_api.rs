@@ -674,9 +674,7 @@ impl ConfigApi {
         let key = key_path[2];
         match key {
             "provider" => Some(ConfigItem::AttrList(node.provider.clone())),
-            "zpr_addr" => self
-                .resolve_hostname(&node.zpr_address)
-                .or_else(|| Some(ConfigItem::StrVal(node.zpr_address.clone()))),
+            "zpr_addr" => Some(ConfigItem::StrVal(node.zpr_address.to_string())),
             "interfaces" => {
                 if key_path.len() == 3 {
                     // nodes/<id>/interfaces -> list of interface "names"

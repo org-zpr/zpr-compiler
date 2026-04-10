@@ -4,6 +4,7 @@
 
 use core::fmt;
 use std::collections::HashMap;
+use std::net::IpAddr;
 
 use crate::errors::CompilationError;
 use crate::protocols::{PortSpec, Protocol};
@@ -18,6 +19,7 @@ pub struct Fabric {
     bootstrap_records: HashMap<String, Vec<u8>>, // bootstrap records maps a CN to a der-encoded public key
     pub services: Vec<FabricService>,
     pub nodes: Vec<FabricNode>,
+    pub links: Vec<FabricLink>,
 }
 
 #[allow(dead_code)]
@@ -38,7 +40,26 @@ pub struct FabricService {
 #[derive(Debug, Clone)]
 pub struct FabricNode {
     pub node_id: String,
+    pub zpr_addr: IpAddr,
     pub provider_attrs: Vec<Attribute>, // parsed out of config::Node.provider
+    pub substrate_addrs: Option<HashMap<String, SubstrateAddr>>, // substrate addrs parsed out of config::Node.substrate
+}
+
+#[derive(Debug, Clone)]
+pub struct FabricLink {
+    pub link_id: String,
+    pub node_a: NodeLinkAddr,
+    pub node_b: NodeLinkAddr,
+    pub link_attrs: Vec<Attribute>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeLinkAddr(pub IpAddr, pub SubstrateAddr); // NODE "ID" -- for now is ZPR address, SUBSTRATE_ADDR
+
+#[derive(Debug, Clone)]
+pub struct SubstrateAddr {
+    pub host: String, // could be an IP
+    pub port: u16,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -242,8 +263,6 @@ impl Fabric {
             }
         }
 
-        println!("XXX fabric::add_trusted_service {id}");
-
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: id.to_string(),
@@ -311,10 +330,6 @@ impl Fabric {
             }
         }
         let fabric_id = self.fabric_id_from_config_id_and_count(id, svc_instance);
-        println!(
-            "XXX fabric::add_service {fabric_id} with provider attrs: {:?}",
-            attrs
-        );
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: fabric_id.clone(),
@@ -363,7 +378,6 @@ impl Fabric {
             }
         }
         let fabric_id = self.fabric_id_from_config_id_and_count(id, svc_instance);
-        println!("XXX fabric::add_buildin_service: {fabric_id}");
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: fabric_id.clone(),
@@ -399,6 +413,15 @@ impl Fabric {
     /// Add a node to the fabric
     pub fn push_node(&mut self, node: FabricNode) {
         self.nodes.push(node);
+    }
+
+    /// Helper to run through the nodes and return the one with matching `node_id` or None.
+    pub fn get_node(&self, node_id: &str) -> Option<&FabricNode> {
+        self.nodes.iter().find(|n| n.node_id == node_id)
+    }
+
+    pub fn push_link(&mut self, link: FabricLink) {
+        self.links.push(link);
     }
 
     /// Add a condition (aka policy aka rule) to an existing service specified by the

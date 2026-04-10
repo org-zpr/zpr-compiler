@@ -10,7 +10,7 @@ use crate::config_api::{ConfigApi, ConfigItem};
 use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
-use crate::fabric::{Fabric, FabricNode, PLine};
+use crate::fabric::{Fabric, FabricLink, FabricNode, NodeLinkAddr, PLine, SubstrateAddr};
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
 use crate::protocols::{PortSpec, Protocol, ZPR_OAUTH_RSA, ZPR_VALIDATION_2};
 use crate::ptypes::{AllowClause, Class, ClassFlavor, FPos, Policy};
@@ -30,7 +30,11 @@ pub struct WeavingContext {
     used_trusted_services: HashSet<String>,
 }
 
-/// Weave produces the fabric from the ZPL and Configuration data structures,
+/// Weave produces the fabric from the ZPL and Configuration data structures.
+/// Note that the all the smarts for building the "fabric" intermediate representation
+/// are here in the weaver.
+///
+/// Access to the configuration is via the [ConfigApi].
 pub fn weave(
     comp: &Compilation,
     config: &ConfigApi,
@@ -74,6 +78,7 @@ pub fn weave(
 
     weaver.init_services(comp, &class_idx, policy, config, ctx)?;
     weaver.init_nodes(config, ctx)?;
+    weaver.add_topology(config, ctx)?;
     weaver.add_client_deny_policies(comp, &class_idx, policy, config)?;
     weaver.add_client_allow_policies(comp, &class_idx, policy, config)?;
     // By the time we get here, we have resolved all attributes and so know which trusted
@@ -645,9 +650,36 @@ impl Weaver {
             let attr_map = squash_attributes(&resolved_node_attrs, &FPos::default())?;
             let provider_attrs = attr_map.into_values().collect::<Vec<Attribute>>();
 
+            // Gather the nodes named substrate addrs if any.
+            let substrates = match config.get(&format!("zpr/nodes/{node_key}/interfaces")) {
+                Some(ConfigItem::KeySet(if_ids)) => {
+                    let mut interfaces = HashMap::new();
+                    for if_id in &if_ids {
+                        match config.get(&format!("zpr/nodes/{node_key}/interfaces/{if_id}")) {
+                            Some(ConfigItem::NetAddr(host, port)) => {
+                                let if_addr = SubstrateAddr {
+                                    host: host.clone(),
+                                    port: port,
+                                };
+                                interfaces.insert(if_id.to_string(), if_addr);
+                            }
+                            _ => {
+                                return Err(CompilationError::ConfigError(format!(
+                                    "interface {if_id} for node {node_key} must be a network address",
+                                )));
+                            }
+                        }
+                    }
+                    Some(interfaces)
+                }
+                _ => None,
+            };
+
             let fabn = FabricNode {
                 node_id: node_key.to_string(),
+                zpr_addr: naddr.into(),
                 provider_attrs: provider_attrs.clone(),
+                substrate_addrs: substrates,
             };
 
             self.fabric.push_node(fabn);
@@ -660,7 +692,7 @@ impl Weaver {
                     "visa service must be added before add_node is called".to_string(),
                 ))?;
             let vs_provider_attrs = vs.provider_attrs.clone();
-            let svc_name = format!("/zpr/{}/vss", node_key);
+            let svc_name = format!("zpr/{}/vss", node_key);
 
             // There cannot be a service with this id already.
             if self.fabric.has_service(&svc_name) {
@@ -688,6 +720,74 @@ impl Weaver {
                 &pline,
             )?;
         }
+        Ok(())
+    }
+
+    fn get_node_link_addr(
+        &self,
+        node_key: &str,
+        if_id: &str,
+    ) -> Result<NodeLinkAddr, CompilationError> {
+        let node = self
+            .fabric
+            .get_node(node_key)
+            .ok_or(CompilationError::BuildError(format!(
+                "linked node {node_key} not found in fabric",
+            )))?;
+        let if_addr = node
+            .substrate_addrs
+            .as_ref()
+            .ok_or(CompilationError::ConfigError(format!(
+                "node {node_key} is part of a link but has no substrate interfaces defined",
+            )))?
+            .get(if_id)
+            .ok_or(CompilationError::ConfigError(format!(
+                "interface {if_id} not found for linked node {node_key}",
+            )))?;
+
+        Ok(NodeLinkAddr(node.zpr_addr.clone(), if_addr.clone()))
+    }
+
+    /// Uses the Fabric nodes, so must be called after setting up the nodes in the fabric.
+    fn add_topology(
+        &mut self,
+        config: &ConfigApi,
+        _ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
+        let link_ids = match config.get("zpr/links") {
+            Some(ConfigItem::KeySet(link_ids)) => link_ids,
+            _ => {
+                return Err(CompilationError::ConfigError(
+                    "no links defined in configuration".to_string(),
+                ));
+            }
+        };
+        for link_id in &link_ids {
+            let link_tuple = match config.get(&format!("zpr/links/{link_id}")) {
+                Some(ConfigItem::KeySet(tup)) => tup,
+                _ => {
+                    return Err(CompilationError::ConfigError(format!(
+                        "missing or invalid link: {link_id}",
+                    )));
+                }
+            };
+            // Expect: (node1, ifname1, node2, ifname2)
+            if link_tuple.len() != 4 {
+                return Err(CompilationError::BuildError(format!(
+                    "link {link_id} must be a tuple of (node1, ifname1, node2, ifname2)",
+                )));
+            }
+
+            let flink = FabricLink {
+                link_id: link_id.to_string(),
+                node_a: self.get_node_link_addr(&link_tuple[0], &link_tuple[1])?,
+                node_b: self.get_node_link_addr(&link_tuple[2], &link_tuple[3])?,
+                link_attrs: vec![], // TODO: support link attributes in config
+            };
+
+            self.fabric.push_link(flink);
+        }
+
         Ok(())
     }
 

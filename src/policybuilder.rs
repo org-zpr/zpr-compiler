@@ -105,6 +105,7 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
 
         self.set_connects(fabric)?;
         self.set_policies(fabric)?;
+        self.set_topology(fabric)?;
         self.set_default_auth(fabric, ctx)?;
         self.set_bootstrap(fabric, ctx)?;
         self.set_auth_services(fabric, ctx)?;
@@ -253,6 +254,22 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                     &policy.zpl_line.to_string(),
                 );
             }
+        }
+        Ok(())
+    }
+
+    fn set_topology(&mut self, fabric: &Fabric) -> Result<(), CompilationError> {
+        for link in &fabric.links {
+            self.policy_writer.write_link(
+                &link.link_id,
+                &link.node_a.0,
+                &link.node_a.1.host,
+                link.node_a.1.port,
+                &link.node_b.0,
+                &link.node_b.1.host,
+                link.node_b.1.port,
+                &link.link_attrs,
+            );
         }
         Ok(())
     }
