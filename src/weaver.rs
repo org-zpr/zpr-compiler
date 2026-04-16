@@ -745,7 +745,10 @@ impl Weaver {
                 "interface {if_id} not found for linked node {node_key}",
             )))?;
 
-        Ok(NodeLinkAddr { zpr_addr: node.zpr_addr.clone(), substrate: if_addr.clone() })
+        Ok(NodeLinkAddr {
+            zpr_addr: node.zpr_addr.clone(),
+            substrate: if_addr.clone(),
+        })
     }
 
     /// Uses the Fabric nodes, so must be called after setting up the nodes in the fabric.
