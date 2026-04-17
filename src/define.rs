@@ -239,18 +239,23 @@ where
                         tok.col,
                     ));
                 }
+                if optional {
+                    return Err(CompilationError::DefineStmtParseError(
+                        "OPTIONAL is only valid for tag attributes".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
                 let attr = if multiple || value.len() > 1 {
                     Attribute::tuple(name)
                         .multi()
                         .values(value.to_vec())
-                        .optional(optional)
                         .domain_hint(class.flavor.into())
                         .build()?
                 } else {
                     Attribute::tuple(name)
                         .single()
                         .values(value.to_vec())
-                        .optional(optional)
                         .domain_hint(class.flavor.into())
                         .build()?
                 };
@@ -272,8 +277,14 @@ where
                         .optional(optional)
                         .build()?
                 } else {
+                    if optional {
+                        return Err(CompilationError::DefineStmtParseError(
+                            "OPTIONAL is only valid for tag attributes".to_string(),
+                            tok.line,
+                            tok.col,
+                        ));
+                    }
                     Attribute::tuple(s)
-                        .optional(optional)
                         .domain_hint(class.flavor.into())
                         .multi_if(multiple)
                         .build()?
@@ -386,6 +397,7 @@ mod test {
             "define marketing-emp as a user with tag multiple foo",
             "define marketing-emp as a user with tags multiple foo",
             "define marketing-emp as a user with tag and foo",
+            "define marketing-emp as a user with optional id",
         ];
         let ctx = CompilationCtx::default();
         for statement in invalids {
@@ -565,20 +577,31 @@ mod test {
         assert_eq!(class.aka, "mice");
     }
 
-    // The "optional" modifier must set attr.optional = true on the resulting
-    // attribute; that flag is separate from multi-valued and must be checked
-    // independently.
+    // The "optional" modifier on a tag must set attr.optional = true; it is only
+    // valid for tag attributes, not plain named attributes.
     #[test]
-    fn test_optional_attr_flag() {
-        let statement = "define employee as a user with optional nickname";
+    fn test_optional_tag_flag() {
+        let statement = "define employee as a user with optional tag nickname";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(statement, &ctx).unwrap();
         let class = parse_define(&tz.tokens, 1).unwrap();
         assert_eq!(class.with_attrs.len(), 1);
         assert!(
             class.with_attrs[0].optional,
-            "attribute should be marked optional"
+            "tag attribute should be marked optional"
         );
+    }
+
+    // "optional" before a plain (non-tag) attribute must be rejected.
+    #[test]
+    fn test_optional_on_non_tag_errors() {
+        let statement = "define employee as a user with optional nickname";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        match parse_define(&tz.tokens, 1) {
+            Ok(_) => panic!("should have failed: 'optional' on non-tag attribute"),
+            Err(e) => assert!(e.to_string().contains("OPTIONAL"), "unexpected error: {e}"),
+        }
     }
 
     // The "multiple" modifier must produce a multi-valued attribute; that flag

@@ -1,5 +1,6 @@
 // Extracted from ZRFC 15.4
 // Not included: conditions and limits
+// Reserved for future use: 'link', 'links', 'over', 'from', 'without'.
 
 <zpl-policy> ::= <statement>*
 
@@ -15,7 +16,7 @@
 <p-statement> ::= <subject-clause> "to" "access" <object-clause>
                   (","? "and" <signal-clause>)? "." <eol>
 
-<subject-clause> ::= <user-spec> | <service-spec> |
+<subject-clause> ::= <user-spec> | <service-spec> | <endpoint-spec> |
                      <user-spec> "on" <endpoint-spec> | <service-spec> "on" <endpoint-spec>
 
 <object-clause> ::= <service-spec> | <service-spec> "on" <endpoint-spec>
@@ -34,8 +35,8 @@
 
 <and-token> := "and" | ","
 
-<attribute-spec> ::= <name> |
-                    "optional" ("tag" | "tags") <name> (<and-token> <name>)*
+<attribute-spec> ::= "multiple"? <name> |
+                    "optional"? ("tag" | "tags") <name> (<and-token> <name>)*
 
 <user-spec> ::= <attribute-expr>* <user-class-name>
 
@@ -90,7 +91,7 @@
 
 <quoted-string> ::= <single-quoted-string> | <double-quoted-string>
 
-<single-quoted-string> ::= "'" <single-quote-chars> "'"
+<single-quoted-string> ::= <single-quote> <single-quote-chars> <single-quote>
 
 <double-quoted-string> ::= '"' <double-quote-chars> '"'
 
@@ -107,6 +108,8 @@
 <float> ::= <digit>+ "." <digit>+
 
 <value-set> ::= "{" <value> ("," <value>)* "}"
+
+<single-quote> := "'" | "`"
 
 <letter> ::= "a".."z" | "A".."Z"
 
