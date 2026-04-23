@@ -348,11 +348,16 @@ impl ConfigApi {
     // - zpr/nodes/<id> -> returns (?)
     // - zpr/nodes/<id>/zpr_addr -> returns zpr address (string?) - pre resolving (ie, so might be a domain name that needs resolving)
     // - zpr/nodes/<id>/provider -> returns list of k/v tuples
+    // - zpr/nodes/<id>/interfaces -> returns list of interface "names" (KeySet)
+    // - zpr/nodes/<id>/interfaces/<ifname> -> returns substrate netaddr (host & port) for the interface. Host may be a hostname or IP addr.
     //
     // - zpr/visa_services -> returns list of visa service IDs (KeySet)
     // - zpr/visa_services/<id> -> returns (?)
-    // - zpr/visa_services/<id>/dock_node_id -> returns (docking node id)
+    // - zpr/visa_services/<id>/dock_node_id -> returns (docking node i or none)
     //
+    // - zpr/links -> list of link identifiers (KeySet)
+    // - zpr/links/<id> -> KeySet of (node1, if1, node2, if2)
+    // - zpr/links/<id>/attributes -> list of k/v tuples (AttrList)
     //
     pub fn get(&self, key: &str) -> Option<ConfigItem> {
         if key.is_empty() {
@@ -455,6 +460,7 @@ impl ConfigApi {
                 self.resolve_hostname(key_path[1])
             }
             "nodes" => self.get_zpr_nodes(key_path),
+            "links" => self.get_zpr_links(key_path),
             "visa_services" => {
                 if key_path.len() == 1 {
                     // visa_services -> list of visa service IDs
@@ -623,6 +629,8 @@ impl ConfigApi {
     }
 
     /// `key_path` here is everything after "zpr/visa_services"
+    ///
+    /// Note that `dock_node_id` may return None if not set in config.
     fn get_zpr_visa_service(&self, key_path: Vec<&str>) -> Option<ConfigItem> {
         if key_path.len() == 1 {
             // visa_services/<id> -> <id>
@@ -633,9 +641,13 @@ impl ConfigApi {
         }
         let key = key_path[1];
         match key {
-            "dock_node_id" => Some(ConfigItem::StrVal(
-                self.config.visa_service.dock_node_id.clone(),
-            )),
+            "dock_node_id" => {
+                if let Some(dock_node_id) = &self.config.visa_service.dock_node_id {
+                    Some(ConfigItem::StrVal(dock_node_id.clone()))
+                } else {
+                    None
+                }
+            }
             _ => panic!("unknown key {}", key),
         }
     }
@@ -662,30 +674,55 @@ impl ConfigApi {
         let key = key_path[2];
         match key {
             "provider" => Some(ConfigItem::AttrList(node.provider.clone())),
-            "zpr_addr" => self
-                .resolve_hostname(&node.zpr_address)
-                .or_else(|| Some(ConfigItem::StrVal(node.zpr_address.clone()))),
+            "zpr_addr" => Some(ConfigItem::StrVal(node.zpr_address.to_string())),
             "interfaces" => {
                 if key_path.len() == 3 {
-                    // nodes/<id>/interfaces -> list of interface names
-                    return Some(ConfigItem::KeySet(
-                        node.interfaces
-                            .iter()
-                            .map(|iface| iface.name.clone())
-                            .collect(),
-                    ));
+                    // nodes/<id>/interfaces -> list of interface "names"
+                    if let Some(ref ifaces) = node.substrate_addrs {
+                        return Some(ConfigItem::KeySet(ifaces.keys().cloned().collect()));
+                    } else {
+                        return None;
+                    }
+                } else if key_path.len() > 3 {
+                    let ifname = key_path[3];
+                    // The only attribute on an interface is the netaddr (host & port), so we return that here ignoring
+                    // any further key path.
+                    let iface = node.substrate_addrs.as_ref()?.get(ifname)?;
+                    // The hostname value may be a mapping.
+                    let hostname = match self.config.resolve(&iface.host) {
+                        Some(mapping) => mapping.to_string(),
+                        None => iface.host.clone(),
+                    };
+                    Some(ConfigItem::NetAddr(hostname, iface.port))
+                } else {
+                    None
                 }
-                let ifname = key_path[3];
-                // The only attribute on an interface is the netaddr, so we return that here ignoring
-                // any further key path.
-                let iface = node.interfaces.iter().find(|iface| iface.name == ifname)?;
-                // The hostname value may be a mapping.
-                let hostname = match self.config.resolve(&iface.host) {
-                    Some(mapping) => mapping.to_string(),
-                    None => iface.host.clone(),
-                };
-                Some(ConfigItem::NetAddr(hostname, iface.port))
             }
+            _ => panic!("unknown key: {}", key),
+        }
+    }
+
+    fn get_zpr_links(&self, key_path: Vec<&str>) -> Option<ConfigItem> {
+        if key_path.len() == 1 {
+            // links -> list of link IDs
+            return Some(ConfigItem::KeySet(
+                self.config.links.keys().cloned().collect(),
+            ));
+        }
+        let link_id = key_path[1];
+        let link = self.config.links.get(link_id)?;
+        if key_path.len() == 2 {
+            // links/<id> -> 4-tuple of (node1, if1, node2, if2)
+            return Some(ConfigItem::KeySet(vec![
+                link.peer_a_id.clone(),
+                link.peer_a_interface.clone(),
+                link.peer_b_id.clone(),
+                link.peer_b_interface.clone(),
+            ]));
+        }
+        let key = key_path[2];
+        match key {
+            "attributes" => Some(ConfigItem::AttrList(link.attributes.clone())),
             _ => panic!("unknown key: {}", key),
         }
     }
@@ -709,10 +746,11 @@ mod test {
         [nodes.n0]
         key = "none"
         zpr_address = "node.zpr"
-        interfaces = [ "in1", "in2" ]
-        in1.netaddr = "127.0.0.1:5000"
-        in2.netaddr = "foo.bah:5000"
         provider = [["foo", "fee"]]
+
+        [nodes.n0.substrate_addrs]
+        in1 = "127.0.0.1:5000"
+        in2 = "foo.bah:5000"
 
         [visa_service]
         dock_node = "n0"
@@ -744,10 +782,8 @@ mod test {
             api.get("zpr/nodes/n0/zpr_addr").unwrap(),
             ConfigItem::StrVal("fd5a:5052:90de::1".to_string())
         );
-        assert_eq!(
-            api.get("zpr/nodes/n0/interfaces").unwrap().to_string(),
-            "[in1, in2]"
-        );
+        let ifnames = api.get("zpr/nodes/n0/interfaces").unwrap().to_string();
+        assert!(ifnames == "[in1, in2]" || ifnames == "[in2, in1]",);
         {
             let (poe_host, poe_port) = match api.get("zpr/nodes/n0/interfaces/in1/netaddr").unwrap()
             {
@@ -844,6 +880,186 @@ mod test {
         let item = ConfigItem::from_protocol(&proto);
         let reconstituted = item.try_into_protocol().unwrap();
         assert_eq!(proto, reconstituted);
+    }
+
+    fn links_api_config() -> &'static str {
+        r#"
+        [resolver]
+        order = [ "hosts", "dns" ]
+
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["endpoint.zpr.adapter.cn", "n0.zpr.org"]]
+
+        [nodes.n0.substrate_addrs]
+        eth0 = "10.0.0.1:5000"
+
+        [nodes.n1]
+        zpr_address = "fd5a:5052:90de::2"
+        provider = [["endpoint.zpr.adapter.cn", "n1.zpr.org"]]
+
+        [nodes.n1.substrate_addrs]
+        eth0 = "10.0.0.2:5000"
+        eth1 = "10.0.1.2:5001"
+
+        [links.link0]
+        peers = [{node="n0"}, {node="n1", interface="eth0"}]
+        attributes = [["zpr.cost", "10"], ["location", "us"]]
+
+        [visa_service]
+        dock_node = "n0"
+        "#
+    }
+
+    #[test]
+    fn test_get_zpr_links_list() {
+        let ctx = CompilationCtx::default();
+        let api =
+            ConfigApi::new_from_toml_content(links_api_config(), Path::new(""), &ctx).unwrap();
+
+        let item = api.get("zpr/links").unwrap();
+        match item {
+            ConfigItem::KeySet(keys) => {
+                assert_eq!(keys.len(), 1);
+                assert_eq!(keys[0], "link0");
+            }
+            _ => panic!("expected KeySet"),
+        }
+    }
+
+    #[test]
+    fn test_get_zpr_links_by_id() {
+        let ctx = CompilationCtx::default();
+        let api =
+            ConfigApi::new_from_toml_content(links_api_config(), Path::new(""), &ctx).unwrap();
+
+        let item = api.get("zpr/links/link0").unwrap();
+        match item {
+            ConfigItem::KeySet(tuple) => {
+                assert_eq!(tuple.len(), 4);
+                assert_eq!(tuple[0], "n0");
+                assert_eq!(tuple[1], "eth0");
+                assert_eq!(tuple[2], "n1");
+                assert_eq!(tuple[3], "eth0");
+            }
+            _ => panic!("expected KeySet"),
+        }
+    }
+
+    #[test]
+    fn test_get_zpr_links_unknown_id_returns_none() {
+        let ctx = CompilationCtx::default();
+        let api =
+            ConfigApi::new_from_toml_content(links_api_config(), Path::new(""), &ctx).unwrap();
+
+        assert!(api.get("zpr/links/nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_get_zpr_links_attributes() {
+        let ctx = CompilationCtx::default();
+        let api =
+            ConfigApi::new_from_toml_content(links_api_config(), Path::new(""), &ctx).unwrap();
+
+        let item = api.get("zpr/links/link0/attributes").unwrap();
+        match item {
+            ConfigItem::AttrList(attrs) => {
+                assert_eq!(attrs.len(), 2);
+                assert!(attrs.contains(&("zpr.cost".to_string(), "10".to_string())));
+                assert!(attrs.contains(&("location".to_string(), "us".to_string())));
+            }
+            _ => panic!("expected AttrList"),
+        }
+    }
+
+    #[test]
+    fn test_get_zpr_links_no_attributes() {
+        let cfg = r#"
+        [resolver]
+        order = [ "hosts", "dns" ]
+
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["endpoint.zpr.adapter.cn", "n0.zpr.org"]]
+
+        [nodes.n0.substrate_addrs]
+        eth0 = "10.0.0.1:5000"
+
+        [nodes.n1]
+        zpr_address = "fd5a:5052:90de::2"
+        provider = [["endpoint.zpr.adapter.cn", "n1.zpr.org"]]
+
+        [nodes.n1.substrate_addrs]
+        eth0 = "10.0.0.2:5000"
+
+        [links.bare]
+        peers = [{node="n0"}, {node="n1"}]
+
+        [visa_service]
+        dock_node = "n0"
+        "#;
+        let ctx = CompilationCtx::default();
+        let api = ConfigApi::new_from_toml_content(cfg, Path::new(""), &ctx).unwrap();
+
+        let item = api.get("zpr/links/bare/attributes").unwrap();
+        match item {
+            ConfigItem::AttrList(attrs) => {
+                // links always get a default zpr.cost attribute if not specified
+                assert_eq!(attrs.len(), 1);
+                assert_eq!(attrs[0], ("zpr.cost".to_string(), "1".to_string()));
+            }
+            _ => panic!("expected AttrList"),
+        }
+    }
+
+    #[test]
+    fn test_get_zpr_links_multiple() {
+        let cfg = r#"
+        [resolver]
+        order = [ "hosts", "dns" ]
+
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["endpoint.zpr.adapter.cn", "n0.zpr.org"]]
+
+        [nodes.n0.substrate_addrs]
+        eth0 = "10.0.0.1:5000"
+
+        [nodes.n1]
+        zpr_address = "fd5a:5052:90de::2"
+        provider = [["endpoint.zpr.adapter.cn", "n1.zpr.org"]]
+
+        [nodes.n1.substrate_addrs]
+        eth0 = "10.0.0.2:5000"
+
+        [nodes.n2]
+        zpr_address = "fd5a:5052:90de::3"
+        provider = [["endpoint.zpr.adapter.cn", "n2.zpr.org"]]
+
+        [nodes.n2.substrate_addrs]
+        eth0 = "10.0.0.3:5000"
+
+        [links.link0]
+        peers = [{node="n0"}, {node="n1"}]
+
+        [links.link1]
+        peers = [{node="n1"}, {node="n2"}]
+
+        [visa_service]
+        dock_node = "n0"
+        "#;
+        let ctx = CompilationCtx::default();
+        let api = ConfigApi::new_from_toml_content(cfg, Path::new(""), &ctx).unwrap();
+
+        let item = api.get("zpr/links").unwrap();
+        match item {
+            ConfigItem::KeySet(keys) => {
+                assert_eq!(keys.len(), 2);
+                assert!(keys.contains(&"link0".to_string()));
+                assert!(keys.contains(&"link1".to_string()));
+            }
+            _ => panic!("expected KeySet"),
+        }
     }
 
     #[test]

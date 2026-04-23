@@ -4,24 +4,22 @@
 
 use core::fmt;
 use std::collections::HashMap;
-use std::net::Ipv6Addr;
+use std::net::IpAddr;
 
-use crate::config_api::{ConfigApi, ConfigItem};
 use crate::errors::CompilationError;
-use crate::fabric_util::{squash_attributes, vec_to_attributes};
 use crate::protocols::{PortSpec, Protocol};
-use crate::ptypes::{FPos, Signal};
-use crate::zpl;
+use crate::ptypes::Signal;
 use zpr::policy_types::{Attribute, ServiceType};
 
 /// A service oriented view of the network.
 #[derive(Debug, Clone, Default)]
 pub struct Fabric {
-    pub revision: String,
+    revision: String,
+    default_auth_cert_asn: Vec<u8>, // CA cert for default/builtin trusted auth
+    bootstrap_records: HashMap<String, Vec<u8>>, // bootstrap records maps a CN to a der-encoded public key
     pub services: Vec<FabricService>,
     pub nodes: Vec<FabricNode>,
-    pub default_auth_cert_asn: Vec<u8>, // CA cert for default/builtin trusted auth
-    pub bootstrap_records: HashMap<String, Vec<u8>>, // bootstrap records maps a CN to a der-encoded public key
+    pub links: Vec<FabricLink>,
 }
 
 #[allow(dead_code)]
@@ -42,7 +40,29 @@ pub struct FabricService {
 #[derive(Debug, Clone)]
 pub struct FabricNode {
     pub node_id: String,
+    pub zpr_addr: IpAddr,
     pub provider_attrs: Vec<Attribute>, // parsed out of config::Node.provider
+    pub substrate_addrs: Option<HashMap<String, SubstrateAddr>>, // substrate addrs parsed out of config::Node.substrate
+}
+
+#[derive(Debug, Clone)]
+pub struct FabricLink {
+    pub link_id: String,
+    pub node_a: NodeLinkAddr,
+    pub node_b: NodeLinkAddr,
+    pub link_attrs: Vec<Attribute>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NodeLinkAddr {
+    pub zpr_addr: IpAddr,
+    pub substrate: SubstrateAddr,
+} // NODE "ID" -- for now is ZPR address, SUBSTRATE_ADDR
+
+#[derive(Debug, Clone)]
+pub struct SubstrateAddr {
+    pub host: String, // could be an IP
+    pub port: u16,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -198,6 +218,34 @@ impl fmt::Display for Fabric {
 }
 
 impl Fabric {
+    pub fn set_revision(&mut self, rev: &str) {
+        self.revision = rev.to_string();
+    }
+
+    pub fn get_revision(&self) -> &str {
+        &self.revision
+    }
+
+    pub fn set_default_auth_cert(&mut self, cert_asn: Vec<u8>) {
+        self.default_auth_cert_asn = cert_asn;
+    }
+
+    pub fn get_default_auth_cert(&self) -> Option<&[u8]> {
+        if self.default_auth_cert_asn.is_empty() {
+            None
+        } else {
+            Some(&self.default_auth_cert_asn)
+        }
+    }
+
+    pub fn push_bootstrap_record(&mut self, cn: &str, pubkey_asn: Vec<u8>) {
+        self.bootstrap_records.insert(cn.to_string(), pubkey_asn);
+    }
+
+    pub fn get_bootstrap_records(&self) -> &HashMap<String, Vec<u8>> {
+        &self.bootstrap_records
+    }
+
     /// You must add client services associated with the trusted service before adding a trusted service.
     pub fn add_trusted_service(
         &mut self,
@@ -212,10 +260,12 @@ impl Fabric {
     ) -> Result<(), CompilationError> {
         for s in &self.services {
             if s.config_id == id {
-                // Caller should prevent this.
-                panic!("trusted service {} already exists in the fabric", id);
+                return Err(CompilationError::BuildError(format!(
+                    "cannot add duplicate trusted service: already exists: {id}"
+                )));
             }
         }
+
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: id.to_string(),
@@ -247,9 +297,17 @@ impl Fabric {
         assert!(stype != ServiceType::Undefined); // programming error
         match &stype {
             ServiceType::BuiltIn => {
-                panic!("not allowed to explicity add a BUILTIN service: {}", id)
+                return Err(CompilationError::BuildError(format!(
+                    "illegal add of a BUILTIN service: {}",
+                    id
+                )));
             }
-            ServiceType::Trusted(_) => panic!("use add_trusted_service to add a TRUSTED service"),
+            ServiceType::Trusted(_) => {
+                return Err(CompilationError::BuildError(format!(
+                    "add_service cannot add a TRUSTED service -- use add_trusted_service('{}')",
+                    id
+                )));
+            }
             _ => {}
         }
         if stype == ServiceType::Regular && id.starts_with("/zpr") {
@@ -355,101 +413,18 @@ impl Fabric {
         self.services.iter().find(|s| s.fabric_id == fabric_id)
     }
 
-    pub fn update_service(
-        &mut self,
-        svc_id: &str,
-        mutator: impl FnOnce(&mut FabricService),
-    ) -> bool {
-        if let Some(svc) = self.services.iter_mut().find(|s| s.fabric_id == svc_id) {
-            mutator(svc);
-            true
-        } else {
-            false
-        }
+    /// Add a node to the fabric
+    pub fn push_node(&mut self, node: FabricNode) {
+        self.nodes.push(node);
     }
 
-    /// Add a node to the fabric.  Must add visa service before calling this.
-    ///
-    /// This also adds visa service access to the nodes visa support service.
-    pub fn add_node(&mut self, node_id: &str, config: &ConfigApi) -> Result<(), CompilationError> {
-        let mut node_attrs = match config.get(&format!("zpr/nodes/{node_id}/provider")) {
-            Some(ConfigItem::AttrList(tuples)) => vec_to_attributes(&tuples)?,
-            _ => {
-                return Err(CompilationError::ConfigError(format!(
-                    "missing provider attributes for node {}",
-                    node_id
-                )));
-            }
-        };
+    /// Helper to run through the nodes and return the one with matching `node_id` or None.
+    pub fn get_node(&self, node_id: &str) -> Option<&FabricNode> {
+        self.nodes.iter().find(|n| n.node_id == node_id)
+    }
 
-        let zpr_addr = match config.get(&format!("zpr/nodes/{node_id}/zpr_addr")) {
-            Some(ConfigItem::StrVal(s)) => s,
-            _ => {
-                return Err(CompilationError::ConfigError(format!(
-                    "missing zpr address for node {}",
-                    node_id
-                )));
-            }
-        };
-
-        // The address returned from config-api has already gone though the resolver.
-        // We require an IPv6 address.
-        let naddr: Ipv6Addr = match zpr_addr.parse() {
-            // TODO: Should be parsed to an IpAddr in config.rs
-            Ok(a) => a,
-            Err(e) => {
-                return Err(CompilationError::ConfigError(format!(
-                    "invalid zpr IPv6 address for node: {}: {}",
-                    zpr_addr, e
-                )));
-            }
-        };
-        node_attrs.push(Attribute::try_zpr_internal_attr(
-            zpl::KATTR_ADDR,
-            &naddr.to_string(),
-        )?);
-
-        // Note that we do not have line/col info from the config file.
-        let attr_map = squash_attributes(&node_attrs, &FPos::default())?;
-        let provider_attrs = attr_map.into_values().collect::<Vec<Attribute>>();
-
-        let fabn = FabricNode {
-            node_id: node_id.to_string(),
-            provider_attrs: provider_attrs.clone(),
-        };
-        self.nodes.push(fabn);
-
-        // Now create the visa support service for this node and an access rule.
-        let vs = self
-            .get_visa_service()
-            .expect("visa service must be added before add_node is called");
-        let vs_provider_attrs = vs.provider_attrs.clone();
-        let svc_name = format!("/zpr/{}/vss", node_id);
-
-        // There cannot be a service with this id already.
-        if self.has_service(&svc_name) {
-            return Err(CompilationError::ConfigError(format!(
-                "unabled to configure node VSS because service {} already exists in fabric",
-                &svc_name
-            )));
-        }
-
-        let vss_prot = Protocol::tcp("zpr-vss")
-            .add_port(PortSpec::Single(zpl::VISA_SUPPORT_SEVICE_PORT))
-            .build()
-            .unwrap();
-        let vss_id = self.add_builtin_service(&svc_name, &vss_prot, &provider_attrs)?;
-        let pline = PLine::new_builtin("allow visa service to access node visa support");
-        self.add_condition_to_service(
-            false,
-            &vss_id,
-            &vs_provider_attrs,
-            &[],
-            false,
-            None,
-            &pline,
-        )?;
-        Ok(())
+    pub fn push_link(&mut self, link: FabricLink) {
+        self.links.push(link);
     }
 
     /// Add a condition (aka policy aka rule) to an existing service specified by the
@@ -467,52 +442,31 @@ impl Fabric {
         let svc = self.services.iter_mut().find(|s| s.fabric_id == service_id);
         if svc.is_none() {
             // programming error
-            panic!(
-                "call add_condition_to_service but service {} not found",
+            return Err(CompilationError::BuildError(format!(
+                "add_condition_to_service: service not found: {}",
                 service_id
-            );
+            )));
         }
-        // TODO check that service signal wants to signal to exists?
         let svc = svc.unwrap();
+
+        // For the service attributes, only add a policy if the attributes are not
+        // already present in the provider attributes.
+        let unique_svc_attrs: Vec<Attribute> = svc_attrs
+            .iter()
+            .filter(|a| !svc.provider_attrs.contains(a))
+            .cloned()
+            .collect();
+
+        // TODO check that service signal wants to signal to exists?
+
         svc.client_policies.push(ClientPolicy {
             never_allow: never_allow,
             cli_condition: cli_attrs.to_vec(),
-            svc_condition: svc_attrs.to_vec(),
+            svc_condition: unique_svc_attrs.to_vec(),
             access_only,
             signal,
             zpl_line: pline.clone(),
         });
-        Ok(())
-    }
-
-    /// Add a condition (aka plicy aka rule) to all services -- EXCEPT nodes, trusted services, and visa services.
-    pub fn add_condition_to_all_services(
-        &mut self,
-        never_allow: bool,
-        cli_attrs: &[Attribute],
-        svc_attrs: &[Attribute],
-        signal: Option<Signal>,
-        pline: &PLine,
-    ) -> Result<(), CompilationError> {
-        for svc in &mut self.services {
-            if svc.service_type == ServiceType::Regular {
-                // For the service attributes, only add a policy if the attributes are not
-                // already present in the provider attributes.
-                let unique_svc_attrs: Vec<Attribute> = svc_attrs
-                    .iter()
-                    .filter(|a| !svc.provider_attrs.contains(a))
-                    .cloned()
-                    .collect();
-                svc.client_policies.push(ClientPolicy {
-                    never_allow: never_allow,
-                    access_only: false, // TODO: this is a guess
-                    cli_condition: cli_attrs.to_vec(),
-                    svc_condition: unique_svc_attrs.to_vec(),
-                    signal: signal.clone(),
-                    zpl_line: pline.clone(),
-                });
-            }
-        }
         Ok(())
     }
 }

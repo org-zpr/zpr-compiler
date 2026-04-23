@@ -35,6 +35,9 @@ pub const KATTR_ROLE: &str = "zpr.role";
 pub const KATTR_CN: &str = "endpoint.zpr.adapter.cn";
 pub const KATTR_ADDR: &str = "zpr.addr";
 
+/// TODO: Add a "link" default class?
+pub const KATTR_LINK_COST: &str = "zpr.cost";
+
 /// Multi-valued "services" attribute.
 pub const KATTR_SERVICES: &str = "zpr.services";
 

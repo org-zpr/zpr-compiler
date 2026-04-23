@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::net::IpAddr;
 
 use crate::errors::CompilationError;
 use crate::protocols::Protocol;
@@ -10,6 +11,7 @@ pub enum TSType {
     ActorAuth, // trusted service <-> adapter
 }
 
+/// To support multiple policy output formats, this trait defines the interface for writing policies.
 pub trait PolicyWriter {
     fn print_stats(&self);
 
@@ -61,6 +63,18 @@ pub trait PolicyWriter {
         validate_uri: Option<&str>,
         returns_attrs: Option<&HashMap<String, Attribute>>,
         identity_attrs: Option<&Vec<String>>,
+    );
+
+    fn write_link(
+        &mut self,
+        link_id: &str,
+        node_a_zpr_addr: &IpAddr,
+        node_a_substrate_host: &str,
+        node_a_substrate_port: u16,
+        node_b_zpr_addr: &IpAddr,
+        node_b_substrate_host: &str,
+        node_b_substrate_port: u16,
+        link_attrs: &[Attribute],
     );
 
     fn finalize(self) -> Result<Vec<u8>, CompilationError>;

@@ -31,6 +31,41 @@ the nodes Noise certificate.
 * `zpr_address` - IPv6 ZPRnet address for the node. Node must be preconfigured with this
 same address.
 
+### Topology
+
+If there are multiple nodes you need to define their substrate addresses. We support multiple 
+substrate addresses per node. Each address is specified in `HOST:PORT` format and is tied
+to an identifier.  In the example below the identifier is `i0`.
+
+
+```toml
+[nodes.<NODEID>]
+provider = [[]]
+#...
+
+[nodes.<NODEID>.substrate_addrs]
+i0 = "10.0.0.1:5000"
+```
+
+To connect nodes you must specific `links` in the zplc file.
+
+```toml
+[links.<LINKID>]
+attributes = [["zpr.cost", "1"]] # this is the default
+peers = [ { node = "<NODEID>" }, 
+          { node = "<NODEID>" } ]
+```
+
+If a node has multiple substrate addresses then reference the substrate address name
+in the peers list, eg:
+
+```toml
+[links.<LINKID>]
+attributes = [["zpr.cost", "1"]] # this is the default
+peers = [ { node = "<NODEID>" }, 
+          { node = "<NODEID>", interface = "i3" } ]
+```
+
 
 ## Trusted Services
 

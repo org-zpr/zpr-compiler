@@ -2,7 +2,9 @@ use bytes::Bytes;
 use colored::Colorize;
 use openssl::rsa::Rsa;
 use std::convert::TryInto;
+
 use zpr::policy::v1 as policy_capnp;
+use zpr::policy_types::{AttrExp, AttrOp, Peering};
 
 use crate::compiler::get_compiler_version;
 use crate::dump;
@@ -213,6 +215,40 @@ pub fn dump_v2(fname: &str, encoded_buf: Bytes) {
             println!();
         }
     }
+    if policy.has_topology() {
+        dump::print_section_hdr("TOPOLOGY");
+        for (i, p_rdr) in policy.get_topology().unwrap().iter().enumerate() {
+            if let Ok(peering) = Peering::try_from(p_rdr) {
+                println!(
+                    "{} peering: {} <-> {}",
+                    format!("{:02}", i + 1).dimmed(),
+                    peering.node_a.to_string().yellow(),
+                    peering.node_b.to_string().yellow()
+                );
+                println!(
+                    "            {}:{} <-> {}:{}",
+                    peering.substrate_a.host.to_string().yellow().dimmed(),
+                    peering.substrate_a.port.to_string().yellow().dimmed(),
+                    peering.substrate_b.host.to_string().yellow().dimmed(),
+                    peering.substrate_b.port.to_string().yellow().dimmed()
+                );
+                for attr in &peering.attributes {
+                    println!(
+                        "              {} {}",
+                        format!("{}", "󰞘").dimmed(),
+                        attr_exp_to_string(attr).yellow()
+                    );
+                }
+            } else {
+                println!(
+                    "{} peering: {}",
+                    format!("{:02}", i + 1).dimmed(),
+                    "(invalid)".red()
+                );
+            }
+            println!();
+        }
+    }
     if policy.has_keys() {
         dump::print_section_hdr("KEYS");
         for (i, key) in policy.get_keys().unwrap().iter().enumerate() {
@@ -321,6 +357,32 @@ fn attr_exp_v2_to_string(exp: &policy_capnp::attr_expr::Reader) -> String {
             s.push_str("]");
         } else if vals.len() == 1 {
             s.push_str(&vals.get(0).unwrap().to_str().unwrap());
+        } else {
+            s.push_str("\"\"");
+        }
+    } else {
+        s.push_str("(no value)")
+    }
+    s
+}
+
+fn attr_exp_to_string(exp: &AttrExp) -> String {
+    let mut s = String::new();
+    s.push_str(exp.key.as_str());
+    let opstr = match exp.op {
+        AttrOp::Eq => "EQ",
+        AttrOp::Ne => "NE",
+        AttrOp::Has => "HAS",
+        AttrOp::Excludes => "EXCLUDES",
+    };
+    s.push_str(&format!(" {} ", opstr));
+    if !exp.value.is_empty() {
+        if exp.value.len() > 1 {
+            s.push_str("[");
+            s.push_str(&exp.value.join(", "));
+            s.push_str("]");
+        } else if exp.value.len() == 1 {
+            s.push_str(&exp.value[0]);
         } else {
             s.push_str("\"\"");
         }

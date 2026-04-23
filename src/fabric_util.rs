@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::errors::CompilationError;
 use crate::ptypes::FPos;
-use zpr::policy_types::Attribute;
+use zpr::policy_types::{AttrDomain, Attribute};
 
 /// Convert the list of (key, value) pairs into a list of attributes.
 ///
@@ -13,6 +13,24 @@ pub fn vec_to_attributes(v: &[(String, String)]) -> Result<Vec<Attribute>, Compi
     let mut attrs = Vec::new();
     for (k, v) in v {
         attrs.push(Attribute::tuple(k).single().value(v).build()?);
+    }
+    Ok(attrs)
+}
+
+/// Just like [vec_to_attributes] but also adds a domain hint to the attributes.
+pub fn vec_to_attributes_in_domain(
+    v: &[(String, String)],
+    domain: AttrDomain,
+) -> Result<Vec<Attribute>, CompilationError> {
+    let mut attrs = Vec::new();
+    for (k, v) in v {
+        attrs.push(
+            Attribute::tuple(k)
+                .domain_hint(domain)
+                .single()
+                .value(v)
+                .build()?,
+        );
     }
     Ok(attrs)
 }

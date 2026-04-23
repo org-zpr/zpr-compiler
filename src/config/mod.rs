@@ -1,7 +1,6 @@
-//! config.rs - load/parse a ZPL configuration TOML file
+//! Loads and parses a ZPL TOML configuration file into a `Config` struct.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
@@ -13,11 +12,19 @@ use toml::Table;
 use crate::context::CompilationCtx;
 use crate::crypto::sha256;
 use crate::errors::CompilationError;
-use crate::protocols::{
-    IanaProtocol, IcmpFlowType, PortSpec, Protocol, ProtocolError, ZPR_L7_BUILTINS,
-};
+use crate::protocols::{IcmpFlowType, PortSpec, Protocol, ProtocolError, ZPR_L7_BUILTINS};
 use crate::zpl;
 use zpr::policy_types::Attribute;
+
+mod node_link;
+mod protocol;
+mod service;
+mod trusted_service;
+
+use node_link::{parse_link, parse_node, parse_substrate_addrs};
+use protocol::parse_protocol;
+use service::parse_service;
+use trusted_service::parse_trusted_service;
 
 /// Helper to create a ConfigError. Works with a single string (or &str) argument
 /// (really anything that has a to_string function), or with two args: a format string and arguments.
@@ -39,6 +46,7 @@ pub struct Config {
     pub digest: Digest,
     resolver: Resolver,
     pub nodes: HashMap<String, Node>,
+    pub links: HashMap<String, Link>,
     pub visa_service: VisaService,
     pub bootstrap_cfg: Bootstrap,
     pub trusted_services: Vec<TrustedService>,
@@ -94,29 +102,41 @@ impl Default for Resolver {
 }
 
 /// Node table.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Node {
     pub id: String,
     pub provider: Vec<(String, String)>,
-    pub zpr_address: String,
-    pub interfaces: Vec<Interface>,
+    pub zpr_address: IpAddr,
+    pub substrate_addrs: Option<HashMap<String, Interface>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Link {
+    // ID's map to node ID's.
+    pub peer_a_id: String,
+
+    // Interfaces map to Node substrate interface IDs.
+    pub peer_a_interface: String,
+
+    pub peer_b_id: String,
+    pub peer_b_interface: String,
+
+    // Link always gets 'zpr.cost' attribute at least.
+    pub attributes: Vec<(String, String)>,
 }
 
 /// Interface is part of a node.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct Interface {
-    pub name: String,
     pub host: String, // host or IP
     pub port: u16,
 }
 
 /// Visa Service table ("visa_service")
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct VisaService {
-    pub dock_node_id: String,
+    pub dock_node_id: Option<String>,
 }
 
 pub struct Bootstrap {
@@ -144,7 +164,16 @@ impl Config {
     pub fn resolve(&self, hostname: &str) -> Option<IpAddr> {
         // TODO: I suppose the resolver table could map a name to another name.
         //       For now that is not supported.
-        self.resolver.hosts.as_ref()?.get(hostname)?.parse().ok()
+        self.resolver.resolve(hostname)
+    }
+}
+
+impl Resolver {
+    /// found in the table, then None is returned.
+    pub fn resolve(&self, hostname: &str) -> Option<IpAddr> {
+        // TODO: I suppose the resolver table could map a name to another name.
+        //       For now that is not supported.
+        self.hosts.as_ref()?.get(hostname)?.parse().ok()
     }
 }
 
@@ -172,22 +201,14 @@ impl ConfigParse {
 
     fn parse(&mut self, ctx: &CompilationCtx) -> Result<Config, CompilationError> {
         let resolver = self.parse_resolver(ctx)?;
-        let nodes = self.parse_nodes(ctx)?;
+        let nodes = self.parse_nodes(&resolver, ctx)?;
+
+        // Links if present tie node interfaces together.
+        let links = self.parse_links(ctx, &nodes)?;
 
         let visa_service = match self.parse_visa_service(ctx)? {
             Some(vs) => vs,
-            None => {
-                // There can only be one node.
-                if nodes.len() != 1 {
-                    return Err(err_config!(
-                        "visa_service section missing and there is not exactly one node"
-                    ));
-                }
-                let one_node = nodes.values().next().unwrap();
-                VisaService {
-                    dock_node_id: one_node.id.clone(),
-                }
-            }
+            None => VisaService::default(),
         };
 
         let bootstrap = self.parse_bootstrap(ctx)?;
@@ -199,6 +220,7 @@ impl ConfigParse {
             digest: self.digest,
             resolver,
             nodes,
+            links,
             visa_service,
             bootstrap_cfg: bootstrap,
             trusted_services,
@@ -285,10 +307,15 @@ impl ConfigParse {
     }
 
     /// Parse all the nodes.<ID> sections. There must be at least one.
-    fn parse_nodes(&self, ctx: &CompilationCtx) -> Result<HashMap<String, Node>, CompilationError> {
+    fn parse_nodes(
+        &self,
+        resolver: &Resolver,
+        ctx: &CompilationCtx,
+    ) -> Result<HashMap<String, Node>, CompilationError> {
         if !self.ctoml.contains_key("nodes") {
             return Err(err_config!("missing section: nodes"));
         }
+        let mut zpr_addr_idx = HashSet::new();
         let nodes = self.ctoml["nodes"]
             .as_table()
             .ok_or(err_config!("error reading nodes section"))?;
@@ -300,15 +327,84 @@ impl ConfigParse {
                     return Err(err_config!("node ID '{}' is reserved", node_id));
                 }
             }
-            let n = parse_node(
+            let mut n = parse_node(
                 node_id,
                 v.as_table()
                     .ok_or(err_config!("node {} is not a table", node_id))?,
+                resolver,
                 ctx,
             )?;
+
+            if let Some(addr_val) = v.get("substrate_addrs") {
+                if let Some(tbl) = addr_val.as_table() {
+                    let substrate_addrs = parse_substrate_addrs(node_id, tbl, ctx)?;
+                    if !substrate_addrs.is_empty() {
+                        n.substrate_addrs = Some(substrate_addrs);
+                    } else {
+                        ctx.warn(
+                            format!("node {} has empty substrate_addrs section", node_id).as_str(),
+                        )?;
+                    }
+                }
+            }
+
+            // Check that the node's ZPR address is unique across all nodes.
+            if zpr_addr_idx.contains(&n.zpr_address) {
+                return Err(err_config!(
+                    "duplicate ZPR address '{}' for node '{}'",
+                    n.zpr_address,
+                    node_id
+                ));
+            }
+            zpr_addr_idx.insert(n.zpr_address.clone());
+
             node_map.insert(node_id.to_string(), n);
         }
         Ok(node_map)
+    }
+
+    /// Parse the links data from the toml configuration.
+    ///
+    /// Links look like this:
+    /// ```toml
+    /// [links.link1]
+    /// attributes = [["zpr.cost", "10"]]
+    /// peers = [{ node = "node1", interface = "if1" }, { node = "node2", interface = "if2" }]
+    /// ```
+    fn parse_links(
+        &self,
+        ctx: &CompilationCtx,
+        nodes: &HashMap<String, Node>,
+    ) -> Result<HashMap<String, Link>, CompilationError> {
+        if !self.ctoml.contains_key("links") {
+            return Ok(HashMap::new());
+        }
+        let links = self.ctoml["links"]
+            .as_table()
+            .ok_or(err_config!("error reading links section"))?;
+        let mut link_map = HashMap::new();
+        for (link_id, v) in links {
+            let mut link = parse_link(
+                link_id,
+                v.as_table()
+                    .ok_or(err_config!("link {} is not a table", link_id))?,
+                ctx,
+                nodes,
+            )?;
+
+            // If link does not have a cost attribute we add it.
+            if !link
+                .attributes
+                .iter()
+                .any(|(k, _)| k == zpl::KATTR_LINK_COST)
+            {
+                link.attributes
+                    .push((zpl::KATTR_LINK_COST.to_string(), "1".to_string()));
+            }
+
+            link_map.insert(link_id.to_string(), link);
+        }
+        Ok(link_map)
     }
 
     /// Parse the very basic visa_service section.
@@ -316,6 +412,8 @@ impl ConfigParse {
     /// The only thing in here is dock_node with the node ID.
     /// As we currently only support one node user can just skip
     /// this and we will fill it in automatically.
+    ///
+    /// TODO: See https://github.com/org-zpr/zpr-compiler/issues/100
     fn parse_visa_service(
         &mut self,
         ctx: &CompilationCtx,
@@ -342,7 +440,9 @@ impl ConfigParse {
             .ok_or(err_config!("visa_service missing dock_node"))?
             .to_string();
 
-        Ok(Some(VisaService { dock_node_id }))
+        Ok(Some(VisaService {
+            dock_node_id: Some(dock_node_id),
+        }))
     }
 
     // Parse optional boostrap section. Each entry in the table is of the form: `<CN> = <KEYFILE>`.
@@ -484,6 +584,7 @@ impl ConfigParse {
             match elem.as_str() {
                 "resolver" => (),
                 "nodes" => (),
+                "links" => (),
                 "visa_service" => (),
                 "bootstrap" => (),
                 "trusted_services" => (),
@@ -499,138 +600,43 @@ impl ConfigParse {
     }
 }
 
-fn require_key(ctx: &str, table: &Table, key: &str) -> Result<(), CompilationError> {
-    if !table.contains_key(key) {
-        return Err(err_config!("error in {}: missing entry for {}", ctx, key));
+/// Parse attribute tuples from a TOML table field.
+///
+/// This is how we generally encode ZPR attriutes into the toml, for example:
+///
+/// ```toml
+/// attributes = [["some.key","some value"], ["other.key", "other value"]]
+/// ```
+///
+/// `ctx` is a helpful string to help user understand where in the config we are.
+///
+/// Pass the field name (in above example that would be `attributes`)
+/// and this will return a vector of (key, value) tuples.
+///
+/// If key is not found, returns None.
+pub(super) fn parse_attribute_tuples(
+    ctx: &str,
+    table: &Table,
+    field_name: &str,
+) -> Result<Option<Vec<(String, String)>>, CompilationError> {
+    if !table.contains_key(field_name) {
+        return Ok(None);
     }
-    Ok(())
-}
-
-/// Parse a single node table.
-fn parse_node(node_id: &str, node: &Table, ctx: &CompilationCtx) -> Result<Node, CompilationError> {
-    warn_unknown_node_property(node, ctx)?;
-    require_key(&format!("nodes.{}", node_id), node, "zpr_address")?;
-    let zpr_address = node["zpr_address"]
-        .as_str()
-        .ok_or(err_config!("node {} invalid zpr_address", node_id))?
-        .to_string();
-
-    // In order to parse the interfaces, we need the interface names.
-    // TODO: Interfaces are not required and will only be useful later for
-    //       creating lans and bridges and also for adding interface properties.
-    let mut interfaces = Vec::new();
-    if node.contains_key("interfaces") {
-        let ifnames = node["interfaces"]
-            .as_array()
-            .ok_or(err_config!("node {} missing interfaces", node_id))?;
-        for ifname in ifnames {
-            let ifname = ifname.as_str().ok_or(err_config!(
-                "node {} interface name is not a string",
-                node_id
-            ))?;
-
-            // The node contains a table entry for each interface name.
-            if !node.contains_key(ifname) {
-                return Err(err_config!(
-                    "node {} missing entry for interface {}",
-                    node_id,
-                    ifname
-                ));
-            }
-            let iface = parse_interface(
-                ifname,
-                node[ifname].as_table().ok_or(err_config!(
-                    "node {} interface {} is not a table",
-                    node_id,
-                    ifname
-                ))?,
-            )?;
-            interfaces.push(iface);
-        }
-    }
-
-    let provider = parse_provider(&format!("node {}", node_id), node)?;
-
-    Ok(Node {
-        id: node_id.to_string(),
-        zpr_address,
-        interfaces,
-        provider,
-    })
-}
-
-fn warn_unknown_node_property(node: &Table, ctx: &CompilationCtx) -> Result<(), CompilationError> {
-    for elem in node.keys() {
-        match elem.as_str() {
-            "provider" => (),
-            "zpr_address" => (),
-            "interfaces" => (),
-            "in1" => (),
-            _ => ctx.warn(&format!(
-                "unknown property '{elem}' detected while parsing node",
-            ))?,
-        }
-    }
-
-    Ok(())
-}
-
-fn parse_provider(ctx: &str, table: &Table) -> Result<Vec<(String, String)>, CompilationError> {
-    // The provider is an array of tuples (array of arrays).
-    if !table.contains_key("provider") {
-        return Err(err_config!("{} missing provider", ctx));
-    }
-    let provider_tuples = table["provider"]
+    let attr_tuples = table[field_name]
         .as_array()
-        .ok_or(err_config!("{} provider is not an array", ctx))?;
+        .ok_or(err_config!("{} {field_name} is not an array", ctx))?;
 
-    let provider = tuples_to_tuple_str_vec(ctx, provider_tuples)?;
-    Ok(provider)
+    let attrs = tuples_to_tuple_str_vec(ctx, attr_tuples)?;
+    Ok(Some(attrs))
 }
 
-/// Parse the nodes interface entry.
-fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, CompilationError> {
-    if !iface.contains_key("netaddr") {
-        return Err(err_config!("interface {} missing netaddr", ifname));
-    }
-    let netaddr = iface["netaddr"]
-        .as_str()
-        .ok_or(err_config!("interface {} missing netaddr", ifname))?
-        .to_string();
-
-    // Form of `netaddr` is HOST:PORT, host may be a hostname (which may need to be run through the resolver)
-    // or an IPv4 or IPv6 address.
-
-    // We'll try to parse as a SocketAddr first (which requires an IP address, not a name)
-    //let saddr: std::net::SocketAddr = netaddr.parse();
-    match netaddr.parse::<std::net::SocketAddr>() {
-        Ok(saddr) => Ok(Interface {
-            name: ifname.to_string(),
-            host: saddr.ip().to_string(),
-            port: saddr.port(),
-        }),
-        Err(_) => {
-            // Did not parse as a SocketAddr, so try as "hostname:portnum"
-            let parts: Vec<&str> = netaddr.split(':').collect();
-            if parts.len() != 2 {
-                return Err(err_config!(
-                    "interface {} netaddr must be in the form HOST:PORT",
-                    ifname
-                ));
-            }
-            let portnum = parts[1].parse::<u16>().map_err(|_| {
-                err_config!(
-                    "interface {} port number is not a valid: {}",
-                    ifname,
-                    parts[1]
-                )
-            })?;
-            Ok(Interface {
-                name: ifname.to_string(),
-                host: parts[0].to_string(),
-                port: portnum,
-            })
-        }
+pub(super) fn parse_provider(
+    ctx: &str,
+    table: &Table,
+) -> Result<Vec<(String, String)>, CompilationError> {
+    match parse_attribute_tuples(ctx, table, "provider")? {
+        Some(attrs) => Ok(attrs),
+        None => Err(err_config!("{} missing provider", ctx)),
     }
 }
 
@@ -663,476 +669,10 @@ fn tuples_to_tuple_str_vec(
     Ok(svec)
 }
 
-// Parse an individual trusted_service table.
-fn parse_trusted_service(
-    ts_id: &str,
-    ts: &Table,
-    ctx: &CompilationCtx,
-) -> Result<TrustedService, CompilationError> {
-    warn_unknown_ts_property(ts, ctx)?;
-    // The "api" value is optional for the default trusted service.
-    let mut is_default = false;
-    let api = if ts.contains_key("api") {
-        ts["api"]
-            .as_str()
-            .ok_or(err_config!("trusted_service {} missing api", ts_id))?
-            .to_string()
-    } else if ts_id == zpl::DEFAULT_TRUSTED_SERVICE_ID {
-        is_default = true;
-        zpl::DEFAULT_TRUSTED_SERVICE_API.to_string()
-    } else {
-        return Err(err_config!("trusted_service {} missing api", ts_id));
-    };
-    let cert_path = if ts.contains_key("cert_path") {
-        Some(PathBuf::from(ts["cert_path"].as_str().ok_or(
-            err_config!("trusted_service {} cert_path is not a string", ts_id),
-        )?))
-    } else if is_default {
-        // The path is the only thing required for the default section.
-        ctx.warn("no cert_path for default trusted_service, certificate checking disabled")?;
-        None
-    } else {
-        None
-    };
-
-    let returns_attrs: Vec<String>;
-    let identity_attrs: Vec<String>;
-    let client_svc: Option<String>;
-    let service_svc: Option<String>;
-    if !is_default {
-        returns_attrs = parse_string_array(ts, "returns_attributes", "trusted_service")?;
-        identity_attrs = parse_string_array(ts, "identity_attributes", "trusted_service")?;
-
-        if ts.contains_key("client") {
-            client_svc = Some(
-                ts["client"]
-                    .as_str()
-                    .ok_or(err_config!("trusted_service {} client parse error", ts_id))?
-                    .to_string(),
-            );
-        } else {
-            client_svc = Some(format!("{}-client", ts_id));
-        }
-        if ts.contains_key("service") {
-            service_svc = Some(
-                ts["service"]
-                    .as_str()
-                    .ok_or(err_config!("trusted_service {} service parse error", ts_id))?
-                    .to_string(),
-            );
-        } else {
-            service_svc = Some(format!("{}-vs", ts_id));
-        }
-    } else {
-        if ts.contains_key("returns_attributes") {
-            return Err(err_config!(
-                "default trusted_service does not allow custom returns_attributes"
-            ));
-        }
-        if ts.contains_key("identity_attributes") {
-            return Err(err_config!(
-                "default trusted_service does not allow custom identity_attributes"
-            ));
-        }
-        returns_attrs = vec![format!("{} -> {}", zpl::KATTR_CN, zpl::KATTR_CN)];
-        identity_attrs = vec![String::from(zpl::KATTR_CN)];
-        client_svc = None;
-        service_svc = None;
-    }
-
-    let mut returns = HashMap::new();
-    for ra in &returns_attrs {
-        let (service_key_name, zpr_attr) = parse_attribute_mapping(ra)?;
-        if returns.contains_key(&service_key_name) {
-            return Err(err_config!(
-                "trusted_service {} contains duplicate service attribute name '{}'",
-                ts_id,
-                service_key_name
-            ));
-        }
-        returns.insert(service_key_name, zpr_attr);
-    }
-
-    let mut idents = Vec::new();
-    for ra in &identity_attrs {
-        // The ident attribute (for now) must exist in the returns attributes.
-        if !returns.contains_key(ra) {
-            return Err(err_config!(
-                "trusted_service {} identity attribute '{}' not in returns_attributes",
-                ts_id,
-                ra
-            ));
-        }
-        idents.push(ra.to_string());
-    }
-
-    let provider = if ts.contains_key("provider") {
-        Some(parse_provider(&format!("trusted_service {ts_id}"), ts)?)
-    } else {
-        if !is_default {
-            return Err(err_config!("trusted_service {} missing provider", ts_id));
-        }
-        None
-    };
-
-    Ok(TrustedService {
-        id: ts_id.to_string(),
-        api,
-        cert_path,
-        returns_attrs: returns,
-        identity_attrs: idents,
-        provider,
-        client: client_svc,
-        service: service_svc,
-    })
-}
-
-/// The mapping string format is "<service-key-name> -> <attribute-spec>" where attribute
-/// spec is:
-///   - <class-name>.<attribute-name> for a regular single value attribute.
-///   - #<class-name>.<attribute-name> for a tag attribute.
-///   - <class-name>.<attribute-name>{} for a multi-valued attribute.
-///
-/// Note that we never use "optional" flag in ZPLC.
-fn parse_attribute_mapping(mapping: &str) -> Result<(String, Attribute), CompilationError> {
-    let parts: Vec<&str> = mapping.split("->").collect();
-    if parts.len() != 2 {
-        return Err(err_config!(
-            "invalid attribute mapping '{}', must be of the form '<service-key-name> -> <attribute-spec>'",
-            mapping
-        ));
-    }
-    let service_key_name = parts[0].trim().to_string();
-    let attr_spec = parts[1].trim();
-
-    let zpr_attr = if let Some(stripped) = attr_spec.strip_prefix("#") {
-        Attribute::tag(stripped).build()?
-    } else if let Some(stripped) = attr_spec.strip_suffix("{}") {
-        Attribute::tuple(stripped).multi().build()?
-    } else {
-        Attribute::tuple(attr_spec).single().build()?
-    };
-
-    // In theory we can support any attribute names if they are quoted.
-    // But until we support that on VS we will not permit some characters
-    // here.
-    let valid_chars: HashSet<char> =
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-./"
-            .chars()
-            .collect();
-    for c in zpr_attr.zpl_key().chars() {
-        if !valid_chars.contains(&c) {
-            return Err(err_config!(
-                "invalid attribute name '{}' in mapping '{}', contains invalid character '{}'",
-                zpr_attr.zpl_key(),
-                mapping,
-                c
-            ));
-        }
-    }
-
-    Ok((service_key_name, zpr_attr))
-}
-
-fn warn_unknown_ts_property(ts: &Table, ctx: &CompilationCtx) -> Result<(), CompilationError> {
-    for elem in ts.keys() {
-        match elem.as_str() {
-            "cert_path" => (),
-            "api" => (),
-            "client" => (),
-            "service" => (),
-            "returns_attributes" => (),
-            "provider" => (),
-            "prefix" => (),
-            "identity_attributes" => (),
-            _ => ctx.warn(&format!(
-                "unknown property '{elem}' detected while parsing trusted_services",
-            ))?,
-        }
-    }
-    Ok(())
-}
-
-/// Parse table entry `key` as a string array.  If key is not found returns empty vector.
-fn parse_string_array(ts: &Table, key: &str, ctx: &str) -> Result<Vec<String>, CompilationError> {
-    if !ts.contains_key(key) {
-        return Ok(Vec::new());
-    }
-    let arr = ts[key]
-        .as_array()
-        .ok_or(err_config!("{} {} is not an array", ctx, key))?;
-    let mut ret = Vec::new();
-    for a in arr {
-        ret.push(
-            a.as_str()
-                .ok_or(err_config!("{} {} array entry is not a string", ctx, key))?
-                .to_string(),
-        );
-    }
-    Ok(ret)
-}
-
-/// Parse an individual protocol table.
-/// Allow fields are:
-/// - l4protocol (iana protocol name)
-/// - 7lprotocol (app layer protocol name eg, HTTP or a ZPR protocol name)
-/// - port (optional)
-/// - icmp_type
-/// - icmp_codes
-fn parse_protocol(
-    prot_label: &str,
-    prot: &Table,
-    ctx: &CompilationCtx,
-) -> Result<Protocol, CompilationError> {
-    warn_unknown_prot_property(prot, ctx)?;
-    if !prot.contains_key("l4protocol") {
-        return Err(err_config!(
-            "protocol {} missing key 'l4protocol'",
-            prot_label
-        ));
-    }
-    let protocol_name = prot["l4protocol"]
-        .as_str()
-        .ok_or(err_config!("protocol {} missing protocol", prot_label))?
-        .to_string();
-    let l7protocol = if prot.contains_key("l7protocol") {
-        Some(
-            prot["l7protocol"]
-                .as_str()
-                .ok_or(err_config!(
-                    "protocol {} l7protocol is not a string",
-                    prot_label
-                ))?
-                .to_string(),
-        )
-    } else {
-        None
-    };
-    if let Some(l4) = IanaProtocol::parse(&protocol_name) {
-        match l4 {
-            IanaProtocol::TCP => {
-                let mut bldr = Protocol::tcp(prot_label);
-                let pspec = parse_tcp_udp_ports(prot_label, prot)?;
-                bldr = bldr.add_ports(pspec);
-                if let Some(l7) = l7protocol {
-                    bldr = bldr.layer7(l7);
-                }
-                Ok(bldr.build()?)
-            }
-            IanaProtocol::UDP => {
-                let mut bldr = Protocol::udp(prot_label);
-                let pspec = parse_tcp_udp_ports(prot_label, prot)?;
-                bldr = bldr.add_ports(pspec);
-                if let Some(l7) = l7protocol {
-                    bldr = bldr.layer7(l7);
-                }
-                Ok(bldr.build()?)
-            }
-            IanaProtocol::ICMP => {
-                Ok(Protocol::icmp4(prot_label, parse_icmp_details(prot_label, prot)?).build()?)
-            }
-            IanaProtocol::ICMPv6 => {
-                Ok(Protocol::icmp6(prot_label, parse_icmp_details(prot_label, prot)?).build()?)
-            }
-        }
-    } else {
-        Err(err_config!(
-            "protocol {}: invalid l4 protocol name: {}",
-            prot_label,
-            protocol_name
-        ))
-    }
-}
-
-fn warn_unknown_prot_property(prot: &Table, ctx: &CompilationCtx) -> Result<(), CompilationError> {
-    for elem in prot.keys() {
-        match elem.as_str() {
-            "l4protocol" => (),
-            "port" => (),
-            "icmp_type" => (),
-            "icmp_codes" => (),
-            "l7protocol" => (),
-            "protocol" => (),
-            _ => ctx.warn(&format!(
-                "unknown property '{elem}' detected while parsing protocols",
-            ))?,
-        }
-    }
-    Ok(())
-}
-
-/// Parse the "port" value, if not found or invalid return an error.
-/// Valid port format is:
-/// - single port number, eg `port = 80`
-/// - comma separated list of port numbers, eg `port = "22,80,443"`
-/// - range of port numbers, eg `port = "8000-9000"`
-/// - comma separated mix of the above (eg, `port = "22,80,443,8000-9000"`)
-fn parse_tcp_udp_ports(ctx: &str, tab: &Table) -> Result<Vec<PortSpec>, CompilationError> {
-    let ps_strv = if tab.contains_key("port") {
-        if tab["port"].is_str() {
-            tab["port"].as_str().unwrap().to_string()
-        } else {
-            tab["port"].to_string()
-        }
-    } else {
-        return Err(err_config!("protocol {} missing port", ctx));
-    };
-
-    // Valid form of `ps_strv` is:
-    // - single port number
-    // - comma separated list of port numbers
-    // - range of port numbers (e.g. 8000-9000)
-    // - comma separated mix of the above (e.g. 22,80,443,8000-9000)
-    PortSpec::parse_list(&ps_strv).map_err(|e| {
-        err_config!(
-            "protocol {} invalid port specification '{}': {}",
-            ctx,
-            ps_strv,
-            e
-        )
-    })
-}
-
-/// Parse the very bare bones individual service table.
-///
-/// A service must reference a defined protocol using the `protocol` key, it can also
-/// additionally override a port or icmp setting in a defined protocol.
-fn parse_service(
-    sid: &str,
-    s: &Table,
-    protocols: &HashMap<String, Protocol>,
-    ctx: &CompilationCtx,
-) -> Result<Service, CompilationError> {
-    warn_unknown_services_property(s, ctx)?;
-    if !s.contains_key("protocol") {
-        return Err(err_config!("service {} missing protocol", sid));
-    }
-    let protocol_label = s["protocol"]
-        .as_str()
-        .ok_or(err_config!("service {} missing protocol", sid))?
-        .to_string();
-    let provider = if s.contains_key("provider") {
-        Some(parse_provider(&format!("service {}", sid), s)?)
-    } else {
-        None
-    };
-
-    let Some(matched_protocol) = protocols.get(&protocol_label) else {
-        return Err(err_config!(
-            "service {} references unknown protocol {}",
-            sid,
-            protocol_label
-        ));
-    };
-
-    // The service could contain overrides for protocol.
-    let opt_refine = if matched_protocol.is_icmp() {
-        if s.contains_key("icmp_type") || s.contains_key("icmp_codes") {
-            Some(ProtocolRefinement::Icmp(parse_icmp_details(sid, s)?))
-        } else {
-            None
-        }
-    } else if s.contains_key("port") {
-        Some(ProtocolRefinement::Port(parse_tcp_udp_ports(sid, s)?))
-    } else {
-        None
-    };
-
-    Ok(Service {
-        id: sid.to_string(),
-        protocol_id: protocol_label,
-        protocol_refinement: opt_refine,
-        provider,
-    })
-}
-
-fn warn_unknown_services_property(s: &Table, ctx: &CompilationCtx) -> Result<(), CompilationError> {
-    for elem in s.keys() {
-        match elem.as_str() {
-            "protocol" => (),
-            "icmp_type" => (),
-            "icmp_codes" => (),
-            "port" => (),
-            "provider" => (),
-            _ => ctx.warn(&format!(
-                "unknown property '{elem}' detected while parsing services",
-            ))?,
-        }
-    }
-    Ok(())
-}
-
-/// Parse and do light error checking on the ICMP details (the icmp_type and icmp_codes).
-fn parse_icmp_details(prot_id: &str, prot: &Table) -> Result<IcmpFlowType, CompilationError> {
-    if !prot.contains_key("icmp_type") {
-        return Err(err_config!("protocol {} missing icmp_type", prot_id));
-    }
-    if !prot.contains_key("icmp_codes") {
-        return Err(err_config!("protocol {} missing icmp_codes", prot_id));
-    }
-
-    let codes = prot["icmp_codes"].as_array().ok_or(err_config!(
-        "protocol {} icmp_codes is not an array",
-        prot_id
-    ))?;
-    if codes.is_empty() {
-        return Err(err_config!("protocol {} icmp_codes is empty", prot_id));
-    }
-
-    let ft = prot["icmp_type"]
-        .as_str()
-        .ok_or(err_config!("protocol {} icmp missing interaction", prot_id))?
-        .to_string()
-        .to_lowercase();
-
-    let interaction: IcmpFlowType;
-
-    if ft == zpl::ICMP_INTERACION_REQUEST_RESPONSE {
-        if codes.len() != 2 {
-            return Err(err_config!(
-                "protocol {} icmp request-response requires exactly two type codes",
-                prot_id
-            ));
-        }
-        let code0 = toml_as_u8(&codes[0])
-            .ok_or(err_config!("protocol {} icmp code[0] invalid", prot_id))?;
-        let code1 = toml_as_u8(&codes[1])
-            .ok_or(err_config!("protocol {} icmp code[1] invalid", prot_id))?;
-        interaction = IcmpFlowType::RequestResponse(code0, code1);
-    } else if ft == zpl::ICMP_INTERACTION_ONESHOT {
-        let mut parsed_codes = Vec::new();
-        for tcode in codes {
-            let code = toml_as_u8(tcode).ok_or(err_config!(
-                "protocol {} icmp code '{}' is invalid",
-                prot_id,
-                tcode
-            ))?;
-            parsed_codes.push(code);
-        }
-        interaction = IcmpFlowType::OneShot(parsed_codes);
-    } else {
-        return Err(err_config!(
-            "protocol {} invalid icmp interaction type: {}",
-            prot_id,
-            ft
-        ));
-    }
-
-    Ok(interaction)
-}
-
-/// Convert a TOML integer to a u8.  Returns None if the integer is out of range.
-fn toml_as_u8(v: &toml::Value) -> Option<u8> {
-    match v {
-        toml::Value::Integer(i) if *i >= 0 && *i <= 255 => Some(*i as u8),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use zpr::policy_types::AttrDomain;
+    use crate::protocols::IanaProtocol;
 
     #[test]
     fn test_parse_resolver_empty() {
@@ -1174,27 +714,71 @@ mod test {
     }
 
     #[test]
+    fn test_parse_attribute_tuples() {
+        let tstr = r#"
+        [foo]
+        provider = [["k1", "v1"], ["k2", 99]]
+
+        [fee]
+        # should return empty vector.
+        attrs = []
+
+        [fox]
+        nope = "no attrs here"
+        "#;
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        {
+            let foo_tbl = cparser.ctoml["foo"].as_table().unwrap();
+            let attrs = parse_attribute_tuples("foo", foo_tbl, "provider");
+            assert!(attrs.is_ok(), "{:?}", attrs);
+            let attrs = attrs.unwrap();
+            assert!(attrs.is_some());
+            let attrs = attrs.unwrap();
+            assert_eq!(attrs.len(), 2);
+            assert!(attrs.contains(&("k1".to_string(), "v1".to_string())));
+        }
+        {
+            let fee_tbl = cparser.ctoml["fee"].as_table().unwrap();
+            let attrs = parse_attribute_tuples("fee", fee_tbl, "attrs");
+            assert!(attrs.is_ok(), "{:?}", attrs);
+            let attrs = attrs.unwrap();
+            assert!(attrs.is_some());
+        }
+        {
+            let fox_tbl = cparser.ctoml["fox"].as_table().unwrap();
+            let attrs = parse_attribute_tuples("fox", fox_tbl, "missing");
+            assert!(attrs.is_ok(), "{:?}", attrs);
+            let attrs = attrs.unwrap();
+            assert!(attrs.is_none());
+        }
+    }
+
+    #[test]
     fn test_parse_node() {
         let tstr = r#"
         [nodes]
         [nodes.n0]
-        zpr_address = "foo.zpr"
+        zpr_address = "fd5a:5052:90de::1"
         provider = [["zpr.foo", "bar"], ["baz", 99]]
-        interfaces = ["eth0", "eth1"]
-        eth0.netaddr = "1.2.3.4:2000"
-        eth1.netaddr = "foo.addr:9000"
+        [nodes.n0.substrate_addrs]
+        "eth0" = "1.2.3.4:2000"
+        "eth1" = "foo.addr:9000"
         "#;
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let nodes = cparser.parse_nodes(&CompilationCtx::new(false, false));
+        let nodes = cparser.parse_nodes(&Resolver::default(), &CompilationCtx::new(false, false));
         assert!(nodes.is_ok(), "{:?}", nodes);
         let nodes = nodes.unwrap();
         assert_eq!(nodes.len(), 1);
         let n0 = nodes.get("n0").unwrap();
         assert_eq!(n0.id, "n0");
-        assert_eq!(n0.zpr_address, "foo.zpr");
-        assert_eq!(n0.interfaces.len(), 2);
-        for iface in &n0.interfaces {
-            match iface.name.as_str() {
+        assert_eq!(
+            n0.zpr_address,
+            "fd5a:5052:90de::1".parse::<IpAddr>().unwrap()
+        );
+        let sub_addrs = n0.substrate_addrs.as_ref().unwrap();
+        assert_eq!(sub_addrs.len(), 2);
+        for (ifname, iface) in sub_addrs {
+            match ifname.as_str() {
                 "eth0" => {
                     assert_eq!(iface.host, "1.2.3.4");
                     assert_eq!(iface.port, 2000);
@@ -1215,19 +799,227 @@ mod test {
     }
 
     #[test]
+    fn test_parse_links() {
+        let tstr = r#"
+        [nodes]
+
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["zpr.foo", "bar"], ["baz", 99]]
+        [nodes.n0.substrate_addrs]
+        "i0" = "1.2.3.4:2000"
+
+        [nodes.n1]
+        zpr_address = "fd5a:5052:90de::2"
+        provider = [["zpr.foo", "barf"], ["buz", 100]]
+        [nodes.n1.substrate_addrs]
+        "j0" = "4.5.6.7:2000"
+
+        [links.n0n1]
+        peers = [{ node = "n0" }, { node = "n1" }]
+        "#;
+
+        let ctx = CompilationCtx::new(false, false);
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let nodes = cparser.parse_nodes(&Resolver::default(), &ctx);
+        assert!(nodes.is_ok(), "{:?}", nodes);
+        let nodes = nodes.unwrap();
+        assert_eq!(nodes.len(), 2);
+        let n0 = nodes.get("n0").unwrap();
+        assert_eq!(n0.id, "n0");
+        let n1 = nodes.get("n1").unwrap();
+        assert_eq!(n1.id, "n1");
+
+        let links = cparser.parse_links(&ctx, &nodes);
+        assert!(links.is_ok(), "{:?}", links);
+
+        let links = links.unwrap();
+        assert_eq!(links.len(), 1);
+        let l0 = links.get("n0n1").unwrap();
+        assert_eq!(l0.peer_a_id, "n0");
+        assert_eq!(l0.peer_b_id, "n1");
+
+        assert_eq!(l0.peer_a_interface, "i0".to_string());
+        assert_eq!(l0.peer_b_interface, "j0".to_string());
+
+        assert_eq!(l0.attributes.len(), 1);
+        assert_eq!(l0.attributes[0].0, zpl::KATTR_LINK_COST);
+    }
+
+    #[test]
+    fn test_parse_links_multi_iface_missing_iface_spec() {
+        let tstr = r#"
+        [nodes]
+
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["zpr.foo", "bar"], ["baz", 99]]
+        [nodes.n0.substrate_addrs]
+        "i0" = "1.2.3.4:2000"
+        "i1" = "1.2.3.5:2000"
+        "i2" = "1.2.3.6:2000"
+
+        [nodes.n1]
+        zpr_address = "fd5a:5052:90de::2"
+        provider = [["zpr.foo", "barf"], ["buz", 100]]
+        [nodes.n1.substrate_addrs]
+        "j0" = "4.5.6.7:2000"
+        "j1" = "4.5.6.8:2000"
+
+        [links.n0n1]
+        # will fail since missing intercace names
+        peers = [{ node = "n0" }, { node = "n1" }]
+        "#;
+
+        let ctx = CompilationCtx::new(false, false);
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let nodes = cparser.parse_nodes(&Resolver::default(), &ctx);
+        assert!(nodes.is_ok(), "{:?}", nodes);
+        let nodes = nodes.unwrap();
+        assert_eq!(nodes.len(), 2);
+        let n0 = nodes.get("n0").unwrap();
+        assert_eq!(n0.id, "n0");
+        let n1 = nodes.get("n1").unwrap();
+        assert_eq!(n1.id, "n1");
+
+        let links = cparser.parse_links(&ctx, &nodes);
+        assert!(
+            links.is_err(),
+            "expected error due to missing interface spec, got: {:?}",
+            links
+        );
+    }
+
+    #[test]
+    fn test_parse_links_multi_iface_requires_iface_spec() {
+        let tstr = r#"
+        [nodes]
+
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["zpr.foo", "bar"], ["baz", 99]]
+        [nodes.n0.substrate_addrs]
+        "i0" = "1.2.3.4:2000"
+        "i1" = "1.2.3.5:2000"
+        "i2" = "1.2.3.6:2000"
+
+        [nodes.n1]
+        zpr_address = "fd5a:5052:90de::2"
+        provider = [["zpr.foo", "barf"], ["buz", 100]]
+        [nodes.n1.substrate_addrs]
+        "j0" = "4.5.6.7:2000"
+        "j1" = "4.5.6.8:2000"
+
+        [links.n0n1]
+        # Also override cost
+        attributes = [["zpr.cost", "5"]]
+        peers = [{ node = "n0", interface = "i2"}, { node = "n1", interface = "j1" }]
+        "#;
+
+        let ctx = CompilationCtx::new(false, false);
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let nodes = cparser.parse_nodes(&Resolver::default(), &ctx);
+        assert!(nodes.is_ok(), "{:?}", nodes);
+        let nodes = nodes.unwrap();
+        assert_eq!(nodes.len(), 2);
+        let n0 = nodes.get("n0").unwrap();
+        assert_eq!(n0.id, "n0");
+        let n1 = nodes.get("n1").unwrap();
+        assert_eq!(n1.id, "n1");
+
+        let links = cparser.parse_links(&ctx, &nodes);
+        assert!(links.is_ok(), "{:?}", links);
+
+        let links = links.unwrap();
+        assert_eq!(links.len(), 1);
+        let l0 = links.get("n0n1").unwrap();
+        assert_eq!(l0.peer_a_id, "n0");
+        assert_eq!(l0.peer_b_id, "n1");
+
+        assert_eq!(l0.peer_a_interface, "i2".to_string());
+        assert_eq!(l0.peer_b_interface, "j1".to_string());
+
+        assert_eq!(l0.attributes.len(), 1);
+        assert_eq!(l0.attributes[0].0, zpl::KATTR_LINK_COST);
+        assert_eq!(l0.attributes[0].1, "5");
+    }
+
+    #[test]
+    fn test_parse_links_multiple() {
+        let tstr = r#"
+        [nodes]
+
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["zpr.foo", "bar"], ["baz", 99]]
+
+        [nodes.n0.substrate_addrs]
+        "i0" = "1.2.3.4:2000"
+
+        [nodes.n1]
+        zpr_address = "fd5a:5052:90de::2"
+        provider = [["zpr.foo", "barf"], ["buz", 100]]
+
+        [nodes.n1.substrate_addrs]
+        "j0" = "4.5.6.7:2000"
+        "j1" = "4.5.6.8:2000"
+
+        [nodes.n2]
+        zpr_address = "fd5a:5052:90de::3"
+        provider = [["zpr.foo", "barf"], ["buz", 100]]
+
+        [nodes.n2.substrate_addrs]
+        "k0" = "4.5.6.7:2000"
+        "k1" = "4.5.6.8:2000"
+
+
+        [links.n0n1]
+        peers = [{ node = "n0"}, { node = "n1", interface = "j0" }]
+
+        [links.n1n2]
+        peers = [{ node = "n1", interface = "j1"}, { node = "n2", interface = "k0" }]
+
+        [links.n0n2]
+        peers = [{ node = "n0"}, { node = "n2", interface = "k1" }]
+        "#;
+
+        let ctx = CompilationCtx::new(false, false);
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let nodes = cparser.parse_nodes(&Resolver::default(), &ctx);
+        assert!(nodes.is_ok(), "{:?}", nodes);
+        let nodes = nodes.unwrap();
+        assert_eq!(nodes.len(), 3);
+
+        let links = cparser.parse_links(&ctx, &nodes);
+        assert!(links.is_ok(), "{:?}", links);
+
+        let links = links.unwrap();
+        assert_eq!(links.len(), 3);
+        let l0 = links.get("n0n1").unwrap();
+        assert_eq!(l0.peer_a_id, "n0");
+        assert_eq!(l0.peer_b_id, "n1");
+        let l1 = links.get("n1n2").unwrap();
+        assert_eq!(l1.peer_a_id, "n1");
+        assert_eq!(l1.peer_b_id, "n2");
+        let l2 = links.get("n0n2").unwrap();
+        assert_eq!(l2.peer_a_id, "n0");
+        assert_eq!(l2.peer_b_id, "n2");
+    }
+
+    #[test]
     fn test_parse_node_reserved_id() {
         let tstr = r#"
         [nodes]
         [nodes.visaservice]
         key = "somekey"
-        zpr_address = "foo.zpr"
+        zpr_address = "fd5a:5052:90de::1"
         provider = [["zpr.foo", "bar"], ["baz", 99]]
         interfaces = ["eth0", "eth1"]
         eth0.netaddr = "1.2.3.4:2000"
         eth1.netaddr = "foo.addr:9000"
         "#;
         let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
-        let nodes = cparser.parse_nodes(&CompilationCtx::new(false, false));
+        let nodes = cparser.parse_nodes(&Resolver::default(), &CompilationCtx::new(false, false));
         assert!(nodes.is_err());
         let err = nodes.unwrap_err();
         assert!(err.to_string().contains("is reserved"));
@@ -1244,7 +1036,7 @@ mod test {
         let vs = cparser.parse_visa_service(&ctx);
         assert!(vs.is_ok());
         let vs = vs.unwrap();
-        assert_eq!(vs.unwrap().dock_node_id, "n0");
+        assert_eq!(vs.unwrap().dock_node_id, Some("n0".to_string()));
     }
 
     #[test]
@@ -1586,284 +1378,5 @@ mod test {
             bs.bootstraps.get("another.cn.here").unwrap(),
             &PathBuf::from("other.keyfile.pem")
         );
-    }
-
-    #[test]
-    fn test_parse_attribute_mapping_tag() {
-        let mapping = "service_key -> #endpoint.tag";
-        let result = parse_attribute_mapping(mapping);
-
-        assert!(result.is_ok());
-        let (service_key_name, attr) = result.unwrap();
-
-        assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), AttrDomain::Endpoint);
-        assert_eq!(attr.zpl_value(), "endpoint.tag");
-        assert_eq!(attr.get_values(), None);
-        assert_eq!(attr.is_multi_valued(), false);
-        assert_eq!(attr.is_tag(), true);
-        assert_eq!(attr.optional, false);
-    }
-
-    #[test]
-    fn test_parse_attribute_mapping_multi_valued() {
-        let mapping = "service_key -> user.groups{}";
-        let result = parse_attribute_mapping(mapping);
-
-        assert!(result.is_ok());
-        let (service_key_name, attr) = result.unwrap();
-
-        assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), AttrDomain::User);
-        assert_eq!(attr.zpl_key(), "user.groups");
-        assert_eq!(attr.get_values(), None);
-        assert_eq!(attr.is_multi_valued(), true);
-        assert_eq!(attr.is_tag(), false);
-        assert_eq!(attr.optional, false);
-    }
-
-    #[test]
-    fn test_parse_attribute_mapping_single_valued() {
-        let mapping = "service_key -> service.role";
-        let result = parse_attribute_mapping(mapping);
-
-        assert!(result.is_ok());
-        let (service_key_name, attr) = result.unwrap();
-
-        assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), AttrDomain::Service);
-        assert_eq!(attr.zpl_key(), "service.role");
-        assert_eq!(attr.get_values(), None);
-        assert_eq!(attr.is_multi_valued(), false);
-        assert_eq!(attr.is_tag(), false);
-        assert_eq!(attr.optional, false);
-    }
-
-    #[test]
-    fn test_parse_attribute_mapping_invalid_format() {
-        let mapping = "invalid_format";
-        let result = parse_attribute_mapping(mapping);
-
-        assert!(result.is_err());
-        if let Err(CompilationError::ConfigError(msg)) = result {
-            assert!(msg.contains("invalid attribute mapping"));
-            assert!(msg.contains("must be of the form"));
-        } else {
-            panic!("Expected ConfigError");
-        }
-    }
-
-    #[test]
-    fn test_parse_attribute_mapping_whitespace_handling() {
-        let mapping = "  service_key  ->  user.name  ";
-        let result = parse_attribute_mapping(mapping);
-
-        assert!(result.is_ok());
-        let (service_key_name, attr) = result.unwrap();
-
-        assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), AttrDomain::User);
-        assert_eq!(attr.zpl_key(), "user.name");
-        assert_eq!(attr.get_values(), None);
-        assert_eq!(attr.is_multi_valued(), false);
-        assert_eq!(attr.is_tag(), false);
-        assert_eq!(attr.optional, false);
-    }
-
-    #[test]
-    fn test_parse_attribute_mapping_too_many_arrows() {
-        let mapping = "key -> attr -> extra";
-        let result = parse_attribute_mapping(mapping);
-
-        assert!(result.is_err());
-        if let Err(CompilationError::ConfigError(msg)) = result {
-            assert!(msg.contains("invalid attribute mapping"));
-        } else {
-            panic!("Expected ConfigError");
-        }
-    }
-
-    #[test]
-    fn test_parse_tcp_udp_ports_single_port() {
-        let mut table = Table::new();
-        table.insert("port".to_string(), toml::Value::String("80".to_string()));
-
-        let result = parse_tcp_udp_ports("test-protocol", &table);
-        assert!(result.is_ok());
-        let ports = result.unwrap();
-        assert_eq!(ports.len(), 1);
-        assert_eq!(ports[0], crate::protocols::PortSpec::Single(80));
-    }
-
-    #[test]
-    fn test_parse_tcp_udp_ports_single_port_integer() {
-        let mut table = Table::new();
-        table.insert("port".to_string(), toml::Value::Integer(443));
-
-        let result = parse_tcp_udp_ports("test-protocol", &table);
-        assert!(result.is_ok());
-        let ports = result.unwrap();
-        assert_eq!(ports.len(), 1);
-        assert_eq!(ports[0], crate::protocols::PortSpec::Single(443));
-    }
-
-    #[test]
-    fn test_parse_tcp_udp_ports_multiple_ports() {
-        let mut table = Table::new();
-        table.insert(
-            "port".to_string(),
-            toml::Value::String("80,443,8080".to_string()),
-        );
-
-        let result = parse_tcp_udp_ports("test-protocol", &table);
-        assert!(result.is_ok());
-        let ports = result.unwrap();
-        assert_eq!(ports.len(), 3);
-        assert_eq!(ports[0], crate::protocols::PortSpec::Single(80));
-        assert_eq!(ports[1], crate::protocols::PortSpec::Single(443));
-        assert_eq!(ports[2], crate::protocols::PortSpec::Single(8080));
-    }
-
-    #[test]
-    fn test_parse_tcp_udp_ports_port_range() {
-        let mut table = Table::new();
-        table.insert(
-            "port".to_string(),
-            toml::Value::String("8000-9000".to_string()),
-        );
-
-        let result = parse_tcp_udp_ports("test-protocol", &table);
-        assert!(result.is_ok());
-        let ports = result.unwrap();
-        assert_eq!(ports.len(), 1);
-        assert_eq!(ports[0], crate::protocols::PortSpec::Range(8000, 9000));
-    }
-
-    #[test]
-    fn test_parse_tcp_udp_ports_mixed_ports_and_ranges() {
-        let mut table = Table::new();
-        table.insert(
-            "port".to_string(),
-            toml::Value::String("22,80,8000-8999,443".to_string()),
-        );
-
-        let result = parse_tcp_udp_ports("test-protocol", &table);
-        assert!(result.is_ok());
-        let ports = result.unwrap();
-        assert_eq!(ports.len(), 4);
-        assert_eq!(ports[0], crate::protocols::PortSpec::Single(22));
-        assert_eq!(ports[1], crate::protocols::PortSpec::Single(80));
-        assert_eq!(ports[2], crate::protocols::PortSpec::Range(8000, 8999));
-        assert_eq!(ports[3], crate::protocols::PortSpec::Single(443));
-    }
-
-    #[test]
-    fn test_parse_tcp_udp_ports_with_spaces() {
-        let mut table = Table::new();
-        table.insert(
-            "port".to_string(),
-            toml::Value::String(" 80 , 443 , 8080 ".to_string()),
-        );
-
-        let result = parse_tcp_udp_ports("test-protocol", &table);
-        assert!(result.is_ok());
-        let ports = result.unwrap();
-        assert_eq!(ports.len(), 3);
-        assert_eq!(ports[0], crate::protocols::PortSpec::Single(80));
-        assert_eq!(ports[1], crate::protocols::PortSpec::Single(443));
-        assert_eq!(ports[2], crate::protocols::PortSpec::Single(8080));
-    }
-
-    #[test]
-    fn test_parse_tcp_udp_ports_missing_port() {
-        let table = Table::new(); // Empty table, no port key
-
-        let result = parse_tcp_udp_ports("test-protocol", &table);
-        assert!(result.is_err());
-        if let Err(CompilationError::ConfigError(msg)) = result {
-            assert!(msg.contains("protocol test-protocol missing port"));
-        } else {
-            panic!("Expected ConfigError");
-        }
-    }
-
-    #[test]
-    fn test_parse_tcp_udp_ports_invalid_port_number() {
-        let mut table = Table::new();
-        table.insert(
-            "port".to_string(),
-            toml::Value::String("invalid".to_string()),
-        );
-
-        let result = parse_tcp_udp_ports("test-protocol", &table);
-        assert!(result.is_err());
-        if let Err(CompilationError::ConfigError(msg)) = result {
-            assert!(msg.contains("protocol test-protocol invalid port specification"));
-            assert!(msg.contains("invalid"));
-        } else {
-            panic!("Expected ConfigError");
-        }
-    }
-
-    #[test]
-    fn test_parse_tcp_udp_ports_invalid_port_range() {
-        let mut table = Table::new();
-        table.insert(
-            "port".to_string(),
-            toml::Value::String("8000-7000".to_string()),
-        ); // Invalid range (start > end)
-
-        let result = parse_tcp_udp_ports("test-protocol", &table);
-        assert!(result.is_err());
-        if let Err(CompilationError::ConfigError(msg)) = result {
-            assert!(msg.contains("protocol test-protocol invalid port specification"));
-        } else {
-            panic!("Expected ConfigError");
-        }
-    }
-
-    #[test]
-    fn test_parse_tcp_udp_ports_zero_port() {
-        let mut table = Table::new();
-        table.insert("port".to_string(), toml::Value::String("0".to_string()));
-
-        let result = parse_tcp_udp_ports("test-protocol", &table);
-        assert!(result.is_err());
-        if let Err(CompilationError::ConfigError(msg)) = result {
-            assert!(msg.contains("protocol test-protocol invalid port specification"));
-        } else {
-            panic!("Expected ConfigError");
-        }
-    }
-
-    #[test]
-    fn test_parse_tcp_udp_ports_port_too_high() {
-        let mut table = Table::new();
-        table.insert("port".to_string(), toml::Value::String("65536".to_string())); // Port out of range
-
-        let result = parse_tcp_udp_ports("test-protocol", &table);
-        assert!(result.is_err());
-        if let Err(CompilationError::ConfigError(msg)) = result {
-            assert!(msg.contains("protocol test-protocol invalid port specification"));
-        } else {
-            panic!("Expected ConfigError");
-        }
-    }
-
-    #[test]
-    fn test_parse_tcp_udp_ports_malformed_range() {
-        let mut table = Table::new();
-        table.insert(
-            "port".to_string(),
-            toml::Value::String("8000-8500-9000".to_string()),
-        ); // Too many dashes
-
-        let result = parse_tcp_udp_ports("test-protocol", &table);
-        assert!(result.is_err());
-        if let Err(CompilationError::ConfigError(msg)) = result {
-            assert!(msg.contains("protocol test-protocol invalid port specification"));
-        } else {
-            panic!("Expected ConfigError");
-        }
     }
 }

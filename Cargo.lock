@@ -271,6 +271,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "gen_ops"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "304de19db7028420975a296ab0fcbbc8e69438c4ed254a1e41e2a7f37d5f0e0a"
+
+[[package]]
 name = "getrandom"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -436,6 +442,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ip_network_table-deps-treebitmap"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e537132deb99c0eb4b752f0346b6a836200eaaa3516dd7e5514b63930a09e5d"
+
+[[package]]
 name = "is_terminal_polyfill"
 version = "1.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -488,6 +500,15 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+]
+
+[[package]]
+name = "num-integer"
+version = "0.1.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -629,6 +650,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1885c039570dc00dcb4ff087a89e185fd56bae234ddc7f056a945bf36467248d"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "range-set-blaze"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dbaaf29990efce7efbdb301794fbacf9fcdbfb871e77f67c00b0ae3c08b665e"
+dependencies = [
+ "gen_ops",
+ "itertools",
+ "num-integer",
+ "num-traits",
 ]
 
 [[package]]
@@ -1279,12 +1312,14 @@ dependencies = [
 
 [[package]]
 name = "zpr"
-version = "0.9.0"
-source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.9.0#1a2d224e01bdc08c3b0bf0106b6d8c3f28d12a74"
+version = "0.13.0"
+source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.13.0#ba141f726e374d385c7b05861e42aa46fa9b89de"
 dependencies = [
  "capnp",
  "capnpc",
+ "ip_network_table-deps-treebitmap",
  "open-enum",
+ "range-set-blaze",
  "thiserror 1.0.69",
  "url",
  "zerocopy",

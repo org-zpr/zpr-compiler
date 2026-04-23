@@ -2,22 +2,27 @@
 
 use base64::prelude::*;
 use std::collections::{HashMap, HashSet};
-use zpr::policy_types::{Attribute, ServiceType};
+use std::net::Ipv6Addr;
+use zpr::policy_types::{AttrDomain, Attribute, ServiceType};
 
 use crate::compilation::Compilation;
 use crate::config_api::{ConfigApi, ConfigItem};
 use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
-use crate::fabric::{Fabric, PLine};
-use crate::fabric_util::{squash_attributes, vec_to_attributes};
+use crate::fabric::{Fabric, FabricLink, FabricNode, NodeLinkAddr, PLine, SubstrateAddr};
+use crate::fabric_util::{squash_attributes, vec_to_attributes, vec_to_attributes_in_domain};
 use crate::protocols::{PortSpec, Protocol, ZPR_OAUTH_RSA, ZPR_VALIDATION_2};
 use crate::ptypes::{AllowClause, Class, ClassFlavor, FPos, Policy};
 use crate::zpl;
 
 pub struct Weaver {
     fabric: Fabric,
+    wctx: WeavingContext,
+}
 
+#[derive(Default)]
+pub struct WeavingContext {
     // Map the allow clause ID to the fabric service ID.
     allowid_to_fab_svc: HashMap<usize, String>,
 
@@ -25,24 +30,30 @@ pub struct Weaver {
     used_trusted_services: HashSet<String>,
 }
 
-/// Weave produces the fabric from the ZPL and Configuration data structures,
+/// Weave produces the fabric from the ZPL and Configuration data structures.
+/// Note that the all the smarts for building the "fabric" intermediate representation
+/// are here in the weaver.
+///
+/// Access to the configuration is via the [ConfigApi].
 pub fn weave(
     comp: &Compilation,
     config: &ConfigApi,
     policy: &Policy,
     ctx: &CompilationCtx,
 ) -> Result<Fabric, CompilationError> {
-    let mut weaver = Weaver::new();
+    let mut weaver = Weaver::new(WeavingContext::default());
 
-    let pdig = policy
-        .digest
-        .expect("policy digest must be set prior to calling weave");
+    let pdig = policy.digest.ok_or(CompilationError::BuildError(
+        "missing policy digest".to_string(),
+    ))?;
 
     // Use config verison as its digest. Version is hex encoded hash.
     let cdig = match config.must_get("zpr/version") {
         ConfigItem::StrVal(ver) => {
             let mut d = [0u8; 32];
-            hex::decode_to_slice(ver, &mut d).expect("version must be a 32 byte hex string");
+            hex::decode_to_slice(ver, &mut d).map_err(|_e| {
+                CompilationError::BuildError("version must be a 32 byte hex string".to_string())
+            })?;
             d
         }
         _ => {
@@ -66,7 +77,8 @@ pub fn weave(
     }
 
     weaver.init_services(comp, &class_idx, policy, config, ctx)?;
-    weaver.init_nodes(config)?;
+    weaver.init_nodes(config, ctx)?;
+    weaver.add_topology(config, ctx)?;
     weaver.add_client_deny_policies(comp, &class_idx, policy, config)?;
     weaver.add_client_allow_policies(comp, &class_idx, policy, config)?;
     // By the time we get here, we have resolved all attributes and so know which trusted
@@ -78,12 +90,27 @@ pub fn weave(
     Ok(weaver.fabric)
 }
 
+impl WeavingContext {
+    /// Map the allow clause ID to the fabric service ID.
+    fn map_allow_id_to_fabric_id<S: Into<String>>(&mut self, allow_id: usize, fab_svc_id: S) {
+        self.allowid_to_fab_svc.insert(allow_id, fab_svc_id.into());
+    }
+
+    /// Get the fabric service ID for a given allow clause ID.
+    fn fabric_id_for_allow_id(&self, allow_id: &usize) -> Option<&String> {
+        self.allowid_to_fab_svc.get(allow_id)
+    }
+
+    fn add_used_trusted_service<S: Into<String>>(&mut self, ts_id: S) {
+        self.used_trusted_services.insert(ts_id.into());
+    }
+}
+
 impl Weaver {
-    fn new() -> Self {
+    fn new(wctx: WeavingContext) -> Self {
         Self {
             fabric: Fabric::default(),
-            allowid_to_fab_svc: HashMap::new(),
-            used_trusted_services: HashSet::new(),
+            wctx,
         }
     }
 
@@ -96,7 +123,8 @@ impl Weaver {
         revhash.extend_from_slice(policy_digest);
         revhash.extend_from_slice(config_digest);
         let policy_revision_dig = sha256_of_bytes(&revhash);
-        self.fabric.revision = digest_as_hex(&policy_revision_dig);
+        self.fabric
+            .set_revision(&digest_as_hex(&policy_revision_dig));
         Ok(())
     }
 
@@ -131,15 +159,13 @@ impl Weaver {
     ) -> Result<(), CompilationError> {
         let vs_protocol = Protocol::tcp("zpr-vs")
             .add_port(PortSpec::Single(zpl::VISA_SERVICE_PORT))
-            .build()
-            .unwrap();
+            .build()?;
 
         // The provider of the visa service is a hardcoded CN value.
         let vs_cn_attr = Attribute::tuple(zpl::KATTR_CN)
             .single()
             .value(zpl::VISA_SERVICE_CN)
-            .build()
-            .expect("invalid attribute");
+            .build()?;
         let vs_attrs = vec![vs_cn_attr];
         let fab_svc_id = self.fabric.add_service(
             zpl::VS_SERVICE_NAME,
@@ -207,7 +233,7 @@ impl Weaver {
 
                 // And add the attributes defined at class level
                 admin_access_attrs
-                    .extend_from_slice(&attrs_for_class(class_idx, &lhs_clause.class));
+                    .extend_from_slice(&attrs_for_class(class_idx, &lhs_clause.class)?);
             }
 
             let fp = FPos::from(&ac.server[0].class_tok);
@@ -235,7 +261,7 @@ impl Weaver {
         }
         if condition_count == 0 {
             // TODO: is this an error?
-            ctx.warn("no policy granting VisaService admin access")?;
+            ctx.warn("no policy granting admin access to VisaService")?;
         }
 
         // TODO: When we get around to trusted services, we need to add builtin rules
@@ -262,7 +288,7 @@ impl Weaver {
             // TODO: If there are no allow rules that permit access to the service then
             // maybe we don't even allow it to connect?
             let mut attrs = Vec::new();
-            let svc_class_attrs = attrs_for_class(class_idx, &define.name);
+            let svc_class_attrs = attrs_for_class(class_idx, &define.name)?;
             attrs.extend_from_slice(&svc_class_attrs);
             self.add_service(class_idx, define, &attrs, define.class_id, config)?;
         }
@@ -302,7 +328,9 @@ impl Weaver {
                     attrs.extend_from_slice(&vec_to_attributes(&alist)?);
                 }
                 _ => {
-                    panic!("error: provider must be an attribute list");
+                    return Err(CompilationError::BuildError(format!(
+                        "provider not an attribute list: {matched_service_name}"
+                    )));
                 }
             },
             None => {
@@ -311,11 +339,13 @@ impl Weaver {
         };
 
         // service must have a protocol
-        let prot = match config.get(&format!("/services/{}/protocol", matched_service_name)) {
+        let mut prot = match config.get(&format!("/services/{}/protocol", matched_service_name)) {
             Some(citem) => match &citem {
                 ConfigItem::Protocol(_, _, _) => citem.try_into_protocol()?,
                 _ => {
-                    panic!("error: protocol must be a protocol enum");
+                    return Err(CompilationError::BuildError(format!(
+                        "protocol not a protocol enum: {matched_service_name}"
+                    )));
                 }
             },
             None => {
@@ -334,6 +364,22 @@ impl Weaver {
                     match config.get(&format!("/trusted_services/{nam}/client_service")) {
                         Some(ConfigItem::StrVal(cs_name)) if cs_name == matched_service_name => {
                             svc_type = ServiceType::Authentication;
+
+                            // Also this service is actually provided by the trusted service, so:
+                            let ts_provider_attrs =
+                                match config.get(&format!("/trusted_services/{nam}/provider")) {
+                                    Some(ConfigItem::AttrList(attrs)) => vec_to_attributes(&attrs)?,
+                                    _ => {
+                                        return Err(CompilationError::ConfigError(format!(
+                                            "trusted service {nam} missing provider attributes",
+                                        )));
+                                    }
+                                };
+                            attrs.extend_from_slice(&ts_provider_attrs);
+
+                            // And also has a special protocol layer 7 designation:
+                            // TODO: Really should come from config api.
+                            prot.set_layer7(ZPR_OAUTH_RSA.to_string());
                             break;
                         }
                         _ => (),
@@ -362,36 +408,38 @@ impl Weaver {
         let fabric_svc_id =
             self.fabric
                 .add_service(&matched_service_name, &prot, &resolved_attrs, svc_type)?;
-        self.allowid_to_fab_svc.insert(svc_id, fabric_svc_id);
-
+        self.wctx.map_allow_id_to_fabric_id(svc_id, fabric_svc_id);
         Ok(())
     }
 
     /// This requires that `add_services` has already been run.
     ///
-    /// Panics if
+    /// Errors out if:
     /// * `name` is not in the `class_idx`
     /// * the class ID for `name` is not in the fabric services map.
     fn service_clause_name_to_fabric_id(
         &self,
         class_idx: &HashMap<String, &Class>,
         name: &str,
-    ) -> String {
+    ) -> Result<String, CompilationError> {
         let svc_id = match class_idx.get(name) {
             Some(cls) => cls.class_id,
-            None => panic!("service class {} not found in class index", name),
+            None => {
+                return Err(CompilationError::BuildError(format!(
+                    "service class {name} not found in class index"
+                )));
+            }
         };
-        let fab_svc_id = match self.allowid_to_fab_svc.get(&svc_id) {
+        let fab_svc_id = match self.wctx.fabric_id_for_allow_id(&svc_id) {
             Some(s) => s,
             None => {
                 // programming error
-                panic!(
-                    "error - service {} with id {} not found in map",
-                    name, svc_id
-                );
+                return Err(CompilationError::BuildError(format!(
+                    "service {name} with id {svc_id} not found in fabric map"
+                )));
             }
         };
-        fab_svc_id.clone()
+        Ok(fab_svc_id.clone())
     }
 
     fn allow_clauses_to_services(
@@ -415,22 +463,28 @@ impl Weaver {
 
             let svc_id = match class_idx.get(&server_service.class) {
                 Some(cls) => cls.class_id,
-                None => panic!(
-                    "service class {} not found in class index",
-                    server_service.class
-                ),
+                None => {
+                    return Err(CompilationError::BuildError(format!(
+                        "service class {} not found in class index",
+                        server_service.class
+                    )));
+                }
             };
 
             // start with parent class attributes
-            let mut attrs = attrs_for_class(class_idx, &server_service.class);
+            let mut attrs = attrs_for_class(class_idx, &server_service.class)?;
 
             // And include any additionaal server side attributes from the RHS clause.
             for rhs_clause in &ac.server {
                 attrs.extend_from_slice(&rhs_clause.with);
             }
-            let svc_class = class_idx
-                .get(&server_service.class)
-                .expect("service class not found in class index");
+            let svc_class =
+                class_idx
+                    .get(&server_service.class)
+                    .ok_or(CompilationError::BuildError(format!(
+                        "service class {} not found in class index",
+                        server_service.class
+                    )))?;
             self.add_service(class_idx, svc_class, &attrs, svc_id, config)?;
         }
         Ok(())
@@ -460,18 +514,18 @@ impl Weaver {
             match attr_name.as_str() {
                 zpl::KATTR_CN => {
                     resolved_attrs.push(zpl_attr.clone());
-                    self.used_trusted_services
-                        .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+                    self.wctx
+                        .add_used_trusted_service(zpl::DEFAULT_TRUSTED_SERVICE_ID);
                 }
                 zpl::DEFAULT_ATTR => {
                     resolved_attrs.push(zpl_attr.clone_with_new_name(zpl::KATTR_CN));
-                    self.used_trusted_services
-                        .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+                    self.wctx
+                        .add_used_trusted_service(zpl::DEFAULT_TRUSTED_SERVICE_ID);
                 }
                 zpl::KATTR_SERVICES => {
                     resolved_attrs.push(zpl_attr.clone());
-                    self.used_trusted_services
-                        .insert(zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string());
+                    self.wctx
+                        .add_used_trusted_service(zpl::DEFAULT_TRUSTED_SERVICE_ID);
                 }
                 _ => {
                     // TODO: This should be cached
@@ -515,7 +569,7 @@ impl Weaver {
                                 new_attr.set_multi_valued()?;
                             }
                             resolved_attrs.push(new_attr);
-                            self.used_trusted_services.insert(ts_name.clone());
+                            self.wctx.add_used_trusted_service(ts_name.clone());
                             matched = true;
                         }
                     }
@@ -527,17 +581,16 @@ impl Weaver {
                     }
                 }
             }
-
-            if attr_name == zpl::KATTR_CN {
-            } else if attr_name == zpl::DEFAULT_ATTR {
-            } else {
-            }
         }
         Ok(resolved_attrs)
     }
 
     /// Must init_services before init_nodes.
-    fn init_nodes(&mut self, config: &ConfigApi) -> Result<(), CompilationError> {
+    fn init_nodes(
+        &mut self,
+        config: &ConfigApi,
+        ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
         let node_keys = match config.get("zpr/nodes") {
             Some(ConfigItem::KeySet(node_ids)) => node_ids,
             _ => {
@@ -547,31 +600,15 @@ impl Weaver {
             }
         };
 
-        if node_keys.len() > 1 {
-            return Err(CompilationError::ConfigError(
-                "multiple nodes defined in configuration".to_string(),
-            ));
-        }
-        let vs_dock_node = match config.get("zpr/visa_services/default/dock_node_id") {
-            Some(ConfigItem::StrVal(node_id)) => node_id,
-            _ => {
-                return Err(CompilationError::ConfigError(
-                    "visa service docking node not defined for default VS in configuration"
-                        .to_string(),
-                ));
+        match config.get("zpr/visa_services/default/dock_node_id") {
+            Some(ConfigItem::StrVal(_node_id)) => {
+                ctx.warn("visa service has docking node set but is not enforced")?;
             }
+            _ => (),
         };
-        if vs_dock_node != node_keys[0] {
-            return Err(CompilationError::ConfigError(format!(
-                "visa service docking node must be the only node in configuration: '{}' != '{}'",
-                vs_dock_node, node_keys[0]
-            )));
-        }
 
-        // Before handing off to fabric, we need to check the node provider attributes to see
-        // if they reference any trusted services.
         for node_key in &node_keys {
-            let node_attrs = match config.get(&format!("zpr/nodes/{node_key}/provider")) {
+            let raw_node_attrs = match config.get(&format!("zpr/nodes/{node_key}/provider")) {
                 Some(ConfigItem::AttrList(attrs)) => vec_to_attributes(&attrs)?,
                 _ => {
                     return Err(CompilationError::ConfigError(format!(
@@ -579,12 +616,185 @@ impl Weaver {
                     )));
                 }
             };
-            // We don't care here what the attributes are (the fabric calls for them itself), we just want
-            // to make sure they all resolve.
-            let _ = self.resolve_attributes(&node_attrs, config)?;
+            let mut resolved_node_attrs = self.resolve_attributes(&raw_node_attrs, config)?;
+
+            let zpr_addr = match config.get(&format!("zpr/nodes/{node_key}/zpr_addr")) {
+                Some(ConfigItem::StrVal(s)) => s,
+                _ => {
+                    return Err(CompilationError::ConfigError(format!(
+                        "missing zpr address for node {}",
+                        node_key
+                    )));
+                }
+            };
+
+            // The address returned from config-api has already gone though the resolver.
+            // We require an IPv6 address.
+            let naddr: Ipv6Addr = match zpr_addr.parse() {
+                // TODO: Should be parsed to an IpAddr in config.rs
+                Ok(a) => a,
+                Err(e) => {
+                    return Err(CompilationError::ConfigError(format!(
+                        "invalid zpr IPv6 address for node: {}: {}",
+                        zpr_addr, e
+                    )));
+                }
+            };
+
+            resolved_node_attrs.push(Attribute::try_zpr_internal_attr(
+                zpl::KATTR_ADDR,
+                &naddr.to_string(),
+            )?);
+
+            // Note that we do not have line/col info from the config file.
+            let attr_map = squash_attributes(&resolved_node_attrs, &FPos::default())?;
+            let provider_attrs = attr_map.into_values().collect::<Vec<Attribute>>();
+
+            // Gather the nodes named substrate addrs if any.
+            let substrates = match config.get(&format!("zpr/nodes/{node_key}/interfaces")) {
+                Some(ConfigItem::KeySet(if_ids)) => {
+                    let mut interfaces = HashMap::new();
+                    for if_id in &if_ids {
+                        match config.get(&format!("zpr/nodes/{node_key}/interfaces/{if_id}")) {
+                            Some(ConfigItem::NetAddr(host, port)) => {
+                                let if_addr = SubstrateAddr {
+                                    host: host.clone(),
+                                    port: port,
+                                };
+                                interfaces.insert(if_id.to_string(), if_addr);
+                            }
+                            _ => {
+                                return Err(CompilationError::ConfigError(format!(
+                                    "interface {if_id} for node {node_key} must be a network address",
+                                )));
+                            }
+                        }
+                    }
+                    Some(interfaces)
+                }
+                _ => None,
+            };
+
+            let fabn = FabricNode {
+                node_id: node_key.to_string(),
+                zpr_addr: naddr.into(),
+                provider_attrs: provider_attrs.clone(),
+                substrate_addrs: substrates,
+            };
+
+            self.fabric.push_node(fabn);
+
+            // Now create the visa support service for this node and an access rule.
+            let vs = self
+                .fabric
+                .get_visa_service()
+                .ok_or(CompilationError::BuildError(
+                    "visa service must be added before add_node is called".to_string(),
+                ))?;
+            let vs_provider_attrs = vs.provider_attrs.clone();
+            let svc_name = format!("zpr/{}/vss", node_key);
+
+            // There cannot be a service with this id already.
+            if self.fabric.has_service(&svc_name) {
+                return Err(CompilationError::ConfigError(format!(
+                    "unabled to configure node VSS because service {} already exists in fabric",
+                    &svc_name
+                )));
+            }
+
+            let vss_prot = Protocol::tcp("zpr-vss")
+                .add_port(PortSpec::Single(zpl::VISA_SUPPORT_SEVICE_PORT))
+                .build()
+                .unwrap();
+            let vss_id = self
+                .fabric
+                .add_builtin_service(&svc_name, &vss_prot, &provider_attrs)?;
+            let pline = PLine::new_builtin("allow visa service to access node visa support");
+            self.fabric.add_condition_to_service(
+                false,
+                &vss_id,
+                &vs_provider_attrs,
+                &[],
+                false,
+                None,
+                &pline,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn get_node_link_addr(
+        &self,
+        node_key: &str,
+        if_id: &str,
+    ) -> Result<NodeLinkAddr, CompilationError> {
+        let node = self
+            .fabric
+            .get_node(node_key)
+            .ok_or(CompilationError::BuildError(format!(
+                "linked node {node_key} not found in fabric",
+            )))?;
+        let if_addr = node
+            .substrate_addrs
+            .as_ref()
+            .ok_or(CompilationError::ConfigError(format!(
+                "node {node_key} is part of a link but has no substrate interfaces defined",
+            )))?
+            .get(if_id)
+            .ok_or(CompilationError::ConfigError(format!(
+                "interface {if_id} not found for linked node {node_key}",
+            )))?;
+
+        Ok(NodeLinkAddr {
+            zpr_addr: node.zpr_addr.clone(),
+            substrate: if_addr.clone(),
+        })
+    }
+
+    /// Uses the Fabric nodes, so must be called after setting up the nodes in the fabric.
+    fn add_topology(
+        &mut self,
+        config: &ConfigApi,
+        _ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
+        let link_ids = match config.get("zpr/links") {
+            Some(ConfigItem::KeySet(link_ids)) => link_ids,
+            _ => return Ok(()),
+        };
+        for link_id in &link_ids {
+            let link_tuple = match config.get(&format!("zpr/links/{link_id}")) {
+                Some(ConfigItem::KeySet(tup)) => tup,
+                _ => {
+                    return Err(CompilationError::ConfigError(format!(
+                        "missing or invalid link: {link_id}",
+                    )));
+                }
+            };
+            // Expect: (node1, ifname1, node2, ifname2)
+            if link_tuple.len() != 4 {
+                return Err(CompilationError::BuildError(format!(
+                    "link {link_id} must be a tuple of (node1, ifname1, node2, ifname2)",
+                )));
+            }
+
+            let link_attrs = match config.get(&format!("zpr/links/{link_id}/attributes")) {
+                Some(ConfigItem::AttrList(attrs)) => {
+                    vec_to_attributes_in_domain(&attrs, AttrDomain::Link)?
+                }
+                _ => vec![],
+            };
+
+            let flink = FabricLink {
+                link_id: link_id.to_string(),
+                node_a: self.get_node_link_addr(&link_tuple[0], &link_tuple[1])?,
+                node_b: self.get_node_link_addr(&link_tuple[2], &link_tuple[3])?,
+                link_attrs: link_attrs,
+            };
+
+            self.fabric.push_link(flink);
         }
 
-        self.fabric.add_node(&vs_dock_node, config)
+        Ok(())
     }
 
     /// Process the ZPL policy into conditions for accessing fabric services.
@@ -638,7 +848,7 @@ impl Weaver {
                     || lhs_class.flavor == ClassFlavor::Service
                 {
                     // Add attributes from parent
-                    attrs.extend_from_slice(&attrs_for_class(class_idx, &lhs_class.class));
+                    attrs.extend_from_slice(&attrs_for_class(class_idx, &lhs_class.class)?);
 
                     // Add non-optional instance attributes
                     attrs.extend(lhs_class.with.iter().filter(|a| !a.optional).cloned());
@@ -652,7 +862,7 @@ impl Weaver {
                             Attribute::try_zpr_internal_attr_mv(zpl::KATTR_SERVICES, "")?
                         } else {
                             let fab_svc_name =
-                                self.service_clause_name_to_fabric_id(class_idx, &lhs_class.class);
+                                self.service_clause_name_to_fabric_id(class_idx, &lhs_class.class)?;
                             Attribute::try_zpr_internal_attr_mv(zpl::KATTR_SERVICES, &fab_svc_name)?
                         };
                         attrs.push(svc_attr);
@@ -698,16 +908,27 @@ impl Weaver {
 
             if server_service.class == zpl::DEF_CLASS_SERVICE_NAME {
                 // Add to all services (not nodes or trusted services or visa service)
-                self.fabric.add_condition_to_all_services(
-                    never_allow,
-                    &required_attrs,
-                    &svc_required_attrs,
-                    ac.signal.clone(),
-                    &pline,
-                )?;
+                let regular_svc_ids = self
+                    .fabric
+                    .services
+                    .iter()
+                    .filter(|s| s.service_type == ServiceType::Regular)
+                    .map(|s| s.fabric_id.clone())
+                    .collect::<Vec<String>>();
+                for svc_id in &regular_svc_ids {
+                    self.fabric.add_condition_to_service(
+                        never_allow,
+                        &svc_id,
+                        &required_attrs,
+                        &svc_required_attrs,
+                        false, // guessing
+                        ac.signal.clone(),
+                        &pline,
+                    )?;
+                }
             } else {
                 let fab_svc_id =
-                    self.service_clause_name_to_fabric_id(class_idx, &server_service.class);
+                    self.service_clause_name_to_fabric_id(class_idx, &server_service.class)?;
                 self.fabric.add_condition_to_service(
                     never_allow,
                     &fab_svc_id,
@@ -761,7 +982,7 @@ impl Weaver {
             }
         };
 
-        self.fabric.default_auth_cert_asn = cert_data;
+        self.fabric.set_default_auth_cert(cert_data);
         Ok(())
     }
 
@@ -776,8 +997,8 @@ impl Weaver {
     ) -> Result<(), CompilationError> {
         let mut checked_services = HashSet::new();
         loop {
-            let active_set_count = self.used_trusted_services.len();
-            let active_trusted_services = self.used_trusted_services.clone();
+            let active_set_count = self.wctx.used_trusted_services.len();
+            let active_trusted_services = self.wctx.used_trusted_services.clone();
             for ts_name in &active_trusted_services {
                 if ts_name == zpl::DEFAULT_TRUSTED_SERVICE_ID {
                     continue;
@@ -799,7 +1020,7 @@ impl Weaver {
                 // Call resolve which may add to the list of active trusted services.
                 let _ = self.resolve_attributes(&ts_provider_attrs, config)?;
             }
-            if self.used_trusted_services.len() == active_set_count {
+            if self.wctx.used_trusted_services.len() == active_set_count {
                 break; // no change? We are done.
             }
         }
@@ -816,7 +1037,7 @@ impl Weaver {
 
         // Copy the used trusted service names into a stand alone vector to avoid
         // holding an immutable ref to self in the following loop.
-        let used_trusted_service_names = self.used_trusted_services.clone();
+        let used_trusted_service_names = self.wctx.used_trusted_services.clone();
 
         for ts_name in used_trusted_service_names {
             if ts_name == zpl::DEFAULT_TRUSTED_SERVICE_ID {
@@ -854,15 +1075,8 @@ impl Weaver {
                     }
                 };
 
-            let vs_svc_protocol = self.check_ts_components(
-                config,
-                ctx,
-                &ts_name,
-                &client_svc,
-                &vs_svc,
-                &ts_api,
-                &ts_provider_attrs,
-            )?;
+            let vs_svc_protocol =
+                self.check_ts_components(config, ctx, &ts_name, &client_svc, &vs_svc, &ts_api)?;
 
             // The trusted service must return some attributes, and may return some identity attributes.
             let ts_returns_attrs =
@@ -906,8 +1120,7 @@ impl Weaver {
             let cn_attr = Attribute::tuple(zpl::KATTR_CN)
                 .single()
                 .value(zpl::VISA_SERVICE_CN)
-                .build()
-                .expect("invalid attribute");
+                .build()?;
             let vs_access_attrs = vec![cn_attr];
             let pline = PLine::new_builtin(&format!(
                 "allow visa service access to trusted service {}",
@@ -931,23 +1144,24 @@ impl Weaver {
     ///
     /// Returns the protocol for the visa-facing component of the trusted service (if found).
     ///
-    /// As a side effect this also will update the actor/adapter facing service record in the fabric
-    /// with the protocol and provider attributes.
+    /// `vs_svc` - the visa service facing service name.
+    /// `client_svc` - the actor/adapter facing service name.
     fn check_ts_components(
-        &mut self,
+        &self,
         config: &ConfigApi,
         ctx: &CompilationCtx,
         ts_name: &str,
         client_svc: &str,
         vs_svc: &str,
         ts_api: &str,
-        ts_provider_attrs: &Vec<Attribute>,
     ) -> Result<Option<Protocol>, CompilationError> {
         let mut vs_svc_protocol: Option<Protocol> = None;
         for svc_name in [client_svc, vs_svc] {
             if self.fabric.has_service(svc_name) {
                 if svc_name == vs_svc {
-                    panic!("error: visa service should not yet exist in fabric");
+                    return Err(CompilationError::BuildError(format!(
+                        "VS facing service for {ts_name} already exists: {vs_svc}"
+                    )));
                 }
             } else if svc_name == client_svc {
                 // This implies that there is no ZPL allowing access to the client facing
@@ -964,13 +1178,14 @@ impl Weaver {
                 Some(citem) => match &citem {
                     ConfigItem::Protocol(_, _, _) => citem.try_into_protocol()?,
                     _ => {
-                        panic!("error: protocol must be a protocol enum");
+                        return Err(CompilationError::ConfigError(format!(
+                            "protocol for service {svc_name} must be a valid protocol enum"
+                        )));
                     }
                 },
                 None => {
                     return Err(CompilationError::ConfigError(format!(
-                        "protocol for service {} not found in configuration",
-                        svc_name,
+                        "protocol for service {svc_name} not found in configuration"
                     )));
                 }
             };
@@ -987,19 +1202,6 @@ impl Weaver {
                     )));
                 }
                 vs_svc_protocol = Some(vsp);
-            } else {
-                // Fold in additional details about the client facing authentication service.
-                let mut auth_prot = prot.clone();
-                auth_prot.set_layer7(ZPR_OAUTH_RSA.to_string()); // TODO: Return layer7 name from config_api. Hardcoded to "zpr-oauthrsa" for now.
-                let found = self.fabric.update_service(svc_name, |svc| {
-                    svc.protocol = Some(auth_prot.clone());
-                    svc.provider_attrs = ts_provider_attrs.clone();
-                    svc.service_type = ServiceType::Authentication;
-                });
-                if !found {
-                    // Programming error we checked above that the service was in the fabcir.
-                    panic!("error: service {} not found in fabric", svc_name);
-                }
             }
         }
         Ok(vs_svc_protocol)
@@ -1018,9 +1220,7 @@ impl Weaver {
             match config.get(&format!("zpr/bootstrap/{cnval}")) {
                 Some(ConfigItem::BytesB64(b64data)) => match BASE64_STANDARD.decode(b64data) {
                     Ok(cert_data) => {
-                        self.fabric
-                            .bootstrap_records
-                            .insert(cnval.clone(), cert_data.clone());
+                        self.fabric.push_bootstrap_record(cnval, cert_data);
                     }
                     Err(e) => {
                         return Err(CompilationError::ConfigError(format!(
@@ -1068,11 +1268,14 @@ fn find_defined_service(
 
 /// Get all the WITH attributes on the named class, including any attributes on
 /// the parent classes.  We ignore optional attributes.
-fn attrs_for_class(class_idx: &HashMap<String, &Class>, class_name: &str) -> Vec<Attribute> {
+fn attrs_for_class(
+    class_idx: &HashMap<String, &Class>,
+    class_name: &str,
+) -> Result<Vec<Attribute>, CompilationError> {
     let mut attrs = Vec::new();
-    let mut cl = class_idx
-        .get(class_name)
-        .unwrap_or_else(|| panic!("class {} not found in class index", class_name));
+    let mut cl = class_idx.get(class_name).ok_or_else(|| {
+        CompilationError::BuildError(format!("class {} not found in class index", class_name))
+    })?;
 
     // If my parent name is not my name... grab all my attributes.
     while cl.parent != cl.name {
@@ -1083,9 +1286,12 @@ fn attrs_for_class(class_idx: &HashMap<String, &Class>, class_name: &str) -> Vec
             attrs.push(a.clone());
         }
         // Then move up to the parent class.
-        cl = class_idx
-            .get(&cl.parent)
-            .unwrap_or_else(|| panic!("error parent class {} of {} not found", cl.parent, cl.name));
+        cl = class_idx.get(&cl.parent).ok_or_else(|| {
+            CompilationError::BuildError(format!(
+                "error parent class {} of {} not found",
+                cl.parent, cl.name
+            ))
+        })?;
     }
     // WHEN parent name is my name, take my attributes
     for a in &cl.with_attrs {
@@ -1094,7 +1300,7 @@ fn attrs_for_class(class_idx: &HashMap<String, &Class>, class_name: &str) -> Vec
         }
         attrs.push(a.clone());
     }
-    attrs
+    Ok(attrs)
 }
 
 #[cfg(test)]
@@ -1121,7 +1327,7 @@ mod test {
         dock_node = "n0"
         "#;
 
-        let mut w = Weaver::new();
+        let mut w = Weaver::new(WeavingContext::default());
         let class_idx = HashMap::new();
         let policy = Policy::default();
         let config =
@@ -1189,7 +1395,7 @@ mod test {
         let comp = Compilation::builder(PathBuf::default()).build();
 
         {
-            let mut w = Weaver::new();
+            let mut w = Weaver::new(WeavingContext::default());
 
             let res = w.init_services(&comp, &class_idx, &policy, &config, &ctx);
             assert!(res.is_ok(), "init_services failed: {}", res.unwrap_err());
@@ -1245,7 +1451,7 @@ mod test {
         class_idx.insert("foo".to_string(), &foo_cls);
 
         {
-            let mut w = Weaver::new();
+            let mut w = Weaver::new(WeavingContext::default());
             let res = w.init_services(&comp, &class_idx, &policy, &config, &ctx);
             println!("{:?}", res);
             assert!(res.is_ok(), "init_services failed: {}", res.unwrap_err());
@@ -1288,8 +1494,10 @@ mod test {
         let config = ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), &ctx)
             .expect("failed to parse config");
 
-        let mut w = Weaver::new();
-        w.used_trusted_services.insert("bas".to_string()); // Add the trusted service to the used set.
+        let mut wctx = WeavingContext::default();
+        wctx.add_used_trusted_service("bas");
+
+        let mut w = Weaver::new(wctx);
         let res = w.add_trusted_services(&config, &ctx);
         assert!(
             res.is_ok(),
