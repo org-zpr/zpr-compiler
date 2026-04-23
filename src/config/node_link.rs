@@ -128,7 +128,7 @@ pub(super) fn parse_link(
             .to_string();
 
         let refnode = nodes.get(&node_id);
-        if !refnode.is_some() {
+        if refnode.is_none() {
             return Err(err_config!(
                 "link {} peer {} references unknown node '{}'",
                 link_id,
