@@ -52,12 +52,6 @@ pub(super) fn parse_tcp_udp_ports(
     } else {
         return Err(err_config!("protocol {} missing port", ctx));
     };
-
-    // Valid form of `ps_strv` is:
-    // - single port number
-    // - comma separated list of port numbers
-    // - range of port numbers (e.g. 8000-9000)
-    // - comma separated mix of the above (e.g. 22,80,443,8000-9000)
     PortSpec::parse_list(&ps_strv).map_err(|e| {
         err_config!(
             "protocol {} invalid port specification '{}': {}",
