@@ -1,0 +1,36 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v6
+    - name: Build Release Artifacts
+      run: |
+        rustup toolchain install stable --profile minimal
+        cargo build --release --target x86_64-unknown-linux-gnu
+
+        # TODO: Cross compiling currently runs into some dependency hiccups
+        # rustup target add aarch64-apple-darwin
+        # cargo build --release --target aarch64-apple-darwin
+    - name: Release
+      uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd
+      with:
+        prerelease: true
+        artifactErrorsFailBuild: true
+        artifacts: |
+          target/x86_64-unknown-linux-gnu/release/zplc
+          target/x86_64-unknown-linux-gnu/release/zpdump
+        generateReleaseNotes: true
