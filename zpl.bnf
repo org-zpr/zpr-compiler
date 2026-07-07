@@ -22,6 +22,13 @@
 // KEYWORD STATE (from lex.rs):
 //   - Active keywords: never, allow, define, with, to, access, and, as, aka,
 //     tag, tags, on, optional, multiple, signal (plus "," as AND, "." as terminator).
+//   - Keywords are case-insensitive ("ALLOW" == "allow"). Literals (class,
+//     attribute, and value names) are case-sensitive.
+//   - SPEC DIVERGENCE: ZRFC 15 permits only three keyword casings (lowercase,
+//     Initial-capital, ALLCAPS) — the compiler accepts any mix ("aLLoW").
+//     ZRFC 15 also says class names are case-INsensitive and reserves "all
+//     English prepositions that are not keywords"; the compiler matches class
+//     names case-sensitively and reserves only "without" and "from".
 //   - "a"/"an" are dropped as syntactic sugar wherever they appear (not just after "as").
 //   - "without" and "from" ARE tokenized as reserved keywords but are not
 //     accepted by any grammar rule; using them is a syntax error. (Neither appears
@@ -34,6 +41,11 @@
 
 // Statements are delimited by a terminating period OR by the start of the next
 // allow/define/never keyword. A trailing period is therefore optional in practice.
+//
+// SPEC DIVERGENCE: ZRFC 15 requires each statement to begin on a new line and
+// be "terminated by a period and a blank line". The compiler ignores line
+// structure entirely: no newline/blank-line requirements, and the period
+// itself is optional.
 <statement> ::= <permission-statement> | <denial-statement> | <define-statement>
 
 <permission-statement> ::= "allow" <p-statement>
@@ -52,8 +64,23 @@
 <object-clause> ::= <service-spec> | <service-spec> "on" <endpoint-spec>
 
 // The "and"/"," before "signal" are optional delimiters (consumed but not required).
-<signal-clause> ::= ","? "and"? "signal" <string> "to" <service-class-name>
+// The message may be any <name> (quoting is conventional but not required).
+// The target must be the CANONICAL name of a service class: either the built-in
+// "service" (not "services") or the name a class was defined with. AKA/plural
+// forms are NOT accepted here (allow.rs looks the target up in the canonical
+// class map only). Nothing may follow the signal clause.
+<signal-clause> ::= ","? "and"? "signal" <name> "to" <canonical-service-class-name>
 
+// Every defined class gets an AKA: the explicit one, or an auto-pluralized
+// form of its name ("employee" -> "employees"). Class references in allow/never
+// statements accept either the canonical name or the AKA (except the signal
+// target, see <signal-clause>).
+//
+// SPEC DIVERGENCE: ZRFC 15 pluralizes "adding S or ES" and says an explicit
+// AKA is an ADDITIONAL synonym (both "mouses" and "mice" work). The compiler
+// pluralizes by naively appending "s" (putil::pluralize) and an explicit AKA
+// REPLACES the auto-plural: after "define mouse aka mice ...", "mouses" is
+// not a defined name.
 <aka-clause> ::= "aka" <name>
 
 // --- Class definition attribute list (define.rs::parse_attributes) ---
@@ -62,52 +89,79 @@
 // An additional group can be started with the two-token sequence "and" "with".
 <with-attributes-clause> ::= "with" <attribute-list> ("and" "with" <attribute-list>)*
 
-<attribute-list> ::= <attribute-spec> (<and-token> <attribute-spec>)*
+// The <and-token> separators are optional: "with foo bar baz" parses the same
+// as "with foo, bar and baz". Two consecutive "and"s are an error; commas are
+// ignored freely.
+<attribute-list> ::= <attribute-spec> (<and-token>? <attribute-spec>)*
 
 <and-token> ::= "and" | ","
 
 // "multiple" forces a multi-valued attribute (also implied by set-valued literal).
-// "optional" applies only to tags. "tag" takes a single following name (non-greedy);
+// "optional" applies only to tags. "tag" takes exactly ONE following name
+// (non-greedy; a second name after it starts a new plain attribute-spec);
 // "tags" is greedy and consumes all following names until the next "and with".
 <attribute-spec> ::= "multiple"? (<attr-kv-pair> | <attr-key-presence> | <name>) |
-                     "optional"? ("tag" | "tags") <name> (<and-token> <name>)*
+                     "optional"? "tag" <name> |
+                     "optional"? "tags" <name> (<and-token>? <name>)*
 
 // --- Clause specs used in allow/never statements ---
 //
-// A spec is a class name together with zero or more attribute expressions.
+// A spec is a class name together with zero or more attribute expressions,
+// optionally separated by "and"/"," ("cleared and government user" ==
+// "cleared, government user" == "cleared government user").
 // The class name may appear before OR after the attribute expressions, and at
 // most one class name may appear per spec. The postfix "with ..." form is a
 // hard error (kept only to emit a helpful migration message).
 
-<user-spec> ::= (<attribute-expr> | <user-class-name>)+
+<user-spec> ::= (<attribute-expr> | <user-class-name>) (<and-token>? (<attribute-expr> | <user-class-name>))*
 // A <user-class-name> must be, or descend from, the built-in "user" class.
 <user-class-name> ::= <name> | <built-in-user-class-name>
 
-<endpoint-spec> ::= (<attribute-expr> | <endpoint-class-name>)+
+<endpoint-spec> ::= (<attribute-expr> | <endpoint-class-name>) (<and-token>? (<attribute-expr> | <endpoint-class-name>))*
 // An <endpoint-class-name> must be, or descend from, the built-in "endpoint" class.
 <endpoint-class-name> ::= <name> | <built-in-endpoint-class-name>
 
-<service-spec> ::= (<attribute-expr> | <service-class-name>)+
+<service-spec> ::= (<attribute-expr> | <service-class-name>) (<and-token>? (<attribute-expr> | <service-class-name>))*
 // A <service-class-name> must be, or descend from, the built-in "service" class.
 <service-class-name> ::= <name> | <built-in-service-class-name>
+
+// Canonical form only: the built-in "service" or the name given in a define
+// statement -- never an AKA/plural. Used by <signal-clause>.
+<canonical-service-class-name> ::= "service" | <name>
 
 <attribute-expr> ::= <attr-tag> | <attr-kv-pair> | <attr-key-presence>
 
 <attr-tag> ::= <name>
 
-// No spaces around ':' in <attr-kv-pair>
+// No space may precede the ':' (error). A space AFTER the ':' does not error,
+// but changes the meaning: "clearance: secret" is a key-presence followed by a
+// separate tag "secret", not a kv-pair. A quoted string immediately followed
+// by ':' forms a quoted key ("'my key':val").
 <attr-kv-pair> ::= <key-name> ":" <key-value>
 
-// No space may precede the ':' in <attr-key-presence>
 <attr-key-presence> ::= <key-name> ":"
 
 <key-name> ::= <name>
 
 <key-value> ::= <value>
 
-<name> ::= <identifier> | <string> | <namespace-name>
+<name> ::= <unquoted-name> | <quoted-string>
 
-<namespace-name> ::= <name> "." <name>
+// Dots inside an unquoted word are namespace separators ("user.clearance",
+// "zpr.adapter.cn"). This is purely lexical: quoted segments do NOT join with
+// dots ('"a b".c' is two separate tokens). A dot followed by whitespace (or
+// EOF) terminates the statement instead. There is no leading-letter rule:
+// digits or a dot may start a name ("9abc", "42", "4.2" are all valid names).
+// Consecutive dots ("foo..bar") only produce a warning. ASCII only.
+//
+// SPEC DIVERGENCE: ZRFC 15 describes hierarchical namespaces with a "global"
+// default namespace, namespaces created on first reference in a define, and
+// quoted names usable with namespace prefixes. The compiler implements none
+// of that: the dots are simply kept as part of the token (the dotted string
+// is matched verbatim), and a quoted segment cannot take a prefix or suffix.
+<unquoted-name> ::= <name-char>+
+
+<name-char> ::= <letter> | <digit> | "-" | "_" | "."
 
 <class-name> ::= <built-in-class-name> | <name>
 
@@ -125,12 +179,28 @@
 
 <built-in-user-class-name> ::= "user" | "users"
 
-<identifier> ::= <letter> (<letter> | <digit> | "-" | "_")*
+<value> ::= <unquoted-value> | <quoted-string> | <value-set>
 
-<value> ::= <identifier> | <string> | <value-set>
+// Unlike names, unquoted values may NOT contain "." -- so an unquoted float
+// is invalid in value position ("version:1.5" is an error; quote it:
+// "version:'1.5'"). Integers are fine ("level:7").
+//
+// SPEC DIVERGENCE: ZRFC 15 says unquoted "sequences of numerals with an
+// optional decimal point" are valid strings anywhere, i.e. floats like 123.4
+// should be usable as attribute values. The compiler only accepts them in
+// name position, not after ':' (unless quoted).
+<unquoted-value> ::= <value-char>+
 
-<string> ::= <quoted-string> | <numeric-string>
+<value-char> ::= <letter> | <digit> | "-" | "_"
 
+// Quoted strings may not span lines.
+//
+// SPEC DIVERGENCE: ZRFC 15 strings are UTF-8 and quote characters include the
+// Unicode neutral/forward/backward variants (U+2018/U+2019, U+201C/U+201D,
+// etc.), with backslash escapes defined only for quotes and backslash. The
+// compiler accepts only ASCII ' ` " as quotes (curly quotes are illegal
+// characters), rejects non-ASCII in unquoted words, treats backtick as a
+// single-quote flavor (not in the spec), and lets backslash escape any char.
 <quoted-string> ::= <single-quoted-string> | <double-quoted-string>
 
 <single-quoted-string> ::= <single-quote> <single-quote-chars> <single-quote>
@@ -141,16 +211,18 @@
 
 <double-quote-chars> ::= (<any-char-except-double-quote-or-backslash> | <escaped-char>)*
 
-<escaped-char> ::= "\'" | '\"' | "\\"
+// Backslash escapes ANY following character, not just quotes ("\x" == "x").
+<escaped-char> ::= "\" <any-char>
 
-<numeric-string> ::= <integer> | <float>
+// A set may be empty ("clearance:{}" is accepted and is equivalent to the
+// bare key-presence "clearance:"). Sets do NOT nest. A quoted set value may
+// not contain a comma (compiler issue #72).
+<value-set> ::= "{" (<set-value> ("," <set-value>)*)? "}"
 
-<integer> ::= <digit>+
+<set-value> ::= <unquoted-value> | <quoted-string>
 
-<float> ::= <digit>+ "." <digit>+
-
-<value-set> ::= "{" <value> ("," <value>)* "}"
-
+// A quoted string opened with one single-quote flavor may be closed by the
+// other ("'foo`" is valid).
 <single-quote> ::= "'" | "`"
 
 <letter> ::= "a".."z" | "A".."Z"
