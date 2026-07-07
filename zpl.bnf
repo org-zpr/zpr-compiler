@@ -1,66 +1,91 @@
-// Extracted from ZRFC 15.4
-// Not included: conditions and limits
-// Reserved for future use: 'link', 'links', 'over', 'from', 'without'.
+// ZPL grammar as implemented by the compiler in src/ (lex.rs, parser.rs,
+// allow.rs, define.rs, never.rs). Originally extracted from ZRFC 15, then
+// reconciled against the code.
+//
+// NOT YET IMPLEMENTED (documented in ZRFC 15 but absent from the compiler):
+//   - "over ... links" clause on allow/never statements (link constraints)
+//   - conditions / circumstances / limits (e.g. "before 18:00 GMT", "limited to 10Gb/day")
+//   - the predefined "servers" class and the predefined "link"/"links" class
+//   - "without" clause and "from <trusted-source>" clause
+//
+// KEYWORD STATE (from lex.rs):
+//   - Active keywords: never, allow, define, with, to, access, and, as, aka,
+//     tag, tags, on, optional, multiple, signal (plus "," as AND, "." as terminator).
+//   - "a"/"an" are dropped as syntactic sugar wherever they appear (not just after "as").
+//   - "without" and "from" ARE tokenized as reserved keywords but are not
+//     accepted by any grammar rule; using them is a syntax error.
+//   - "link", "links", "over" are NOT tokenized; if written they are ordinary
+//     literals (i.e. usable as class/attribute/tag names).
 
 <zpl-policy> ::= <statement>*
 
+// Statements are delimited by a terminating period OR by the start of the next
+// allow/define/never keyword. A trailing period is therefore optional in practice.
 <statement> ::= <permission-statement> | <denial-statement> | <define-statement>
 
 <permission-statement> ::= "allow" <p-statement>
 
-<denial-statement> ::= "never" <permission-statement>
+<denial-statement> ::= "never" "allow" <p-statement>
 
-<define-statement> ::= "define" <name> <aka-clause>? "as" <article> <class-name>
-                      <with-attributes-clause>? "." <eol>
+<define-statement> ::= "define" <name> <aka-clause>? "as" <class-name>
+                       <with-attributes-clause>? "."?
 
-<p-statement> ::= <subject-clause> "to" "access" <object-clause>
-                  (","? "and" <signal-clause>)? "." <eol>
+<p-statement> ::= <subject-clause> "to" "access" <object-clause> <signal-clause>? "."?
 
 <subject-clause> ::= <user-spec> | <service-spec> | <endpoint-spec> |
-                     <user-spec> "on" <endpoint-spec> | <service-spec> "on" <endpoint-spec>
+                     <user-spec> "on" <endpoint-spec> |
+                     <service-spec> "on" <endpoint-spec>
 
 <object-clause> ::= <service-spec> | <service-spec> "on" <endpoint-spec>
 
-<signal-clause> ::= "signal" <string> "to" <name>
+// The "and"/"," before "signal" are optional delimiters (consumed but not required).
+<signal-clause> ::= ","? "and"? "signal" <string> "to" <service-class-name>
 
 <aka-clause> ::= "aka" <name>
 
-<article> ::= "a" | "an"
-
-<with-attributes-clause> ::= "with" <attribute-list> <additional-attributes-clause>?
-
-<additional-attributes-clause> ::= "and" <with-attribute-clause>
+// --- Class definition attribute list (define.rs::parse_attributes) ---
+//
+// A "with" clause is a sequence of attribute specs separated by "and"/",".
+// An additional group can be started with the two-token sequence "and" "with".
+<with-attributes-clause> ::= "with" <attribute-list> ("and" "with" <attribute-list>)*
 
 <attribute-list> ::= <attribute-spec> (<and-token> <attribute-spec>)*
 
-<and-token> := "and" | ","
+<and-token> ::= "and" | ","
 
-<attribute-spec> ::= "multiple"? <name> |
-                    "optional"? ("tag" | "tags") <name> (<and-token> <name>)*
+// "multiple" forces a multi-valued attribute (also implied by set-valued literal).
+// "optional" applies only to tags. "tag" takes a single following name (non-greedy);
+// "tags" is greedy and consumes all following names until the next "and with".
+<attribute-spec> ::= "multiple"? (<attr-kv-pair> | <attr-key-presence> | <name>) |
+                     "optional"? ("tag" | "tags") <name> (<and-token> <name>)*
 
-<user-spec> ::= <attribute-expr>* <user-class-name>
+// --- Clause specs used in allow/never statements ---
+//
+// A spec is a class name together with zero or more attribute expressions.
+// The class name may appear before OR after the attribute expressions, and at
+// most one class name may appear per spec. The postfix "with ..." form is a
+// hard error (kept only to emit a helpful migration message).
 
-# A <user-class-name> must either be or be descended from the built-in "user" class.
+<user-spec> ::= (<attribute-expr> | <user-class-name>)+
+// A <user-class-name> must be, or descend from, the built-in "user" class.
 <user-class-name> ::= <name> | <built-in-user-class-name>
 
-<endpoint-spec> ::= <attribute-expr>* <endpoint-class-name>
-
-# An <endpoint-class-name> must either be or be descended from the built-in "endpoint" class.
+<endpoint-spec> ::= (<attribute-expr> | <endpoint-class-name>)+
+// An <endpoint-class-name> must be, or descend from, the built-in "endpoint" class.
 <endpoint-class-name> ::= <name> | <built-in-endpoint-class-name>
 
-<service-spec> ::= <attribute-expr>* <service-class-name>
-
-# An <service-class-name> must either be or be descended from the built-in "endpoint" class.
+<service-spec> ::= (<attribute-expr> | <service-class-name>)+
+// A <service-class-name> must be, or descend from, the built-in "service" class.
 <service-class-name> ::= <name> | <built-in-service-class-name>
 
 <attribute-expr> ::= <attr-tag> | <attr-kv-pair> | <attr-key-presence>
 
 <attr-tag> ::= <name>
 
-# No spaces around ':' in <attr-kv-pair>
+// No spaces around ':' in <attr-kv-pair>
 <attr-kv-pair> ::= <key-name> ":" <key-value>
 
-# No space may preceed the ':' in <attr-key-presence>
+// No space may precede the ':' in <attr-key-presence>
 <attr-key-presence> ::= <key-name> ":"
 
 <key-name> ::= <name>
@@ -79,7 +104,9 @@
 
 <built-in-endpoint-class-name> ::= "endpoint" | "endpoints"
 
-<built-in-service-class-name> ::= "service" | "services"
+// "VisaService"/"VisaServices" is a predefined service class (Class::defaults()),
+// but it is NOT extensible: it may not be used as a parent in a define statement.
+<built-in-service-class-name> ::= "service" | "services" | "VisaService" | "VisaServices"
 
 <built-in-user-class-name> ::= "user" | "users"
 
@@ -109,11 +136,10 @@
 
 <value-set> ::= "{" <value> ("," <value>)* "}"
 
-<single-quote> := "'" | "`"
+<single-quote> ::= "'" | "`"
 
 <letter> ::= "a".."z" | "A".."Z"
 
 <digit> ::= "0".."9"
 
 <comment> ::= "#" <any-chars-to-eol> | "//" <any-chars-to-eol>
-
