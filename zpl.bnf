@@ -127,7 +127,7 @@
 
 <identifier> ::= <letter> (<letter> | <digit> | "-" | "_")*
 
-<value> ::= <string> | <value-set>
+<value> ::= <identifier> | <string> | <value-set>
 
 <string> ::= <quoted-string> | <numeric-string>
 
