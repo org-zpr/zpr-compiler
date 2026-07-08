@@ -71,14 +71,13 @@
 // class map only). Nothing may follow the signal clause.
 <signal-clause> ::= ","? "and"? "signal" <name> "to" <canonical-service-class-name>
 
-// Every defined class gets an AKA: the explicit one, or an auto-pluralized
-// form of its name ("employee" -> "employees"). Class references in allow/never
+// Every defined class gets an AKA: the explicit one, or an auto-pluralized (appending "s" or "es", putile::pluralize)
+// form of its name ("employee" -> "employees", "box" -> "boxes"). Class references in allow/never
 // statements accept either the canonical name or the AKA (except the signal
 // target, see <signal-clause>).
 //
-// SPEC DIVERGENCE: ZRFC 15 pluralizes "adding S or ES" and says an explicit
-// AKA is an ADDITIONAL synonym (both "mouses" and "mice" work). The compiler
-// pluralizes by naively appending "s" (putil::pluralize) and an explicit AKA
+// SPEC DIVERGENCE: ZRFC 15 says an explicit
+// AKA is an ADDITIONAL synonym (both "mouses" and "mice" work). In the compiler an explicit AKA
 // REPLACES the auto-plural: after "define mouse aka mice ...", "mouses" is
 // not a defined name.
 <aka-clause> ::= "aka" <name>
