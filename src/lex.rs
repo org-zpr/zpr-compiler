@@ -12,14 +12,12 @@ pub enum TokenType {
     Allow,
     Define,
     With,
-    Without,
     To,     // to must preceed access
     Access, // access must be preceeded by to
     And,    // "," is AND as is "and" as is ", and"
     Comma,
     As,
     AkA,
-    From,
     Tag,
     Tags,
     On, // starts an endpoint clause
@@ -56,14 +54,12 @@ impl Token {
             "allow" => TokenType::Allow,
             "define" => TokenType::Define,
             "with" => TokenType::With,
-            "without" => TokenType::Without,
             "to" => TokenType::To,
             "access" => TokenType::Access,
             "and" => TokenType::And,
             "," => TokenType::Comma,
             "as" => TokenType::As,
             "aka" => TokenType::AkA,
-            "from" => TokenType::From,
             "tag" => TokenType::Tag,
             "tags" => TokenType::Tags,
             "on" => TokenType::On,
@@ -755,13 +751,11 @@ mod test {
             ("allow", super::TokenType::Allow),
             ("define", super::TokenType::Define),
             ("with", super::TokenType::With),
-            ("without", super::TokenType::Without),
             ("to", super::TokenType::To),
             ("access", super::TokenType::Access),
             ("and", super::TokenType::And),
             ("as", super::TokenType::As),
             ("aka", super::TokenType::AkA),
-            ("from", super::TokenType::From),
             ("tag", super::TokenType::Tag),
             ("tags", super::TokenType::Tags),
             ("optional", super::TokenType::Optional),
@@ -771,6 +765,21 @@ mod test {
             let tz = super::tokenize_str(word, &CompilationCtx::default()).unwrap();
             assert_eq!(tz.tokens.len(), 1, "expected 1 token for '{word}'");
             assert_eq!(&tz.tokens[0].tt, expected, "wrong token type for '{word}'");
+        }
+    }
+
+    #[test]
+    fn test_unreserved_words() {
+        // "without" and "from" are not reserved (ZRFC 15 does not reserve
+        // them); they must tokenize as ordinary literals, case preserved.
+        for word in ["without", "from", "WITHOUT", "FROM"] {
+            let tz = super::tokenize_str(word, &CompilationCtx::default()).unwrap();
+            assert_eq!(tz.tokens.len(), 1, "expected 1 token for '{word}'");
+            assert_eq!(
+                tz.tokens[0].tt,
+                super::TokenType::Literal(word.to_string()),
+                "'{word}' should be an ordinary literal, not a keyword"
+            );
         }
     }
 
@@ -792,13 +801,11 @@ mod test {
             ("Allow", super::TokenType::Allow),
             ("DEFINE", super::TokenType::Define),
             ("WITH", super::TokenType::With),
-            ("WITHOUT", super::TokenType::Without),
             ("TO", super::TokenType::To),
             ("ACCESS", super::TokenType::Access),
             ("AND", super::TokenType::And),
             ("AS", super::TokenType::As),
             ("AKA", super::TokenType::AkA),
-            ("FROM", super::TokenType::From),
             ("TAG", super::TokenType::Tag),
             ("TAGS", super::TokenType::Tags),
             ("ON", super::TokenType::On),
