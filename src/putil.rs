@@ -77,3 +77,19 @@ pub fn pluralize(s: &str) -> String {
         format!("{s}{suffix}")
     }
 }
+
+#[test]
+fn test_pluralize() {
+    assert_eq!(pluralize("mobile-phone"), "mobile-phones");
+    assert_eq!(pluralize("box"), "boxes");
+    assert_eq!(pluralize("bus"), "buses");
+    assert_eq!(pluralize("match"), "matches");
+    assert_eq!(pluralize("dish"), "dishes");
+    assert_eq!(pluralize("potato"), "potatoes");
+    assert_eq!(pluralize("radio"), "radios");
+    assert_eq!(pluralize("VisaService"), "VisaServices");
+    assert_eq!(pluralize("BOX"), "BOXES");
+    assert_eq!(pluralize("POTATO"), "POTATOES");
+    assert_eq!(pluralize("o"), "os");
+    assert_eq!(pluralize(""), "s");
+}
