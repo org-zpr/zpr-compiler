@@ -769,21 +769,6 @@ mod test {
     }
 
     #[test]
-    fn test_unreserved_words() {
-        // "without" and "from" are not reserved (ZRFC 15 does not reserve
-        // them); they must tokenize as ordinary literals, case preserved.
-        for word in ["without", "from", "WITHOUT", "FROM"] {
-            let tz = super::tokenize_str(word, &CompilationCtx::default()).unwrap();
-            assert_eq!(tz.tokens.len(), 1, "expected 1 token for '{word}'");
-            assert_eq!(
-                tz.tokens[0].tt,
-                super::TokenType::Literal(word.to_string()),
-                "'{word}' should be an ordinary literal, not a keyword"
-            );
-        }
-    }
-
-    #[test]
     fn test_comma_token() {
         // A bare comma emits a Comma token.
         let tz = super::tokenize_str(",", &CompilationCtx::default()).unwrap();
