@@ -28,11 +28,8 @@
 //     Initial-capital, ALLCAPS) — the compiler accepts any mix ("aLLoW").
 //     ZRFC 15 also says class names are case-INsensitive and reserves "all
 //     English prepositions that are not keywords"; the compiler matches class
-//     names case-sensitively and reserves only "without" and "from".
+//     names case-sensitively.
 //   - "a"/"an" are dropped as syntactic sugar wherever they appear (not just after "as").
-//   - "without" and "from" ARE tokenized as reserved keywords but are not
-//     accepted by any grammar rule; using them is a syntax error. (Neither appears
-//     in ZRFC 15; they are compiler-reserved for anticipated future clauses.)
 //   - "link", "links", "over" are NOT tokenized; if written they parse as ordinary
 //     literals. ZRFC 15 uses them for the link class and "over" clause (see above),
 //     so they are effectively spec keywords the compiler has not yet reserved.
