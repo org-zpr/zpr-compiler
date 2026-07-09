@@ -212,6 +212,14 @@ pub fn dump_v2(fname: &str, encoded_buf: Bytes) {
                     );
                 }
             }
+            if cp.has_signal() {
+                let signal = cp.get_signal().unwrap();
+                println!(
+                    "         signal: {} -> {}",
+                    signal.get_msg().unwrap().to_str().unwrap().yellow(),
+                    signal.get_svc().unwrap().to_str().unwrap().yellow(),
+                );
+            }
             println!();
         }
     }
