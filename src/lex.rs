@@ -39,14 +39,14 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn new_from_str(s: &ZPLStr, line: usize, col: usize) -> Token {
+    pub fn new_from_str(s: &ZPLStr, line: usize, col: usize) -> Result<Token, CompilationError> {
         if let Some((name, vals)) = s.as_tuple() {
-            return Token::new(
+            return Ok(Token::new(
                 TokenType::Tuple((name.to_string(), vals.to_vec())),
                 line,
                 col,
                 s.rendered_len(),
-            );
+            ));
         }
         let ls = s.as_atom().unwrap().to_lowercase();
         let tok = match ls.as_str() {
@@ -69,7 +69,24 @@ impl Token {
             "signal" => TokenType::Signal,
             _ => TokenType::Literal(s.as_atom().unwrap().into()), // is case sensitive
         };
-        Token::new(tok, line, col, s.rendered_len())
+        if !matches!(tok, TokenType::Literal(_)) {
+            Token::check_capitalization(s.as_atom().unwrap(), line, col)?;
+        }
+        Ok(Token::new(tok, line, col, s.rendered_len()))
+    }
+    // Keywords must be all lower case, all upper case, or initial-capitalized.  Mixed case is not allowed.
+    fn check_capitalization(s: &str, line: usize, col: usize) -> Result<&str, CompilationError> {
+        let rest_has_no_upper = s.chars().skip(1).all(|c| !c.is_uppercase());
+        let has_no_lower = s.chars().all(|c| !c.is_lowercase());
+        if rest_has_no_upper || has_no_lower {
+            Ok(s)
+        } else {
+            Err(CompilationError::IllegalCapitalization(
+                s.to_string(),
+                line,
+                col,
+            ))
+        }
     }
 
     pub fn new(tt: TokenType, line: usize, col: usize, sz: usize) -> Token {
@@ -164,7 +181,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             &current_word.build(),
                             current_start.0,
                             current_start.1,
-                        ));
+                        )?);
                     }
                     current_word = ZPLStrBuilder::new();
                 }
@@ -181,7 +198,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             &current_word.build(),
                             current_start.0,
                             current_start.1,
-                        ));
+                        )?);
                     }
                     current_word = ZPLStrBuilder::new();
                 }
@@ -199,7 +216,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                     &current_word.build(),
                                     current_start.0,
                                     current_start.1,
-                                ));
+                                )?);
                             }
                             current_word = ZPLStrBuilder::new();
                         }
@@ -226,7 +243,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                     &current_word.build(),
                                     current_start.0,
                                     current_start.1,
-                                ));
+                                )?);
                             }
                             current_word = ZPLStrBuilder::new();
                             tokens.push(Token::new(TokenType::Comma, line, col, 1));
@@ -257,7 +274,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                 &current_word.build(),
                                 current_start.0,
                                 current_start.1,
-                            ));
+                            )?);
                         }
                         current_word = ZPLStrBuilder::new();
                         tokens.push(Token::new(TokenType::Period, line, col, 1));
@@ -318,7 +335,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                 &current_word.build(),
                                 current_start.0,
                                 current_start.1,
-                            ));
+                            )?);
                             current_word = ZPLStrBuilder::new();
                         }
                         line += 1;
@@ -368,7 +385,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                         &current_word.build(),
                         current_start.0,
                         current_start.1,
-                    ));
+                    )?);
                     current_word = ZPLStrBuilder::new();
                 }
                 col += 1;
@@ -393,7 +410,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                 &ZPLStr::default(),
                                 current_start.0,
                                 current_start.1,
-                            ));
+                            )?);
                             current_word = ZPLStrBuilder::new();
                             quoting = QuotingType::None;
                         } else {
@@ -424,7 +441,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                         &current_word.build(),
                                         current_start.0,
                                         current_start.1,
-                                    ));
+                                    )?);
                                 }
                                 current_word = ZPLStrBuilder::new();
                             }
@@ -481,7 +498,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
             &current_word.build(),
             current_start.0,
             current_start.1,
-        ));
+        )?);
     }
 
     let tz = Tokenization { tokens };
@@ -1089,6 +1106,23 @@ mod test {
         assert!(matches!(
             tz.unwrap_err(),
             super::CompilationError::UnterminatedSet(_, _)
+        ));
+    }
+
+    #[test]
+    fn test_keyword_mixed_casing() {
+        let zpl = "aLLoW employees to access services.";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::IllegalCapitalization(_, _, _)
+        ));
+
+        let zpl = "ALLOW employees to aCCess SERVICES.";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::IllegalCapitalization(_, _, _)
         ));
     }
 }

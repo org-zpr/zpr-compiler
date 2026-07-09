@@ -97,4 +97,7 @@ pub enum CompilationError {
 
     #[error("build error: {0}")]
     BuildError(String),
+
+    #[error("'{0}' at line {1}, column {2} has illegal capitalization")]
+    IllegalCapitalization(String, usize, usize),
 }
