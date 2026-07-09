@@ -136,7 +136,24 @@ impl Token {
             }
             _ => TokenType::Literal(s.as_atom().unwrap().into()), // is case sensitive
         };
+        if !matches!(tok, TokenType::Literal(_)) {
+            Token::check_capitalization(s.as_atom().unwrap(), line, col)?;
+        }
         Ok(Token::new(tok, line, col, s.rendered_len()))
+    }
+    // Keywords must be all lower case, all upper case, or initial-capitalized.  Mixed case is not allowed.
+    fn check_capitalization(s: &str, line: usize, col: usize) -> Result<(), CompilationError> {
+        let rest_has_no_upper = s.chars().skip(1).all(|c| !c.is_uppercase());
+        let has_no_lower = s.chars().all(|c| !c.is_lowercase());
+        if rest_has_no_upper || has_no_lower {
+            Ok(())
+        } else {
+            Err(CompilationError::IllegalCapitalization(
+                s.to_string(),
+                line,
+                col,
+            ))
+        }
     }
 
     pub fn new(tt: TokenType, line: usize, col: usize, sz: usize) -> Token {
@@ -1156,6 +1173,23 @@ mod test {
         assert!(matches!(
             tz.unwrap_err(),
             super::CompilationError::UnterminatedSet(_, _)
+        ));
+    }
+
+    #[test]
+    fn test_keyword_mixed_casing() {
+        let zpl = "aLLoW employees to access services.";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::IllegalCapitalization(_, _, _)
+        ));
+
+        let zpl = "ALLOW employees to aCCess SERVICES.";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::IllegalCapitalization(_, _, _)
         ));
     }
 
