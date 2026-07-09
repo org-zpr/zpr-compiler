@@ -38,6 +38,70 @@ pub struct Token {
     pub size: usize,
 }
 
+const RESERVED_PREPOSITIONS: &[&str] = &[
+    "aboard",
+    "about",
+    "above",
+    "across",
+    "after",
+    "against",
+    "along",
+    "amid",
+    "amidst",
+    "among",
+    "amongst",
+    "around",
+    "at",
+    "atop",
+    "before",
+    "behind",
+    "below",
+    "beneath",
+    "beside",
+    "besides",
+    "between",
+    "beyond",
+    "but",
+    "by",
+    "concerning",
+    "despite",
+    "down",
+    "during",
+    "except",
+    "for",
+    "from",
+    "in",
+    "inside",
+    "into",
+    "like",
+    "near",
+    "of",
+    "off",
+    "onto",
+    "out",
+    "outside",
+    "over",
+    "past",
+    "per",
+    "regarding",
+    "round",
+    "since",
+    "through",
+    "throughout",
+    "till",
+    "toward",
+    "towards",
+    "under",
+    "underneath",
+    "until",
+    "unto",
+    "up",
+    "upon",
+    "via",
+    "within",
+    "without",
+];
+
 impl Token {
     pub fn new_from_str(s: &ZPLStr, line: usize, col: usize) -> Result<Token, CompilationError> {
         if let Some((name, vals)) = s.as_tuple() {
@@ -67,6 +131,9 @@ impl Token {
             "multiple" => TokenType::Multiple,
             "." => TokenType::Period,
             "signal" => TokenType::Signal,
+            _ if RESERVED_PREPOSITIONS.contains(&ls.as_str()) => {
+                return Err(CompilationError::ReservedPreposition(ls, line, col));
+            }
             _ => TokenType::Literal(s.as_atom().unwrap().into()), // is case sensitive
         };
         if !matches!(tok, TokenType::Literal(_)) {
@@ -1125,4 +1192,16 @@ mod test {
             super::CompilationError::IllegalCapitalization(_, _, _)
         ));
     }
-}
+  
+    fn test_reserved_prepositions() {
+        for word in ["from", "WITHOUT", "Over"] {
+            match super::tokenize_str(word, &CompilationCtx::default()) {
+                Err(CompilationError::ReservedPreposition(w, _, _)) => {
+                    assert_eq!(w, word.to_lowercase());
+                }
+                other => panic!("'{word}' should be a reserved preposition, got {other:?}"),
+            }
+        }
+        let tz = super::tokenize_str("clearance:without", &CompilationCtx::default()).unwrap();
+        assert_eq!(tz.tokens[0].tt, tuple_from_strs("clearance", "without"));
+    }

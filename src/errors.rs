@@ -100,4 +100,9 @@ pub enum CompilationError {
 
     #[error("'{0}' at line {1}, column {2} has illegal capitalization")]
     IllegalCapitalization(String, usize, usize),
+  
+    #[error(
+        "'{0}' at line {1}, column {2} is a reserved preposition (ZRFC 15 reserves English prepositions for future language extensions)"
+    )]
+    ReservedPreposition(String, usize, usize),
 }
