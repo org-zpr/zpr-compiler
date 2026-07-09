@@ -1192,7 +1192,8 @@ mod test {
             super::CompilationError::IllegalCapitalization(_, _, _)
         ));
     }
-  
+
+    #[test]
     fn test_reserved_prepositions() {
         for word in ["from", "WITHOUT", "Over"] {
             match super::tokenize_str(word, &CompilationCtx::default()) {
@@ -1205,3 +1206,4 @@ mod test {
         let tz = super::tokenize_str("clearance:without", &CompilationCtx::default()).unwrap();
         assert_eq!(tz.tokens[0].tt, tuple_from_strs("clearance", "without"));
     }
+}
