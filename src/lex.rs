@@ -38,15 +38,79 @@ pub struct Token {
     pub size: usize,
 }
 
+const RESERVED_PREPOSITIONS: &[&str] = &[
+    "aboard",
+    "about",
+    "above",
+    "across",
+    "after",
+    "against",
+    "along",
+    "amid",
+    "amidst",
+    "among",
+    "amongst",
+    "around",
+    "at",
+    "atop",
+    "before",
+    "behind",
+    "below",
+    "beneath",
+    "beside",
+    "besides",
+    "between",
+    "beyond",
+    "but",
+    "by",
+    "concerning",
+    "despite",
+    "down",
+    "during",
+    "except",
+    "for",
+    "from",
+    "in",
+    "inside",
+    "into",
+    "like",
+    "near",
+    "of",
+    "off",
+    "onto",
+    "out",
+    "outside",
+    "over",
+    "past",
+    "per",
+    "regarding",
+    "round",
+    "since",
+    "through",
+    "throughout",
+    "till",
+    "toward",
+    "towards",
+    "under",
+    "underneath",
+    "until",
+    "unto",
+    "up",
+    "upon",
+    "via",
+    "within",
+    "without",
+];
+
 impl Token {
-    pub fn new_from_str(s: &ZPLStr, line: usize, col: usize) -> Token {
+    pub fn new_from_str(s: &ZPLStr, line: usize, col: usize) -> Result<Token, CompilationError> {
         if let Some((name, vals)) = s.as_tuple() {
-            return Token::new(
+            return Ok(Token::new(
                 TokenType::Tuple((name.to_string(), vals.to_vec())),
                 line,
                 col,
                 s.rendered_len(),
-            );
+            ));
         }
         let ls = s.as_atom().unwrap().to_lowercase();
         let tok = match ls.as_str() {
@@ -67,9 +131,12 @@ impl Token {
             "multiple" => TokenType::Multiple,
             "." => TokenType::Period,
             "signal" => TokenType::Signal,
+            _ if RESERVED_PREPOSITIONS.contains(&ls.as_str()) => {
+                return Err(CompilationError::ReservedPreposition(ls, line, col));
+            }
             _ => TokenType::Literal(s.as_atom().unwrap().into()), // is case sensitive
         };
-        Token::new(tok, line, col, s.rendered_len())
+        Ok(Token::new(tok, line, col, s.rendered_len()))
     }
 
     pub fn new(tt: TokenType, line: usize, col: usize, sz: usize) -> Token {
@@ -164,7 +231,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             &current_word.build(),
                             current_start.0,
                             current_start.1,
-                        ));
+                        )?);
                     }
                     current_word = ZPLStrBuilder::new();
                 }
@@ -181,7 +248,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             &current_word.build(),
                             current_start.0,
                             current_start.1,
-                        ));
+                        )?);
                     }
                     current_word = ZPLStrBuilder::new();
                 }
@@ -199,7 +266,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                     &current_word.build(),
                                     current_start.0,
                                     current_start.1,
-                                ));
+                                )?);
                             }
                             current_word = ZPLStrBuilder::new();
                         }
@@ -226,7 +293,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                     &current_word.build(),
                                     current_start.0,
                                     current_start.1,
-                                ));
+                                )?);
                             }
                             current_word = ZPLStrBuilder::new();
                             tokens.push(Token::new(TokenType::Comma, line, col, 1));
@@ -257,7 +324,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                 &current_word.build(),
                                 current_start.0,
                                 current_start.1,
-                            ));
+                            )?);
                         }
                         current_word = ZPLStrBuilder::new();
                         tokens.push(Token::new(TokenType::Period, line, col, 1));
@@ -318,7 +385,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                 &current_word.build(),
                                 current_start.0,
                                 current_start.1,
-                            ));
+                            )?);
                             current_word = ZPLStrBuilder::new();
                         }
                         line += 1;
@@ -368,7 +435,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                         &current_word.build(),
                         current_start.0,
                         current_start.1,
-                    ));
+                    )?);
                     current_word = ZPLStrBuilder::new();
                 }
                 col += 1;
@@ -393,7 +460,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                 &ZPLStr::default(),
                                 current_start.0,
                                 current_start.1,
-                            ));
+                            )?);
                             current_word = ZPLStrBuilder::new();
                             quoting = QuotingType::None;
                         } else {
@@ -424,7 +491,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                                         &current_word.build(),
                                         current_start.0,
                                         current_start.1,
-                                    ));
+                                    )?);
                                 }
                                 current_word = ZPLStrBuilder::new();
                             }
@@ -481,7 +548,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
             &current_word.build(),
             current_start.0,
             current_start.1,
-        ));
+        )?);
     }
 
     let tz = Tokenization { tokens };
@@ -1090,5 +1157,19 @@ mod test {
             tz.unwrap_err(),
             super::CompilationError::UnterminatedSet(_, _)
         ));
+    }
+
+    #[test]
+    fn test_reserved_prepositions() {
+        for word in ["from", "WITHOUT", "Over"] {
+            match super::tokenize_str(word, &CompilationCtx::default()) {
+                Err(CompilationError::ReservedPreposition(w, _, _)) => {
+                    assert_eq!(w, word.to_lowercase());
+                }
+                other => panic!("'{word}' should be a reserved preposition, got {other:?}"),
+            }
+        }
+        let tz = super::tokenize_str("clearance:without", &CompilationCtx::default()).unwrap();
+        assert_eq!(tz.tokens[0].tt, tuple_from_strs("clearance", "without"));
     }
 }
