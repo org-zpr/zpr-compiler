@@ -75,11 +75,11 @@ impl Token {
         Ok(Token::new(tok, line, col, s.rendered_len()))
     }
     // Keywords must be all lower case, all upper case, or initial-capitalized.  Mixed case is not allowed.
-    fn check_capitalization(s: &str, line: usize, col: usize) -> Result<&str, CompilationError> {
+    fn check_capitalization(s: &str, line: usize, col: usize) -> Result<(), CompilationError> {
         let rest_has_no_upper = s.chars().skip(1).all(|c| !c.is_uppercase());
         let has_no_lower = s.chars().all(|c| !c.is_lowercase());
         if rest_has_no_upper || has_no_lower {
-            Ok(s)
+            Ok(())
         } else {
             Err(CompilationError::IllegalCapitalization(
                 s.to_string(),
