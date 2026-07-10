@@ -245,7 +245,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 if !current_word.is_empty() && !reading_set {
                     if !current_word.is_sugar() {
                         tokens.push(Token::new_from_str(
-                            &current_word.build(),
+                            &current_word.build(line, col)?,
                             current_start.0,
                             current_start.1,
                         )?);
@@ -262,7 +262,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                     // Then treat as a delimiter
                     if !current_word.is_sugar() {
                         tokens.push(Token::new_from_str(
-                            &current_word.build(),
+                            &current_word.build(line, col)?,
                             current_start.0,
                             current_start.1,
                         )?);
@@ -280,7 +280,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                         if !reading_set {
                             if !current_word.is_sugar() {
                                 tokens.push(Token::new_from_str(
-                                    &current_word.build(),
+                                    &current_word.build(line, col)?,
                                     current_start.0,
                                     current_start.1,
                                 )?);
@@ -307,7 +307,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                         } else {
                             if !current_word.is_sugar() {
                                 tokens.push(Token::new_from_str(
-                                    &current_word.build(),
+                                    &current_word.build(line, col)?,
                                     current_start.0,
                                     current_start.1,
                                 )?);
@@ -338,7 +338,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                         }
                         if !current_word.is_sugar() {
                             tokens.push(Token::new_from_str(
-                                &current_word.build(),
+                                &current_word.build(line, col)?,
                                 current_start.0,
                                 current_start.1,
                             )?);
@@ -399,7 +399,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                         // We may have parsed a word prior to the comment.
                         if !current_word.is_empty() && !reading_set {
                             tokens.push(Token::new_from_str(
-                                &current_word.build(),
+                                &current_word.build(line, col)?,
                                 current_start.0,
                                 current_start.1,
                             )?);
@@ -449,7 +449,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                     reading_set = false;
                     // The current tuple we were reading is completed.
                     tokens.push(Token::new_from_str(
-                        &current_word.build(),
+                        &current_word.build(line, col)?,
                         current_start.0,
                         current_start.1,
                     )?);
@@ -505,7 +505,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             if !reading_set {
                                 if !current_word.is_sugar() {
                                     tokens.push(Token::new_from_str(
-                                        &current_word.build(),
+                                        &current_word.build(line, col)?,
                                         current_start.0,
                                         current_start.1,
                                     )?);
@@ -562,7 +562,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
     }
     if !current_word.is_empty() && !current_word.is_sugar() {
         tokens.push(Token::new_from_str(
-            &current_word.build(),
+            &current_word.build(line, col)?,
             current_start.0,
             current_start.1,
         )?);
@@ -672,17 +672,37 @@ mod test {
         }
 
         {
-            // This will fail since a period is not allowed on an unquoted string
+            // This will fail since an unquoted value containing a period must
+            // be a decimal number ("green." is not).
             let zpl = "define alien as user with color:green.. allow aliens to access services";
             let res = super::tokenize_str(zpl, &CompilationCtx::default());
             assert!(res.is_err());
             let err = res.unwrap_err();
             match err {
-                super::CompilationError::IllegalStringLiteralChar(c, _line, _col) => {
-                    assert_eq!(c, '.');
+                super::CompilationError::IllegalNumericValue(v, _line, _col) => {
+                    assert_eq!(v, "green.");
                 }
                 _ => panic!("unexpected error: {:?}", err),
             }
+        }
+    }
+
+    #[test]
+    fn test_decimal_attr_values() {
+        let ctx = CompilationCtx::default();
+        let tz = super::tokenize_str("define alien as user with speed:123.4.", &ctx).unwrap();
+        assert_eq!(tz.tokens[5].tt, tuple_from_strs("speed", "123.4"));
+
+        // Not valid decimals: multiple dots, unquoted dot mixed with quoting.
+        for zpl in [
+            "define alien as user with version:1.2.3.",
+            "define alien as user with colors:{'green'.blue}.",
+        ] {
+            let err = super::tokenize_str(zpl, &ctx).unwrap_err();
+            assert!(matches!(
+                err,
+                super::CompilationError::IllegalNumericValue(_, _, _)
+            ));
         }
     }
 
