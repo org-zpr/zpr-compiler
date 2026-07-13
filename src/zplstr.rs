@@ -89,12 +89,35 @@ impl fmt::Display for ZPLStr {
     }
 }
 
+struct AttributeValue {
+    value: String,
+    is_quoted: bool,
+    has_unquoted_dot: bool,
+}
+
+impl AttributeValue {
+    pub fn new() -> Self {
+        AttributeValue {
+            value: String::new(),
+            is_quoted: false,
+            has_unquoted_dot: false,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.value.clear();
+        self.is_quoted = false;
+        self.has_unquoted_dot = false;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.value.is_empty()
+    }
+}
 pub struct ZPLStrBuilder {
     name: String,
-    current_value: String,
-    current_value_is_quoted: bool,
-    current_value_has_unquoted_dot: bool,
-    prev_values: Vec<(String, bool, bool)>,
+    current_value: AttributeValue,
+    prev_values: Vec<AttributeValue>,
     tuple: bool,
     input_to_value: bool,
 }
@@ -103,9 +126,7 @@ impl ZPLStrBuilder {
     pub fn new() -> Self {
         ZPLStrBuilder {
             name: String::new(),
-            current_value: String::new(),
-            current_value_is_quoted: false,
-            current_value_has_unquoted_dot: false,
+            current_value: AttributeValue::new(),
             prev_values: Vec::new(),
             tuple: false,
             input_to_value: false,
@@ -130,11 +151,11 @@ impl ZPLStrBuilder {
                 return Err(CompilationError::IllegalStringLiteralChar(c, line, col));
             }
             if quoted {
-                self.current_value_is_quoted = true;
+                self.current_value.is_quoted = true;
             } else if c == '.' {
-                self.current_value_has_unquoted_dot = true;
+                self.current_value.has_unquoted_dot = true;
             }
-            self.current_value.push(c);
+            self.current_value.value.push(c);
         } else {
             // The name part of a tuple is allowed to contain periods without needing quotes.
             if !quoted && !c.is_ascii_alphanumeric() && !matches!(c, '.' | '-' | '_') {
@@ -166,20 +187,18 @@ impl ZPLStrBuilder {
             panic!("not in value mode");
         }
         if !self.current_value.is_empty() {
-            self.prev_values.push((
-                self.current_value.clone(),
-                self.current_value_is_quoted,
-                self.current_value_has_unquoted_dot,
-            ));
+            self.prev_values.push(AttributeValue {
+                value: self.current_value.value.clone(),
+                is_quoted: self.current_value.is_quoted,
+                has_unquoted_dot: self.current_value.has_unquoted_dot,
+            });
             self.current_value.clear();
-            self.current_value_is_quoted = false;
-            self.current_value_has_unquoted_dot = false;
         }
     }
 
     /// TRUE if the current value being built is empty.
     pub fn value_is_empty(&self) -> bool {
-        self.current_value.is_empty()
+        self.current_value.value.is_empty()
     }
 
     pub fn is_tuple(&self) -> bool {
@@ -199,21 +218,27 @@ impl ZPLStrBuilder {
         if self.tuple {
             let mut vals = self.prev_values;
             if !self.current_value.is_empty() {
-                vals.push((
-                    self.current_value,
-                    self.current_value_is_quoted,
-                    self.current_value_has_unquoted_dot,
-                ));
+                vals.push(AttributeValue {
+                    value: self.current_value.value,
+                    is_quoted: self.current_value.is_quoted,
+                    has_unquoted_dot: self.current_value.has_unquoted_dot,
+                });
             }
             // Unquoted values containing a '.' must be valid decimal numbers.
-            for (v, quoted, unquoted_dot) in &vals {
-                if *unquoted_dot && (*quoted && v.contains('.') || !Self::is_decimal(v)) {
-                    return Err(CompilationError::IllegalNumericValue(v.clone(), line, col));
+            for v in &vals {
+                if v.has_unquoted_dot
+                    && (v.is_quoted && v.value.contains('.') || !Self::is_decimal(&v.value))
+                {
+                    return Err(CompilationError::IllegalNumericValue(
+                        v.value.clone(),
+                        line,
+                        col,
+                    ));
                 }
             }
             return Ok(ZPLStr::tuple(
                 self.name,
-                vals.into_iter().map(|(v, _, _)| v).collect(),
+                vals.into_iter().map(|v| v.value).collect(),
             ));
         }
         Ok(ZPLStr::atom(self.name))

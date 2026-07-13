@@ -177,15 +177,20 @@
 
 <value> ::= <unquoted-value> | <quoted-string> | <value-set>
 
-// Unlike names, unquoted values may NOT contain "." -- so an unquoted float
-// is invalid in value position ("version:1.5" is an error; quote it:
-// "version:'1.5'"). Integers are fine ("level:7").
+// Unlike names, an unquoted value may contain "." ONLY when the entire value
+// is a decimal number: digits, ".", digits. Anything else
+// with an unquoted dot is an error. Integers are fine ("level:7"),
+// A value that mixes quoted segments with an unquoted dot is also an error ("'1'.5").
 //
 // SPEC DIVERGENCE: ZRFC 15 says unquoted "sequences of numerals with an
-// optional decimal point" are valid strings anywhere, i.e. floats like 123.4
-// should be usable as attribute values. The compiler only accepts them in
-// name position, not after ':' (unless quoted).
-<unquoted-value> ::= <value-char>+
+// optional decimal point" are valid strings anywhere. The compiler now
+// accepts floats in value position, but requires digits on both sides of
+// the dot ("123.4")
+<unquoted-value> ::= <value-word> | <decimal-number>
+
+<value-word> ::= <value-char>+
+
+<decimal-number> ::= <digit>+ "." <digit>+
 
 <value-char> ::= <letter> | <digit> | "-" | "_"
 
