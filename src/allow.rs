@@ -309,8 +309,7 @@ pub fn parse_allow(
     for client_clause in &mut ac.client {
         for attr in &mut client_clause.with {
             if attr.is_unspecified_domain() {
-                let canonical_class_name = classes_idx.get(&client_clause.class).unwrap();
-                let flavor = classes_map.get(canonical_class_name).unwrap().flavor;
+                let flavor = classes_map.get(&client_clause.class).unwrap().flavor;
                 attr.set_domain(flavor.into());
             }
         }
@@ -318,8 +317,7 @@ pub fn parse_allow(
     for server_clause in &mut ac.server {
         for attr in &mut server_clause.with {
             if attr.is_unspecified_domain() {
-                let canonical_class_name = classes_idx.get(&server_clause.class).unwrap();
-                let flavor = classes_map.get(canonical_class_name).unwrap().flavor;
+                let flavor = classes_map.get(&server_clause.class).unwrap().flavor;
                 attr.set_domain(flavor.into());
             }
         }
@@ -540,7 +538,7 @@ where
 fn parse_allow_signal_clause<'a, I>(
     pa_state: &mut ParseAllowState,
     tokens: &mut Peekable<I>,
-    _classes_idx: &HashMap<String, String>,
+    classes_idx: &HashMap<String, String>,
     classes_map: &HashMap<String, Class>,
 ) -> Result<Token, CompilationError>
 where
@@ -595,7 +593,10 @@ where
         // The service does not share a name with a reserved keyword
         if let TokenType::Literal(ref service_name) = tok.tt {
             // We require the requested service to exist in the list of services
-            target = if let Some(service_class) = classes_map.get(service_name) {
+            target = if let Some(service_class) = classes_idx
+                .get(&service_name.to_lowercase())
+                .and_then(|cn| classes_map.get(cn))
+            {
                 if service_class.flavor != ClassFlavor::Service {
                     return Err(CompilationError::ParseError(
                         format!(
@@ -777,7 +778,7 @@ impl PState {
                 }
                 TokenType::Literal(s) => {
                     // This could be a class name or a tag name.
-                    if let Some(class) = classes.get(s) {
+                    if let Some(class) = classes.get(&s.to_lowercase()) {
                         if self.class_name.is_some() {
                             // We already have a class name.
                             let tok = tokens.next().unwrap();
@@ -854,8 +855,8 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.clone(), name.clone());
-            class_index.insert(class.aka.clone(), name.clone());
+            class_index.insert(name.to_lowercase(), name.clone());
+            class_index.insert(class.aka.to_lowercase(), name.clone());
         }
         (class_index, classes)
     }
@@ -878,8 +879,8 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.clone(), name.clone());
-            class_index.insert(class.aka.clone(), name.clone());
+            class_index.insert(name.to_lowercase(), name.clone());
+            class_index.insert(class.aka.to_lowercase(), name.clone());
         }
 
         let cctx = CompilationCtx::default();
@@ -918,8 +919,8 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.clone(), name.clone());
-            class_index.insert(class.aka.clone(), name.clone());
+            class_index.insert(name.to_lowercase(), name.clone());
+            class_index.insert(class.aka.to_lowercase(), name.clone());
         }
 
         let cctx = CompilationCtx::default();
@@ -951,8 +952,8 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.clone(), name.clone());
-            class_index.insert(class.aka.clone(), name.clone());
+            class_index.insert(name.to_lowercase(), name.clone());
+            class_index.insert(class.aka.to_lowercase(), name.clone());
         }
 
         let cctx = CompilationCtx::default();
@@ -1002,8 +1003,8 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.clone(), name.clone());
-            class_index.insert(class.aka.clone(), name.clone());
+            class_index.insert(name.to_lowercase(), name.clone());
+            class_index.insert(class.aka.to_lowercase(), name.clone());
         }
 
         let cctx = CompilationCtx::default();
@@ -1048,8 +1049,8 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.clone(), name.clone());
-            class_index.insert(class.aka.clone(), name.clone());
+            class_index.insert(name.to_lowercase(), name.clone());
+            class_index.insert(class.aka.to_lowercase(), name.clone());
         }
 
         let cctx = CompilationCtx::default();
@@ -1116,8 +1117,8 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.clone(), name.clone());
-            class_index.insert(class.aka.clone(), name.clone());
+            class_index.insert(name.to_lowercase(), name.clone());
+            class_index.insert(class.aka.to_lowercase(), name.clone());
         }
 
         let cctx = CompilationCtx::default();
@@ -1194,8 +1195,8 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.clone(), name.clone());
-            class_index.insert(class.aka.clone(), name.clone());
+            class_index.insert(name.to_lowercase(), name.clone());
+            class_index.insert(class.aka.to_lowercase(), name.clone());
         }
 
         let cctx = CompilationCtx::default();

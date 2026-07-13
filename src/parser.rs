@@ -78,8 +78,8 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
     // Construct an index that adds entries for all the AKAs.
     let mut class_index: HashMap<String, String> = HashMap::new();
     for (name, class) in classes.iter() {
-        class_index.insert(name.clone(), name.clone());
-        class_index.insert(class.aka.clone(), name.clone());
+        class_index.insert(name.to_lowercase(), name.clone());
+        class_index.insert(class.aka.to_lowercase(), name.clone());
     }
 
     // Define statements create classes.
@@ -88,7 +88,7 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
             let class = parse_define(statement, i + 1)?;
 
             // It is an error to redefine a class.
-            if classes.contains_key(&class.name) || class_index.contains_key(&class.name) {
+            if class_index.contains_key(&class.name.to_lowercase()) {
                 return Err(CompilationError::Redefinition(
                     class.name,
                     statement[0].line,
@@ -96,8 +96,8 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
                 ));
             }
             let cname = class.name.clone();
-            class_index.insert(cname.clone(), cname.clone());
-            class_index.insert(class.aka.clone(), cname.clone());
+            class_index.insert(cname.to_lowercase(), cname.clone());
+            class_index.insert(class.aka.to_lowercase(), cname.clone());
             classes.insert(cname, class);
         }
     }
@@ -524,6 +524,35 @@ allow marketing-emps to access role:marketing services
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {
             Ok(_) => panic!("should have failed: class defined twice"),
+            Err(e) => assert!(
+                matches!(e, CompilationError::Redefinition(_, _, _)),
+                "unexpected error: {e:?}"
+            ),
+        }
+    }
+
+    // Class names match case-insensitively. A miscased reference in an
+    // allow statement resolves to the class (not a tag), and a define whose name
+    // differs from an existing class only by case is a redefinition.
+    #[test]
+    fn test_class_name_case_insensitive() {
+        let ctx = CompilationCtx::default();
+
+        let input = "define employee as a user with id\nallow EMPLOYEES to access services";
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        let user_clause = pr.policy.allows[0]
+            .client
+            .iter()
+            .find(|c| c.flavor == ClassFlavor::User)
+            .expect("user clause missing from LHS");
+        assert_eq!(user_clause.class, "employee");
+        assert!(user_clause.with.is_empty(), "'EMPLOYEES' must not be a tag");
+
+        let input = "define employee as a user with id \n define Employee as a user with id";
+        let tz = tokenize_str(input, &ctx).unwrap();
+        match parse(tz.tokens, &ctx) {
+            Ok(_) => panic!("should have failed: class redefined with different case"),
             Err(e) => assert!(
                 matches!(e, CompilationError::Redefinition(_, _, _)),
                 "unexpected error: {e:?}"
