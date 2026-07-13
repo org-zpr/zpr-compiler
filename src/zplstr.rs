@@ -89,10 +89,35 @@ impl fmt::Display for ZPLStr {
     }
 }
 
+struct AttributeValue {
+    value: String,
+    is_quoted: bool,
+    has_unquoted_dot: bool,
+}
+
+impl AttributeValue {
+    pub fn new() -> Self {
+        AttributeValue {
+            value: String::new(),
+            is_quoted: false,
+            has_unquoted_dot: false,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.value.clear();
+        self.is_quoted = false;
+        self.has_unquoted_dot = false;
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.value.is_empty()
+    }
+}
 pub struct ZPLStrBuilder {
     name: String,
-    current_value: String,
-    prev_values: Vec<String>,
+    current_value: AttributeValue,
+    prev_values: Vec<AttributeValue>,
     tuple: bool,
     input_to_value: bool,
 }
@@ -101,7 +126,7 @@ impl ZPLStrBuilder {
     pub fn new() -> Self {
         ZPLStrBuilder {
             name: String::new(),
-            current_value: String::new(),
+            current_value: AttributeValue::new(),
             prev_values: Vec::new(),
             tuple: false,
             input_to_value: false,
@@ -122,10 +147,15 @@ impl ZPLStrBuilder {
         col: usize,
     ) -> Result<(), CompilationError> {
         if self.input_to_value {
-            if !quoted && !c.is_ascii_alphanumeric() && !matches!(c, '-' | '_') {
+            if !quoted && !c.is_ascii_alphanumeric() && !matches!(c, '.' | '-' | '_') {
                 return Err(CompilationError::IllegalStringLiteralChar(c, line, col));
             }
-            self.current_value.push(c);
+            if quoted {
+                self.current_value.is_quoted = true;
+            } else if c == '.' {
+                self.current_value.has_unquoted_dot = true;
+            }
+            self.current_value.value.push(c);
         } else {
             // The name part of a tuple is allowed to contain periods without needing quotes.
             if !quoted && !c.is_ascii_alphanumeric() && !matches!(c, '.' | '-' | '_') {
@@ -157,14 +187,18 @@ impl ZPLStrBuilder {
             panic!("not in value mode");
         }
         if !self.current_value.is_empty() {
-            self.prev_values.push(self.current_value.clone());
+            self.prev_values.push(AttributeValue {
+                value: self.current_value.value.clone(),
+                is_quoted: self.current_value.is_quoted,
+                has_unquoted_dot: self.current_value.has_unquoted_dot,
+            });
             self.current_value.clear();
         }
     }
 
     /// TRUE if the current value being built is empty.
     pub fn value_is_empty(&self) -> bool {
-        self.current_value.is_empty()
+        self.current_value.value.is_empty()
     }
 
     pub fn is_tuple(&self) -> bool {
@@ -180,18 +214,45 @@ impl ZPLStrBuilder {
     }
 
     /// Convert this builder into a [ZPLStr].
-    pub fn build(self) -> ZPLStr {
+    pub fn build(self, line: usize, col: usize) -> Result<ZPLStr, CompilationError> {
         if self.tuple {
             let mut vals = self.prev_values;
             if !self.current_value.is_empty() {
-                vals.push(self.current_value);
+                vals.push(AttributeValue {
+                    value: self.current_value.value,
+                    is_quoted: self.current_value.is_quoted,
+                    has_unquoted_dot: self.current_value.has_unquoted_dot,
+                });
             }
-            return ZPLStr::tuple(self.name, vals);
+            // Unquoted values containing a '.' must be valid decimal numbers.
+            for v in &vals {
+                if v.has_unquoted_dot
+                    && (v.is_quoted && v.value.contains('.') || !Self::is_decimal(&v.value))
+                {
+                    return Err(CompilationError::IllegalNumericValue(
+                        v.value.clone(),
+                        line,
+                        col,
+                    ));
+                }
+            }
+            return Ok(ZPLStr::tuple(
+                self.name,
+                vals.into_iter().map(|v| v.value).collect(),
+            ));
         }
-        ZPLStr::atom(self.name)
+        Ok(ZPLStr::atom(self.name))
+    }
+    /// Checks if the supplied value is a decimal number: digits, '.', digits.
+    fn is_decimal(v: &str) -> bool {
+        v.split_once('.').is_some_and(|(whole, frac)| {
+            !whole.is_empty()
+                && !frac.is_empty()
+                && whole.chars().all(|c| c.is_ascii_digit())
+                && frac.chars().all(|c| c.is_ascii_digit())
+        })
     }
 }
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -208,7 +269,7 @@ mod test {
         assert!(!b.is_empty());
         assert!(!b.is_tuple());
         assert!(!b.is_sugar());
-        let s = b.build();
+        let s = b.build(1, 1).unwrap();
         assert_eq!(s.is_tuple(), false);
         assert_eq!(s.as_atom().unwrap(), "classified");
         assert_eq!(format!("{}", s), "classified");
@@ -229,7 +290,7 @@ mod test {
         assert!(b.accept_value().is_ok());
         assert!(b.accept_value().is_err()); // second time should return false
         assert!(b.is_tuple());
-        let s = b.build();
+        let s = b.build(1, 1).unwrap();
         assert_eq!(s.is_tuple(), true);
         let (k, v) = s.as_tuple().unwrap();
         assert_eq!(k, "name");
@@ -255,7 +316,7 @@ mod test {
         for (i, c) in "John".chars().enumerate() {
             b.push(c, false, 1, i + 1).unwrap();
         }
-        let s = b.build();
+        let s = b.build(1, 1).unwrap();
         assert_eq!(s.is_tuple(), true);
         let (k, v) = s.as_tuple().unwrap();
         assert_eq!(k, "name");
@@ -290,7 +351,7 @@ mod test {
         for (i, c) in "role3".chars().enumerate() {
             b.push(c, false, 1, i + 1).unwrap();
         }
-        let s = b.build();
+        let s = b.build(1, 1).unwrap();
         assert_eq!(s.is_tuple(), true);
         let (k, v) = s.as_tuple().unwrap();
         assert_eq!(k, "roles");
@@ -299,5 +360,15 @@ mod test {
         assert_eq!(v[1], "role2");
         assert_eq!(v[2], "role3");
         assert_eq!(format!("{}", s), "roles:{role1, role2, role3}");
+    }
+
+    #[test]
+    fn test_is_decimal() {
+        for v in ["1.5", "123.4", "0.0"] {
+            assert!(ZPLStrBuilder::is_decimal(v), "{}", v);
+        }
+        for v in [".5", "5.", "1.2.3", "-1.5", "1.a", "green.blue", "5"] {
+            assert!(!ZPLStrBuilder::is_decimal(v), "{}", v);
+        }
     }
 }

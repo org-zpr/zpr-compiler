@@ -32,6 +32,9 @@ pub enum CompilationError {
     #[error("illegal character for unquoted name literal at line {1}, column {2}: {0}")]
     IllegalNameLiteralChar(char, usize, usize),
 
+    #[error("invalid numeric value in unquoted string literal at line {1}, column {2}: {0}")]
+    IllegalNumericValue(String, usize, usize),
+
     #[error("illegal set start '{{' at line {0}, column {1}")]
     IllegalSetStart(usize, usize),
 
