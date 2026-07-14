@@ -86,14 +86,14 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
     for (i, statement) in statements.iter().enumerate() {
         if statement[0].tt == TokenType::Define {
             let class = parse_define(statement, i + 1)?;
-
-            // It is an error to redefine a class.
-            if class_index.contains_key(&class.name.to_lowercase()) {
-                return Err(CompilationError::Redefinition(
-                    class.name,
-                    statement[0].line,
-                    statement[0].col,
-                ));
+            for new_name in [&class.name, &class.aka] {
+                if class_index.contains_key(&new_name.to_lowercase()) {
+                    return Err(CompilationError::Redefinition(
+                        new_name.clone(),
+                        statement[0].line,
+                        statement[0].col,
+                    ));
+                }
             }
             let cname = class.name.clone();
             class_index.insert(cname.to_lowercase(), cname.clone());
@@ -553,6 +553,21 @@ allow marketing-emps to access role:marketing services
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {
             Ok(_) => panic!("should have failed: class redefined with different case"),
+            Err(e) => assert!(
+                matches!(e, CompilationError::Redefinition(_, _, _)),
+                "unexpected error: {e:?}"
+            ),
+        }
+    }
+
+    // An AKA colliding with an existing name/AKA must be a Redefinition error,
+    #[test]
+    fn test_aka_collision_error() {
+        let input = "define bad AKA Users as endpoint";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        match parse(tz.tokens, &ctx) {
+            Ok(_) => panic!("should have failed: AKA collides with built-in 'users'"),
             Err(e) => assert!(
                 matches!(e, CompilationError::Redefinition(_, _, _)),
                 "unexpected error: {e:?}"
