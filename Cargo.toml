@@ -1,6 +1,6 @@
 [package]
 name = "zplc"
-version = "0.11.1"
+version = "0.12.0"
 edition = "2024"
 
 [dependencies]
@@ -15,7 +15,7 @@ nix = { version = "0.30.1", features = ["hostname"] }
 openssl = "0.10.70"
 prost = "0.13.4"
 ring = "0.17.8"
-serde = { version = "1.0.217", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.8"
 toml = "0.9.7"
-zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.13.0", features = ["policy"] }
+zpr = { git = "https://github.com/org-zpr/zpr-common.git", tag = "v0.19.2", features = ["policy"] }
