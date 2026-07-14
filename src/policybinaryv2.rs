@@ -254,14 +254,6 @@ impl PolicyWriter for PolicyBinaryV2 {
         // nop
     }
 
-    /*
-    fn write_connect_match(&mut self, conditions: &[Attribute]) {
-        if !self.join_policies.has(conditions) {
-            self.join_policies.add_connect(conditions);
-        }
-    }
-    */
-
     fn write_connect_match_for_provider(
         &mut self,
         svc_attrs: &[Attribute],
