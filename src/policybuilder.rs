@@ -276,17 +276,7 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
 
     fn set_connects(&mut self, fabric: &Fabric) -> Result<(), CompilationError> {
         for svc in &fabric.services {
-            // Any agent that can access a service can connect
-            for clipol in &svc.client_policies {
-                if clipol.never_allow {
-                    continue; // obviously we don't want you to connect if you only appear in a deny policy.
-                }
-                if !clipol.access_only {
-                    self.policy_writer
-                        .write_connect_match(&clipol.cli_condition);
-                }
-            }
-            // Any agent that provides a service can connect
+            // Add join policies for agents that provide a service
             match svc.service_type {
                 ServiceType::Regular
                 | ServiceType::Visa

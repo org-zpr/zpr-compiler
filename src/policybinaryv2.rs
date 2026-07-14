@@ -114,25 +114,6 @@ impl JPBuilder {
         self.policies.iter()
     }
 
-    /// TRUE if this building contains this exact attribute collection.
-    fn has(&self, conditions: &[Attribute]) -> bool {
-        let key = JPKey::new(conditions);
-        self.policies.contains_key(&key)
-    }
-
-    /// Adds a connect join policy (no services provided) if not already present.
-    fn add_connect(&mut self, conditions: &[Attribute]) {
-        let key = JPKey::new(conditions);
-        if !self.policies.contains_key(&key) {
-            let jp = JoinPolicy {
-                conditions: conditions.to_vec(),
-                flags: PFlags::default(),
-                provides: None,
-            };
-            self.policies.insert(key, jp);
-        }
-    }
-
     /// Add a connect join policy that also provides a service.
     /// Note that same attr set may provide multiple services.
     /// flags are additive.
@@ -273,11 +254,13 @@ impl PolicyWriter for PolicyBinaryV2 {
         // nop
     }
 
+    /*
     fn write_connect_match(&mut self, conditions: &[Attribute]) {
         if !self.join_policies.has(conditions) {
             self.join_policies.add_connect(conditions);
         }
     }
+    */
 
     fn write_connect_match_for_provider(
         &mut self,
@@ -705,28 +688,6 @@ mod test {
 
         // Both attributes share the same ZPL key, so JPKey::new should panic.
         let _ = JPKey::new(&[attr_admin, attr_dev]);
-    }
-
-    #[test]
-    fn test_jp_builder_has_and_add_connect() {
-        let mut builder = JPBuilder::default();
-        let conditions = vec![
-            Attribute::tuple("user.role")
-                .single()
-                .value("admin")
-                .build()
-                .unwrap(),
-        ];
-
-        assert!(!builder.has(&conditions));
-        builder.add_connect(&conditions);
-        assert!(builder.has(&conditions));
-
-        let key = JPKey::new(&conditions);
-        let jp = builder.policies.get(&key).expect("join policy missing");
-        assert_eq!(jp.conditions, conditions);
-        assert!(jp.provides.is_none());
-        assert_eq!(jp.flags, PFlags::default());
     }
 
     #[test]
