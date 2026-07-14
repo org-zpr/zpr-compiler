@@ -66,7 +66,7 @@ pub fn parse_define(
     // The flavor of the parent class really cannot be figured out until all
     // the classes are defined. To give meaning full error may need to track
     // the define token or something.
-    let flavor = match parent_class_name.as_str() {
+    let flavor = match parent_class_name.to_lowercase().as_str() {
         zpl::DEF_CLASS_USER_NAME | zpl::DEF_CLASS_USER_AKA => {
             parent_class_name = String::from(zpl::DEF_CLASS_USER_NAME);
             ClassFlavor::User
@@ -309,6 +309,10 @@ where
 // Fill in any classes with undefined flavor by walking backwards to their parent classes.
 pub fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(), CompilationError> {
     let mut undef_count = 0;
+    let lowercase_classes: HashMap<String, String> = classes
+        .keys()
+        .map(|k| (k.to_lowercase(), k.clone()))
+        .collect();
     for class in (*classes).values() {
         if class.flavor == ClassFlavor::Undefined {
             undef_count += 1;
@@ -324,7 +328,10 @@ pub fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(),
         }
         for name in needs_parent {
             let parentless_ref = classes.get(&name).unwrap();
-            let parent_flavor = match classes.get(parentless_ref.parent.as_str()) {
+            let canonical_parent = lowercase_classes
+                .get(&parentless_ref.parent.to_lowercase())
+                .cloned();
+            let parent_flavor = match canonical_parent.as_ref().and_then(|k| classes.get(k)) {
                 Some(parent) => {
                     // Ensure parent allows subclassing.
                     if !parent.extensible {
@@ -354,6 +361,7 @@ pub fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(),
             if parent_flavor != ClassFlavor::Undefined {
                 let parentless = classes.get_mut(&name).unwrap();
                 parentless.flavor = parent_flavor;
+                parentless.parent = canonical_parent.unwrap();
                 undef_count -= 1;
             }
         }
