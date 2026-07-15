@@ -630,7 +630,7 @@ allow marketing-emps to access role:marketing services.
     fn test_class_name_case_insensitive() {
         let ctx = CompilationCtx::default();
 
-        let input = "define employee as a user with id\nallow EMPLOYEES to access services";
+        let input = "define employee as a user with id.\n\nallow EMPLOYEES to access services.";
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");
         let user_clause = pr.policy.allows[0]
@@ -641,7 +641,7 @@ allow marketing-emps to access role:marketing services.
         assert_eq!(user_clause.class, "employee");
         assert!(user_clause.with.is_empty(), "'EMPLOYEES' must not be a tag");
 
-        let input = "define employee as a user with id \n define Employee as a user with id";
+        let input = "define employee as a user with id.\n\ndefine Employee as a user with id.";
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {
             Ok(_) => panic!("should have failed: class redefined with different case"),
@@ -655,7 +655,7 @@ allow marketing-emps to access role:marketing services.
     // An AKA colliding with an existing name/AKA must be a Redefinition error,
     #[test]
     fn test_aka_collision_error() {
-        let input = "define bad AKA Users as endpoint";
+        let input = "define bad AKA Users as endpoint.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {
