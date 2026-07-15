@@ -442,68 +442,53 @@ allow marketing-emps to access role:marketing services.
     // Violations of the ZRFC 15 statement layout rules.
     #[test]
     fn test_statement_delimiter_errors() {
+        use std::mem::discriminant;
+
+        // (input, expected error variant — fields are ignored, only the variant matters)
+        let cases = [
+            // No blank line after the period: same line, next line, comment-only line.
+            (
+                "Define Alien as a user with color:green. Allow Aliens to access services.",
+                CompilationError::MissingBlankLine(0, 0),
+            ),
+            (
+                "Define Alien as a user with color:green.\nAllow Aliens to access services.",
+                CompilationError::MissingBlankLine(0, 0),
+            ),
+            (
+                "Define Alien as a user with color:green.\n# comment\nAllow Aliens to access services.",
+                CompilationError::MissingBlankLine(0, 0),
+            ),
+            // Missing period: at end of input, before the next keyword, at a blank line.
+            (
+                "Allow Aliens to access services",
+                CompilationError::MissingStatementTerminator(0, 0),
+            ),
+            (
+                "Define Alien as a user with color:green\nAllow Aliens to access services.",
+                CompilationError::MissingStatementTerminator(0, 0),
+            ),
+            (
+                "Allow Aliens\n\nto access services.",
+                CompilationError::MissingStatementTerminator(0, 0),
+            ),
+            // A bare period with no statement before it.
+            (".", CompilationError::ParseError(String::new(), 0, 0)),
+        ];
+
         let ctx = CompilationCtx::default();
-        let parse_err = |input: &str| -> CompilationError {
+        for (input, expected) in cases {
             let tz = tokenize_str(input, &ctx).unwrap();
-            match parse(tz.tokens, &ctx) {
-                Ok(_) => panic!("should not have parsed '{}'", input),
+            let err = match parse(tz.tokens, &ctx) {
+                Ok(_) => panic!("should not have parsed '{input}'"),
                 Err(e) => e,
-            }
-        };
-
-        // Two statements sharing a line: no blank line after the period.
-        let err =
-            parse_err("Define Alien as a user with color:green. Allow Aliens to access services.");
-        assert!(
-            matches!(err, CompilationError::MissingBlankLine(_, _)),
-            "unexpected error: {err:?}"
-        );
-
-        // Statements on consecutive lines: still no blank line.
-        let err =
-            parse_err("Define Alien as a user with color:green.\nAllow Aliens to access services.");
-        assert!(
-            matches!(err, CompilationError::MissingBlankLine(_, _)),
-            "unexpected error: {err:?}"
-        );
-
-        // A comment-only line does not count as a blank line.
-        let err = parse_err(
-            "Define Alien as a user with color:green.\n# comment\nAllow Aliens to access services.",
-        );
-        assert!(
-            matches!(err, CompilationError::MissingBlankLine(_, _)),
-            "unexpected error: {err:?}"
-        );
-
-        // Missing period at end of input.
-        let err = parse_err("Allow Aliens to access services");
-        assert!(
-            matches!(err, CompilationError::MissingStatementTerminator(_, _)),
-            "unexpected error: {err:?}"
-        );
-
-        // Next statement's keyword arrives before the previous one is terminated.
-        let err =
-            parse_err("Define Alien as a user with color:green\nAllow Aliens to access services.");
-        assert!(
-            matches!(err, CompilationError::MissingStatementTerminator(_, _)),
-            "unexpected error: {err:?}"
-        );
-
-        // Blank line in the middle of an unterminated statement.
-        let err = parse_err("Allow Aliens\n\nto access services.");
-        assert!(
-            matches!(err, CompilationError::MissingStatementTerminator(_, _)),
-            "unexpected error: {err:?}"
-        );
-
-        // A bare period with no statement before it.
-        let err = parse_err(".");
-        assert!(
-            matches!(err, CompilationError::ParseError(_, _, _)),
-            "unexpected error: {err:?}"
-        );
+            };
+            assert_eq!(
+                discriminant(&err),
+                discriminant(&expected),
+                "wrong error for '{input}': {err:?}"
+            );
+        }
     }
 
     // Put periods in where they don't belong. Should fail.
