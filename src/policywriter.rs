@@ -20,7 +20,6 @@ pub trait PolicyWriter {
     fn write_policy_revision(&mut self, revision: &str);
     fn write_policy_metadata(&mut self, metadata: &str);
     fn write_max_visa_lifetime(&mut self, lifetime: std::time::Duration);
-    fn write_connect_match(&mut self, conditions: &[Attribute]);
 
     fn write_connect_match_for_provider(
         &mut self,
