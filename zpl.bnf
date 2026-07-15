@@ -21,7 +21,8 @@
 //
 // KEYWORD STATE (from lex.rs):
 //   - Active keywords: never, allow, define, with, to, access, and, as, aka,
-//     tag, tags, on, optional, multiple, signal (plus "," as AND, "." as terminator).
+//     tag, tags, on, optional, multiple, signal (plus "," as AND, "." followed 
+//     by a blank line to terminate a statement).
 //   - Keywords are case-insensitive ("ALLOW" == "allow"). Literals (class,
 //     attribute, and value names) are case-sensitive.
 //   - SPEC DIVERGENCE: ZRFC 15 permits only three keyword casings (lowercase,
@@ -36,23 +37,35 @@
 
 <zpl-policy> ::= <statement>*
 
-// Statements are delimited by a terminating period OR by the start of the next
-// allow/define/never keyword. A trailing period is therefore optional in practice.
+// Every statement begins on a new line and is terminated by a
+// period followed by a blank line. End of input also satisfies the blank-line
+// requirement, so the final statement needs only its period.
 //
-// SPEC DIVERGENCE: ZRFC 15 requires each statement to begin on a new line and
-// be "terminated by a period and a blank line". The compiler ignores line
-// structure entirely: no newline/blank-line requirements, and the period
-// itself is optional.
-<statement> ::= <permission-statement> | <denial-statement> | <define-statement>
+// Layout rules (enforced by the parser via lexer-emitted blank-line tokens):
+//   - <blank-line> is a line containing no tokens (empty or whitespace-only).
+//     Multiple consecutive blank lines are equivalent to one; blank lines
+//     before the first statement and after the last are ignored.
+//   - A comment-only line is invisible: it does not satisfy the blank-line
+//     requirement, and it does not interrupt a multi-line statement.
+//   - A statement may span multiple lines, but a blank line before the
+//     terminating period is an error (missing statement terminator).
+//   - Nothing but a comment may follow the period on its line; in particular
+//     two statements can never share a line.
+//   - Leading whitespace (indentation) before a statement is allowed.
+<statement> ::= (<permission-statement> | <denial-statement> | <define-statement>)
+                <statement-terminator>
+
+<statement-terminator> ::= "." (<blank-line> | <end-of-input>)
+
 
 <permission-statement> ::= "allow" <p-statement>
 
 <denial-statement> ::= "never" "allow" <p-statement>
 
 <define-statement> ::= "define" <name> <aka-clause>? "as" <class-name>
-                       <with-attributes-clause>? "."?
+                       <with-attributes-clause>?
 
-<p-statement> ::= <subject-clause> "to" "access" <object-clause> <signal-clause>? "."?
+<p-statement> ::= <subject-clause> "to" "access" <object-clause> <signal-clause>?
 
 <subject-clause> ::= <user-spec> | <service-spec> | <endpoint-spec> |
                      <user-spec> "on" <endpoint-spec> |

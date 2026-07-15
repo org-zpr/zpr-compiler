@@ -3,14 +3,16 @@
 # Since we don't yet authenticate users, this policy is expressed using endpoints.
 
 
-define adapter as a endpoint with cn
-define GoldenClient as an adapter with cn:'client.zpr.org'
+define adapter as a endpoint with cn.
 
-define ZServicePingable as a service with cn:'service.zpr.org'
-define ZWebService as a service with cn:'service.zpr.org'
+define GoldenClient as an adapter with cn:'client.zpr.org'.
 
-allow GoldenClient to access ZServicePingable
-allow GoldenClient to access ZWebService
+define ZServicePingable as a service with cn:'service.zpr.org'.
 
-allow zpr.adapter.cn:'client.zpr.org' endpoints to access VisaService
+define ZWebService as a service with cn:'service.zpr.org'.
 
+allow GoldenClient to access ZServicePingable.
+
+allow GoldenClient to access ZWebService.
+
+allow zpr.adapter.cn:'client.zpr.org' endpoints to access VisaService.

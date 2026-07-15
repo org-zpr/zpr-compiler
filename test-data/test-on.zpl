@@ -21,6 +21,7 @@ allow clearance:classified government users to access level:classified services 
 # Now define an endpoint that requires an attribute. And then use that in a
 # trailing ON clause.
 define LockedEndpoint as an endpoint with tag encrypted.
+
 allow clearance:classified government users to access level:secret services on LockedEndpoints.
 #___________________________________________________________________________↑
 
@@ -28,18 +29,15 @@ allow clearance:classified government users to access level:secret services on L
 
 # Defines as usual must use the WITH format.
 define ServiceRequiresEncrypted as an Image-database with tag endpoint.encrypted.
+
 allow clearance:public users to access ServiceRequiresEncrypted.
 
 
 define AuthService as a service.
 
 # Here is an endpoint clause without ON since there is no user clause.
-allow zpr.adapter.cn: endpoints to access AuthService
+allow zpr.adapter.cn: endpoints to access AuthService.
+
 define NetAdmins as users with endpoint.zpr.adapter.cn:'admin.zpr.org'.
-allow NetAdmins to access VisaService
 
-
-
-
-
-
+allow NetAdmins to access VisaService.

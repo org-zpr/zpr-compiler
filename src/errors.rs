@@ -108,4 +108,12 @@ pub enum CompilationError {
         "'{0}' at line {1}, column {2} is a reserved preposition (ZRFC 15 reserves English prepositions for future language extensions)"
     )]
     ReservedPreposition(String, usize, usize),
+
+    #[error(
+        "statement is not terminated at line {0}, column {1}. Statements must end with periods"
+    )]
+    MissingStatementTerminator(usize, usize),
+
+    #[error("expected a blank line after statement at line {0}, column {1}")]
+    MissingBlankLine(usize, usize),
 }

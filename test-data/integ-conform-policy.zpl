@@ -1,22 +1,25 @@
-define adapter as a endpoint with zpr.adapter.cn
+define adapter as a endpoint with zpr.adapter.cn.
 
 # Our node offers PING too
-define PingableNode as a service with endpoint.zpr.adapter.cn:'node.zpr.org'
+define PingableNode as a service with endpoint.zpr.adapter.cn:'node.zpr.org'.
 
 # Three services, all offered by same adapter
-define WebService as a service with endpoint.zpr.adapter.cn:'service.zpr.org'
-define IPerfService as a service with endpoint.zpr.adapter.cn:'service.zpr.org'
-define PingableService as a service with endpoint.zpr.adapter.cn:'service.zpr.org'
+define WebService as a service with endpoint.zpr.adapter.cn:'service.zpr.org'.
 
-define SpecialClient as an adapter with endpoint.zpr.adapter.cn:'client.zpr.org'
+define IPerfService as a service with endpoint.zpr.adapter.cn:'service.zpr.org'.
+
+define PingableService as a service with endpoint.zpr.adapter.cn:'service.zpr.org'.
+
+define SpecialClient as an adapter with endpoint.zpr.adapter.cn:'client.zpr.org'.
 
 # the SpecialClient can access three services
-allow SpecialClient to access WebService
-allow SpecialClient to access IPerfService
-allow SpecialClient to access PingableService
+allow SpecialClient to access WebService.
+
+allow SpecialClient to access IPerfService.
+
+allow SpecialClient to access PingableService.
 
 # any connected adapter can ping the node
-allow adapter to access PingableNode
+allow adapter to access PingableNode.
 
-allow zpr.adapter.cn:'client.zpr.org' endpoints to access VisaService
-
+allow zpr.adapter.cn:'client.zpr.org' endpoints to access VisaService.
