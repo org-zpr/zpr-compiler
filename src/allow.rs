@@ -855,8 +855,9 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.to_lowercase(), name.clone());
-            class_index.insert(class.aka.to_lowercase(), name.clone());
+            for n in class.iterate_all_names() {
+                class_index.insert(n.to_lowercase(), name.clone());
+            }
         }
         (class_index, classes)
     }
@@ -879,8 +880,9 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.to_lowercase(), name.clone());
-            class_index.insert(class.aka.to_lowercase(), name.clone());
+            for n in class.iterate_all_names() {
+                class_index.insert(n.to_lowercase(), name.clone());
+            }
         }
 
         let cctx = CompilationCtx::default();
@@ -919,8 +921,9 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.to_lowercase(), name.clone());
-            class_index.insert(class.aka.to_lowercase(), name.clone());
+            for n in class.iterate_all_names() {
+                class_index.insert(n.to_lowercase(), name.clone());
+            }
         }
 
         let cctx = CompilationCtx::default();
@@ -952,8 +955,9 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.to_lowercase(), name.clone());
-            class_index.insert(class.aka.to_lowercase(), name.clone());
+            for n in class.iterate_all_names() {
+                class_index.insert(n.to_lowercase(), name.clone());
+            }
         }
 
         let cctx = CompilationCtx::default();
@@ -1003,8 +1007,9 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.to_lowercase(), name.clone());
-            class_index.insert(class.aka.to_lowercase(), name.clone());
+            for n in class.iterate_all_names() {
+                class_index.insert(n.to_lowercase(), name.clone());
+            }
         }
 
         let cctx = CompilationCtx::default();
@@ -1049,8 +1054,9 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.to_lowercase(), name.clone());
-            class_index.insert(class.aka.to_lowercase(), name.clone());
+            for n in class.iterate_all_names() {
+                class_index.insert(n.to_lowercase(), name.clone());
+            }
         }
 
         let cctx = CompilationCtx::default();
@@ -1117,8 +1123,9 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.to_lowercase(), name.clone());
-            class_index.insert(class.aka.to_lowercase(), name.clone());
+            for n in class.iterate_all_names() {
+                class_index.insert(n.to_lowercase(), name.clone());
+            }
         }
 
         let cctx = CompilationCtx::default();
@@ -1195,8 +1202,9 @@ mod test {
         }
         let mut class_index: HashMap<String, String> = HashMap::new();
         for (name, class) in classes.iter() {
-            class_index.insert(name.to_lowercase(), name.clone());
-            class_index.insert(class.aka.to_lowercase(), name.clone());
+            for n in class.iterate_all_names() {
+                class_index.insert(n.to_lowercase(), name.clone());
+            }
         }
 
         let cctx = CompilationCtx::default();
