@@ -34,10 +34,10 @@
 // Statements are delimited by a terminating period OR by the start of the next
 // allow/define/never keyword. A trailing period is therefore optional in practice.
 //
-// SPEC DIVERGENCE: ZRFC 15 requires each statement to begin on a new line and
-// be "terminated by a period and a blank line". The compiler ignores line
-// structure entirely: no newline/blank-line requirements, and the period
-// itself is optional.
+// SPEC DIVERGENCE: the spec requires each statement to begin on a new line and
+// be "terminated by a period followed by either a newline or the end of the
+// file". The compiler ignores line structure entirely: no newline
+// requirements, and the period itself is optional.
 <statement> ::= <permission-statement> | <denial-statement> | <define-statement>
 
 <permission-statement> ::= "allow" <p-statement>
