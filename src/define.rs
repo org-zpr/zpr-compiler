@@ -32,8 +32,8 @@ pub fn parse_define(
     //        ^^^^^^^^^^
     let class_name = putil::return_literal(root_tok, tokens.next(), "class name", "define")?;
 
-    // define class_name AKA and plural                 ^^^ ^^^^^^
-    let plural_name = putil::pluralize(&class_name);
+    // define class_name aka aka_name
+    //                   ^^^ ^^^^^^^^
     let aka_name = if tokens.peek().is_some_and(|t| t.tt == TokenType::AkA) {
         let aka = tokens.next().unwrap(); // consume the AKA
         Some(putil::return_literal(
@@ -45,6 +45,8 @@ pub fn parse_define(
     } else {
         None
     };
+
+    let plural_name = putil::pluralize(&class_name);
 
     // define class_name [ aka foo ] as a parent-class-name with
     //                               ^^
