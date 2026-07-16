@@ -33,7 +33,7 @@ same address.
 
 ### Topology
 
-If there are multiple nodes you need to define their substrate addresses. We support multiple 
+If there are multiple nodes you need to define their substrate addresses. We support multiple
 substrate addresses per node. Each address is specified in `HOST:PORT` format and is tied
 to an identifier.  In the example below the identifier is `i0`.
 
@@ -52,7 +52,7 @@ To connect nodes you must specific `links` in the zplc file.
 ```toml
 [links.<LINKID>]
 attributes = [["zpr.cost", "1"]] # this is the default
-peers = [ { node = "<NODEID>" }, 
+peers = [ { node = "<NODEID>" },
           { node = "<NODEID>" } ]
 ```
 
@@ -62,7 +62,7 @@ in the peers list, eg:
 ```toml
 [links.<LINKID>]
 attributes = [["zpr.cost", "1"]] # this is the default
-peers = [ { node = "<NODEID>" }, 
+peers = [ { node = "<NODEID>" },
           { node = "<NODEID>", interface = "i3" } ]
 ```
 
@@ -113,7 +113,7 @@ For non default trusted services, the field meanings are:
   the compiler expects to find a service block named `<TSNAME>-client`.
 * `cert_path` - Used to pass a TLS certificate to the visa service which is used to
   verify the service connection.
-* `returns_attributes` - List of attribute keys returned by the service mapped to 
+* `returns_attributes` - List of attribute keys returned by the service mapped to
   ZPL attribute names.
 * `identity_attributes` - Subset of the `returns_attributes` that denote identity.
 * `provider` - Attribute key/value tuples of the actor (or actors) that provide this service.
@@ -181,7 +181,7 @@ returns_attributes = [
 ]
 ```
 
-And then for `identity_attributes` make sure to use the service name (not the 
+And then for `identity_attributes` make sure to use the service name (not the
 ZPL name).  For example, given the above returns attributes:
 
 ```toml
@@ -257,8 +257,29 @@ l4protocl = "TCP"
 port = 443
 
 [service.WebService]
-protocol = webtls
+protocol = "webtls"
 port = 3030
+```
+
+To associate a service with an actor you need provider attributes. These can
+come from the ZPL, but you can also put them in the configuration.  Eg,
+
+```toml
+[service.WebService]
+protocol = "http"
+port = 80
+provider = [[ "endpoint.zpr.adapter.cn", "foo.blah"]]
+```
+
+If you need a static address for a service, the service adapter needs to specify
+a `zpr_addr` in its config file AND the service configuration needs to match
+with a `zpr.addr` attribute.  For example,
+
+```toml
+[service.WebService]
+protocol = "http"
+port = 80
+provider = [[ "endpoint.zpr.adapter.cn", "foo.blah"], ["zpr.addr", "fd5a:5052:2020::19"]]
 ```
 
 
