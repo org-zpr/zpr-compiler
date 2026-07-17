@@ -108,4 +108,7 @@ pub enum CompilationError {
         "'{0}' at line {1}, column {2} is a reserved preposition (ZRFC 15 reserves English prepositions for future language extensions)"
     )]
     ReservedPreposition(String, usize, usize),
+
+    #[error("Illegal charecter following backslash within quote at line {0}, column {1}")]
+    BackslashError(usize, usize),
 }
