@@ -21,8 +21,8 @@
 //
 // KEYWORD STATE (from lex.rs):
 //   - Active keywords: never, allow, define, with, to, access, and, as, aka,
-//     tag, tags, on, optional, multiple, signal (plus "," as AND, "." followed 
-//     by a blank line to terminate a statement).
+//     tag, tags, on, optional, multiple, signal (plus "," as AND, "." followed
+//     by a newline to terminate a statement).
 //   - Keywords are case-insensitive ("ALLOW" == "allow"). Literals (class,
 //     attribute, and value names) are case-sensitive.
 //   - "a"/"an" are dropped as syntactic sugar wherever they appear (not just after "as").
@@ -32,25 +32,22 @@
 
 <zpl-policy> ::= <statement>*
 
-// Every statement begins on a new line and is terminated by a
-// period followed by a blank line. End of input also satisfies the blank-line
-// requirement, so the final statement needs only its period.
+// Every statement begins on a new line and is terminated by a period followed
+// by a newline or the end of the file.
 //
-// Layout rules (enforced by the parser via lexer-emitted blank-line tokens):
-//   - <blank-line> is a line containing no tokens (empty or whitespace-only).
-//     Multiple consecutive blank lines are equivalent to one; blank lines
-//     before the first statement and after the last are ignored.
-//   - A comment-only line is invisible: it does not satisfy the blank-line
-//     requirement, and it does not interrupt a multi-line statement.
-//   - A statement may span multiple lines, but a blank line before the
-//     terminating period is an error (missing statement terminator).
-//   - Nothing but a comment may follow the period on its line; in particular
-//     two statements can never share a line.
+// Layout rules (enforced by the parser using token line numbers):
+//   - Blank lines are insignificant: allowed (but not required) between
+//     statements, before the first, after the last, and even inside a
+//     multi-line statement.
+//   - Comment-only lines are likewise insignificant.
+//   - Two statements can never share a line: nothing but whitespace or a
+//     comment may follow the terminating period on its line (a trailing
+//     comment is accepted as a deliberate leniency).
 //   - Leading whitespace (indentation) before a statement is allowed.
 <statement> ::= (<permission-statement> | <denial-statement> | <define-statement>)
                 <statement-terminator>
 
-<statement-terminator> ::= "." (<blank-line> | <end-of-input>)
+<statement-terminator> ::= "." (<newline> | <end-of-input>)
 
 
 <permission-statement> ::= "allow" <p-statement>

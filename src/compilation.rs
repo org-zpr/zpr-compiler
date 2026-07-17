@@ -553,7 +553,6 @@ mod test {
     fn simple_compile() {
         let zpl = r#"
         define Webby as service with endpoint.zpr.adapter.cn.
-
         allow zpr.adapter.cn: endpoints to access Webby.
         "#;
 
@@ -582,7 +581,6 @@ mod test {
     fn define_requires_with() {
         let zpl = r#"
         define Webby as service.
-
         allow zpr.adapter.cn: endpoints to access Webby.
         "#;
 
@@ -636,7 +634,6 @@ mod test {
 
         let zpl = r#"
         define Webby as service.
-
         allow zpr.adapter.cn: endpoints to access Webby.
         "#;
 
@@ -664,7 +661,6 @@ mod test {
     fn cannot_use_cn_as_tag() {
         let zpl = r#"
         define Webby as service with endpoint.zpr.adapter.cn.
-
         allow zpr.adapter.cn endpoints to access Webby.
         "#;
 
@@ -694,7 +690,6 @@ mod test {
     fn test_svc_attrs_must_be_defined() {
         let zpl = r#"
         define Webby as service with unknown_attr.
-
         allow cn: endpoints to access services.
         "#;
 
@@ -724,7 +719,6 @@ mod test {
     fn test_allow_attrs_must_be_defined() {
         let zpl = r#"
         define Webby as service with endpoint.zpr.adapter.cn.
-
         allow unknown_attr: endpoints to access services.
         "#;
 
@@ -754,11 +748,8 @@ mod test {
     fn test_service_attributes() {
         let zpl = r#"
         define Webby as a service with user.bas_id:100.
-
         allow color:green users to access content:green services.
-
         allow color:brown users to access content:brown services.
-
         allow color:red users to access Webby.
         "#;
 

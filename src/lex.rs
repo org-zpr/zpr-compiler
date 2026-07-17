@@ -28,7 +28,6 @@ pub enum TokenType {
     Period,
     Eos, // means "end of statement" but is never actually created
     Signal,
-    BlankLine,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -230,14 +229,10 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
 
     let mut current_word = ZPLStrBuilder::new();
     let mut current_start = (line, col);
-    let mut line_blank = true;
     let mut quoting = QuotingType::None;
     let mut reading_set = false;
 
     while let Some(c) = chars.next() {
-        if !c.is_whitespace() {
-            line_blank = false;
-        }
         match c {
             '\n' => {
                 if quoting.is_quoting() {
@@ -257,12 +252,8 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                     }
                     current_word = ZPLStrBuilder::new();
                 }
-                if line_blank {
-                    tokens.push(Token::new(TokenType::BlankLine, line, 1, 0));
-                }
                 line += 1;
                 col = 1;
-                line_blank = true;
             }
             '\t' => {
                 // tab?
@@ -416,7 +407,6 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                         }
                         line += 1;
                         col = 1;
-                        line_blank = true;
                     }
                 }
             }
@@ -1087,20 +1077,6 @@ mod test {
         assert_eq!(tokens[2].tt, super::TokenType::To);
         assert_eq!(tokens[2].line, 3);
         assert_eq!(tokens[2].col, 1);
-    }
-
-    // --- Blank line tokens ---
-
-    #[test]
-    fn test_blank_line_token() {
-        let zpl = "foo\n\nbar";
-        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
-        let tokens = tz.tokens;
-        assert_eq!(tokens.len(), 3);
-        assert_eq!(tokens[0].tt, super::TokenType::Literal("foo".to_string()));
-        assert_eq!(tokens[1].tt, super::TokenType::BlankLine);
-        assert_eq!(tokens[1].line, 2);
-        assert_eq!(tokens[2].tt, super::TokenType::Literal("bar".to_string()));
     }
 
     #[test]

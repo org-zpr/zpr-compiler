@@ -1,7 +1,5 @@
 define database as a service.
-
 define employee as a user with user.bas_id.
-
 define signalService as a service.
 
 # No ON

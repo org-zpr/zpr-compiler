@@ -4,7 +4,6 @@ services.
 
 # test
 define database as a service with user.bas_id:1234.
-
 define employee as a user with user.bas_id.
 
 allow color:red employees to access classified databases on tint:sales endpoints.

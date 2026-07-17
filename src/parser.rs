@@ -13,11 +13,10 @@ pub struct ParsingResult {
     pub policy: Policy,
 }
 
-//states for state of a line
+// State of statement
 enum StatementState {
     Waiting,
     InStatement,
-    Finished,
 }
 pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, CompilationError> {
     let mut result = ParsingResult::default();
@@ -25,28 +24,21 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
     let mut current_statement = Vec::new();
 
     // Convert the tokens into statements, which are just sub-lists of the tokens.
-    // Statements must begin on a new line and be terminated by
-    // a period followed by a blank line (end of input also satisfies the blank
-    // line). Comment-only lines are invisible.
+    // Per ZRFC 15, every statement begins on a new line and is terminated by a
+    // period followed by a newline (end of input also qualifies). Blank lines
+    // and comment-only lines are insignificant.
     let mut state = StatementState::Waiting;
     let mut in_never = false;
+    let mut period_line = 0; // line of the most recent statement-terminating period
     for tok in tokens {
         match tok.tt {
-            TokenType::BlankLine => match state {
-                StatementState::InStatement => {
-                    return Err(CompilationError::MissingStatementTerminator(
-                        tok.line, tok.col,
-                    ));
-                }
-                StatementState::Finished => state = StatementState::Waiting,
-                StatementState::Waiting => {}
-            },
             TokenType::Period => match state {
                 StatementState::InStatement => {
                     statements.push(current_statement);
                     current_statement = Vec::new();
                     in_never = false;
-                    state = StatementState::Finished
+                    period_line = tok.line;
+                    state = StatementState::Waiting;
                 }
                 _ => {
                     return Err(CompilationError::ParseError(
@@ -57,10 +49,15 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
                 }
             },
             TokenType::Allow if in_never => {
+                // The one "allow" that belongs to a "never allow" statement.
+                in_never = false;
                 current_statement.push(tok);
             }
             TokenType::Allow | TokenType::Define | TokenType::Never => match state {
                 StatementState::Waiting => {
+                    if tok.line == period_line {
+                        return Err(CompilationError::MissingNewline(tok.line, tok.col));
+                    }
                     in_never = tok.tt == TokenType::Never;
                     current_statement.push(tok);
                     state = StatementState::InStatement;
@@ -70,21 +67,18 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
                         tok.line, tok.col,
                     ));
                 }
-                StatementState::Finished => {
-                    return Err(CompilationError::MissingBlankLine(tok.line, tok.col));
-                }
             },
             _ => match state {
                 StatementState::InStatement => current_statement.push(tok),
                 StatementState::Waiting => {
+                    if tok.line == period_line {
+                        return Err(CompilationError::MissingNewline(tok.line, tok.col));
+                    }
                     return Err(CompilationError::ParseError(
                         "unexpected token".to_string(),
                         tok.line,
                         tok.col,
                     ));
-                }
-                StatementState::Finished => {
-                    return Err(CompilationError::MissingBlankLine(tok.line, tok.col));
                 }
             },
         }
@@ -211,12 +205,12 @@ mod test {
     fn test_parse_define() {
         let valids = vec![
             "define employee as a user with an id.",
-            "define employee as a user with an id.\n\ndefine marketing-emp as an employee with rule:marketing and tag full-time.",
+            "define employee as a user with an id.\ndefine marketing-emp as an employee with rule:marketing and tag full-time.",
             "define employee as a user with an ID-number, multiple roles and optional tags full-time, part-time, and intern.",
             "define employee as a user with an `ID number`, multiple roles and optional tags full-time, part-time, and intern and with color:purple, size:`extra:large`.",
             "define gateway as a service with an external-network-connection.",
-            "define gateway as a service with an external-network-connection.\n\ndefine internet-gateway as a gateway with external-network-connection:public-internet.",
-            "define peripheral as a user with function.\n\ndefine mouse AKA mice as a peripheral with function:pointing.",
+            "define gateway as a service with an external-network-connection.\ndefine internet-gateway as a gateway with external-network-connection:public-internet.",
+            "define peripheral as a user with function.\ndefine mouse AKA mice as a peripheral with function:pointing.",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -411,16 +405,21 @@ allow marketing-emps to access role:marketing services.
         }
     }
 
-    // Statements must be terminated by a period and separated by a blank line
-    // An end of input satisfies the blank-line requirement.
+    // Statements must be terminated by a period followed by a newline
+    // (end of input also qualifies). Blank lines are insignificant.
     #[test]
     fn test_use_periods() {
         let valids = vec![
-            "Define Alien as a user with color:green.\n\nAllow Aliens to access services.",
-            // Extra blank lines between, before, and after statements are fine.
+            // A newline after the period is all that is required between statements.
+            "Define Alien as a user with color:green.\nAllow Aliens to access services.",
+            // Blank lines between, before, and after statements are fine.
             "\n\nDefine Alien as a user with color:green.\n\n\n\nAllow Aliens to access services.\n\n",
-            // A comment-only line does not interrupt a multi-line statement.
+            // Even a blank line inside a multi-line statement is fine.
+            "Allow users\n\nto access services.",
+            // A comment-only line does not interrupt a multi-line statement...
             "Allow users\n# comment\nto access services.",
+            // ...nor a statement boundary.
+            "Define Alien as a user with color:green.\n# comment\nAllow Aliens to access services.",
             // A trailing comment may follow the terminating period.
             "Allow users to access services. # comment",
         ];
@@ -446,20 +445,17 @@ allow marketing-emps to access role:marketing services.
 
         // (input, expected error variant — fields are ignored, only the variant matters)
         let cases = [
-            // No blank line after the period: same line, next line, comment-only line.
+            // Two statements sharing a line: the period must be followed by a newline.
             (
                 "Define Alien as a user with color:green. Allow Aliens to access services.",
-                CompilationError::MissingBlankLine(0, 0),
+                CompilationError::MissingNewline(0, 0),
             ),
+            // Any trailing token after the period, keyword or not, is rejected the same way.
             (
-                "Define Alien as a user with color:green.\nAllow Aliens to access services.",
-                CompilationError::MissingBlankLine(0, 0),
+                "Allow Aliens to access services. foo",
+                CompilationError::MissingNewline(0, 0),
             ),
-            (
-                "Define Alien as a user with color:green.\n# comment\nAllow Aliens to access services.",
-                CompilationError::MissingBlankLine(0, 0),
-            ),
-            // Missing period: at end of input, before the next keyword, at a blank line.
+            // Missing period: at end of input, and before the next statement keyword.
             (
                 "Allow Aliens to access services",
                 CompilationError::MissingStatementTerminator(0, 0),
@@ -468,8 +464,9 @@ allow marketing-emps to access role:marketing services.
                 "Define Alien as a user with color:green\nAllow Aliens to access services.",
                 CompilationError::MissingStatementTerminator(0, 0),
             ),
+            // An unterminated "never allow" must not swallow the next allow statement.
             (
-                "Allow Aliens\n\nto access services.",
+                "never allow color:green users to access services\nallow color:red users to access services.",
                 CompilationError::MissingStatementTerminator(0, 0),
             ),
             // A bare period with no statement before it.
@@ -542,7 +539,7 @@ allow marketing-emps to access role:marketing services.
     // registry lookup path in parse_allow.
     #[test]
     fn test_custom_class_in_allow() {
-        let input = "define employee as a user with id.\n\nallow employees to access services.";
+        let input = "define employee as a user with id.\nallow employees to access services.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");
@@ -565,7 +562,7 @@ allow marketing-emps to access role:marketing services.
     fn test_aka_name_in_allow() {
         // "mice" is the AKA for "mouse"; the allow statement uses the AKA.
         let input =
-            "define mouse AKA mice as a user with device-id.\n\nallow mice to access services.";
+            "define mouse AKA mice as a user with device-id.\nallow mice to access services.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");
@@ -587,8 +584,8 @@ allow marketing-emps to access role:marketing services.
     #[test]
     fn test_multi_level_inheritance() {
         let input = "\
-            define worker as a user with id.\n\n\
-            define employee as a worker with role.\n\n\
+            define worker as a user with id.\n\
+            define employee as a worker with role.\n\
             define engineer as an employee with specialty.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
@@ -611,7 +608,7 @@ allow marketing-emps to access role:marketing services.
     // Redefinition error, not silently overwrite the first definition.
     #[test]
     fn test_redefinition_error() {
-        let input = "define employee as a user with id.\n\ndefine employee as a user with id.";
+        let input = "define employee as a user with id.\ndefine employee as a user with id.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {
@@ -630,7 +627,7 @@ allow marketing-emps to access role:marketing services.
     fn test_class_name_case_insensitive() {
         let ctx = CompilationCtx::default();
 
-        let input = "define employee as a user with id.\n\nallow EMPLOYEES to access services.";
+        let input = "define employee as a user with id.\nallow EMPLOYEES to access services.";
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");
         let user_clause = pr.policy.allows[0]
@@ -641,7 +638,7 @@ allow marketing-emps to access role:marketing services.
         assert_eq!(user_clause.class, "employee");
         assert!(user_clause.with.is_empty(), "'EMPLOYEES' must not be a tag");
 
-        let input = "define employee as a user with id.\n\ndefine Employee as a user with id.";
+        let input = "define employee as a user with id.\ndefine Employee as a user with id.";
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {
             Ok(_) => panic!("should have failed: class redefined with different case"),
@@ -726,7 +723,7 @@ allow marketing-emps to access role:marketing services.
     // before its define in the source file must still resolve correctly.
     #[test]
     fn test_forward_reference_in_allow() {
-        let input = "allow employees to access services.\n\ndefine employee as a user with id.";
+        let input = "allow employees to access services.\ndefine employee as a user with id.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("forward reference should resolve");
@@ -757,8 +754,8 @@ allow marketing-emps to access role:marketing services.
     #[test]
     fn test_multi_statement_counts() {
         let input = "\
-            allow users to access services.\n\n\
-            allow color:green users to access services.\n\n\
+            allow users to access services.\n\
+            allow color:green users to access services.\n\
             never allow color:red users to access services.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
