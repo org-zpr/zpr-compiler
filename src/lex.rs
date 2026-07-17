@@ -338,6 +338,18 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 } else {
                     true // none (end of input)
                 };
+                //comment must be seperated by a space
+                if !quoting.is_quoting() {
+                    let mut following_chars = chars.clone();
+                    let followed_by_comment = match following_chars.next() {
+                        Some('#') => true,
+                        Some('/') => following_chars.next() == Some('/'),
+                        _ => false,
+                    };
+                    if followed_by_comment {
+                        return Err(CompilationError::MissingSpaceBeforeComment(line, col));
+                    }
+                }
                 if !current_word.is_empty() && quoting.is_quoting() {
                     current_word.push(c, true, line, col)?;
                 } else if !current_word.is_empty() {
@@ -1206,6 +1218,28 @@ mod test {
             tz.unwrap_err(),
             super::CompilationError::IllegalColon(_, _)
         ));
+    }
+
+    // --- Error: Comments must be separated from a period by whitespace ---
+
+    #[test]
+    fn test_comment_must_be_separated_from_period() {
+        // "#" and "//" comments glued to a period are errors, whether the
+        // period ends a word or stands alone.
+        for zpl in [
+            "allow users to access services.# comment",
+            "allow users to access services .# comment",
+            "allow users to access services.// comment",
+        ] {
+            let err = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    super::CompilationError::MissingSpaceBeforeComment(_, _)
+                ),
+                "expected MissingSpaceBeforeComment for [{zpl}], got {err:?}"
+            );
+        }
     }
 
     // --- Error: illegal set delimiters ---

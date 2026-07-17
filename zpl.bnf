@@ -42,7 +42,8 @@
 //   - Comment-only lines are likewise insignificant.
 //   - Two statements can never share a line: nothing but whitespace or a
 //     comment may follow the terminating period on its line (a trailing
-//     comment is accepted as a deliberate leniency).
+//     comment is accepted as a deliberate leniency, but must be separated
+//     from the period by whitespace: ".#" or ".//" is an error).
 //   - Leading whitespace (indentation) before a statement is allowed.
 <statement> ::= (<permission-statement> | <denial-statement> | <define-statement>)
                 <statement-terminator>
