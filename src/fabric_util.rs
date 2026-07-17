@@ -12,7 +12,16 @@ use zpr::policy_types::{AttrDomain, Attribute};
 pub fn vec_to_attributes(v: &[(String, String)]) -> Result<Vec<Attribute>, CompilationError> {
     let mut attrs = Vec::new();
     for (k, v) in v {
-        attrs.push(Attribute::tuple(k).single().value(v).build()?);
+        // `zpr.addr` lives in the ZPR-internal domain, which parse_domain rejects.
+        // Route it through the internal constructor so it can appear in a provider clause.
+        // This is currently how we assign a static address to a service.
+        // Will need to be rethought in the future - see https://github.com/org-zpr/zpr-compiler/issues/133
+        let attr = if k == crate::zpl::KATTR_ADDR {
+            Attribute::try_zpr_internal_attr(k, v)?
+        } else {
+            Attribute::tuple(k).single().value(v).build()?
+        };
+        attrs.push(attr);
     }
     Ok(attrs)
 }
@@ -33,6 +42,23 @@ pub fn vec_to_attributes_in_domain(
         );
     }
     Ok(attrs)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_zpr_addr_allowed_but_other_internal_rejected() {
+        // zpr.addr is permitted and lands in the ZPR-internal domain.
+        let ok = vec_to_attributes(&[("zpr.addr".to_string(), "fd5a:5052:8888::9".to_string())])
+            .expect("zpr.addr should be allowed");
+        assert_eq!(ok.len(), 1);
+        assert_eq!(ok[0].zpl_key(), "zpr.addr");
+
+        // Other zpr.* keys still fail the domain check (no spoofing internal attrs).
+        assert!(vec_to_attributes(&[("zpr.role".to_string(), "node".to_string())]).is_err());
+    }
 }
 
 /// Given a list of attributes that apply, return just the set of unique
