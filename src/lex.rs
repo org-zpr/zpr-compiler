@@ -195,6 +195,15 @@ enum QuotingType {
     Double,
 }
 
+//single and double quote types
+const SINGLE_QUOTES: [char; 5] = ['\'', '`', '´', '‘', '’'];
+const DOUBLE_QUOTES: [char; 3] = ['\"', '“', '”'];
+
+/// verifies quote types
+fn is_quote_char(c: char) -> bool {
+    SINGLE_QUOTES.contains(&c) || DOUBLE_QUOTES.contains(&c)
+}
+
 impl QuotingType {
     fn is_quoting(&self) -> bool {
         match self {
@@ -205,18 +214,20 @@ impl QuotingType {
 
     /// Panics if not called with a valid quote character.
     fn set_quoting(&mut self, c: char) {
-        match c {
-            '\'' | '`' => *self = QuotingType::Single,
-            '\"' => *self = QuotingType::Double,
-            _ => panic!("call to set_quoting with invalid char: '{c}'"),
+        if SINGLE_QUOTES.contains(&c) {
+            *self = QuotingType::Single
+        } else if DOUBLE_QUOTES.contains(&c) {
+            *self = QuotingType::Double
+        } else {
+            panic!("call to set_quoting with invalid char: '{c}'")
         }
     }
 
     fn is_match(&self, c: char) -> bool {
         match self {
             QuotingType::None => false,
-            QuotingType::Single => c == '\'' || c == '`',
-            QuotingType::Double => c == '\"',
+            QuotingType::Single => SINGLE_QUOTES.contains(&c),
+            QuotingType::Double => DOUBLE_QUOTES.contains(&c),
         }
     }
 }
@@ -457,7 +468,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 }
                 col += 1;
             }
-            '\'' | '`' | '\"' => {
+            c if is_quote_char(c) => {
                 // A single or double quote alone can start a quoted string.
                 // We do not differentiate between the types of single quotes. But
                 // if a single quote starts a quoted string a single quote must end it
@@ -532,9 +543,13 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 if quoting.is_quoting() {
                     // If we are quoting, we need to escape (ie, accept) the next character.
                     if let Some(&next) = chars.peek() {
-                        col += 1;
-                        let _ = chars.next(); // consume the next char
-                        current_word.push(next, true, line, col)?;
+                        if is_quote_char(next) || next == '\\' {
+                            col += 1;
+                            let _ = chars.next(); // consume the next char
+                            current_word.push(next, true, line, col)?;
+                        } else {
+                            return Err(CompilationError::BackslashError(line, col));
+                        }
                     } else {
                         // trailing backslash while quoting?
                         // Don't care -- we will get an error due to EOL while quoting.
@@ -601,6 +616,29 @@ mod test {
         assert_eq!(rolemanager.tt, tuple_from_strs("role", "manager"));
         let officefrisco = &tokens[9];
         assert_eq!(officefrisco.tt, tuple_from_strs("office", "fris:co"));
+    }
+
+    #[test]
+    fn test_utf8_and_quote_variants() {
+        let zpl = "define foo as user with color:pürple, “role”:“man \\” ager”, and tag ‘naïve’";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        println!("{:?}", tokens);
+        assert_eq!(tokens.len(), 12);
+        assert_eq!(tokens[5].tt, tuple_from_strs("color", "pürple"));
+        assert_eq!(tokens[7].tt, tuple_from_strs("role", "man ” ager"));
+        assert_eq!(tokens[11].tt, TokenType::Literal(String::from("naïve")));
+    }
+
+    #[test]
+    fn test_utf8_unquoted_name() {
+        let zpl = "define pürple as user with größe:blau";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        println!("{:?}", tokens);
+        assert_eq!(tokens.len(), 6);
+        assert_eq!(tokens[1].tt, TokenType::Literal(String::from("pürple")));
+        assert_eq!(tokens[5].tt, tuple_from_strs("größe", "blau"));
     }
 
     #[test]
@@ -1110,6 +1148,32 @@ mod test {
     fn test_unterminated_quote_eof() {
         // A quoted string that reaches EOF without a closing quote is an error.
         let zpl = "\"unterminated";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::UnterminatedQuote(_, _)
+        ));
+    }
+
+    // --- Error: bad backslash escape ---
+
+    #[test]
+    fn test_invalid_escape_in_quotes() {
+        let zpl = "define foo as user with tag \"a\\xb\"";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::BackslashError(_, _)
+        ));
+    }
+
+    // --- Error: quote families don't mix ---
+
+    #[test]
+    fn test_mismatched_quote_families() {
+        let zpl = "define foo as user with tag “abc'";
         let tz = super::tokenize_str(zpl, &CompilationCtx::default());
         assert!(tz.is_err());
         assert!(matches!(

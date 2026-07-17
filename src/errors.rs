@@ -118,4 +118,6 @@ pub enum CompilationError {
         "expected newline after statement-terminating period at line {0}, column {1} (each statement must begin on its own line)"
     )]
     MissingNewline(usize, usize),
+    #[error("Illegal charecter following backslash within quote at line {0}, column {1}")]
+    BackslashError(usize, usize),
 }
