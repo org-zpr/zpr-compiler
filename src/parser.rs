@@ -24,12 +24,12 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
     let mut current_statement = Vec::new();
 
     // Convert the tokens into statements, which are just sub-lists of the tokens.
-    // Per ZRFC 15, every statement begins on a new line and is terminated by a
+    // Every statement begins on a new line and is terminated by a
     // period followed by a newline (end of input also qualifies). Blank lines
     // and comment-only lines are insignificant.
     let mut state = StatementState::Waiting;
     let mut in_never = false;
-    let mut period_line = 0; // line of the most recent statement-terminating period
+    let mut period_line = 0;
     for tok in tokens {
         match tok.tt {
             TokenType::Period => match state {
@@ -49,7 +49,6 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
                 }
             },
             TokenType::Allow if in_never => {
-                // The one "allow" that belongs to a "never allow" statement.
                 in_never = false;
                 current_statement.push(tok);
             }
