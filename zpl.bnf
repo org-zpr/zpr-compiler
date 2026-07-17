@@ -137,7 +137,8 @@
 // dots ('"a b".c' is two separate tokens). A dot followed by whitespace (or
 // EOF) terminates the statement instead. There is no leading-letter rule:
 // digits or a dot may start a name ("9abc", "42", "4.2" are all valid names).
-// Consecutive dots ("foo..bar") only produce a warning. ASCII only.
+// Consecutive dots ("foo..bar") only produce a warning. Unicode alphanumerics
+// are accepted ("pürple", "日本語").
 //
 // SPEC DIVERGENCE: ZRFC 15 describes hierarchical namespaces with a "global"
 // default namespace, namespaces created on first reference in a define, and
@@ -183,26 +184,23 @@
 
 <value-char> ::= <letter> | <digit> | "-" | "_"
 
-// Quoted strings may not span lines.
-//
-// SPEC DIVERGENCE: ZRFC 15 strings are UTF-8 and quote characters include the
-// Unicode neutral/forward/backward variants (U+2018/U+2019, U+201C/U+201D,
-// etc.), with backslash escapes defined only for quotes and backslash. The
-// compiler accepts only ASCII ' ` " as quotes (curly quotes are illegal
-// characters), rejects non-ASCII in unquoted words, treats backtick as a
-// single-quote flavor (not in the spec), and lets backslash escape any char.
+// Quoted strings may not span lines. Strings are UTF-8, and the
+// quote characters include the Unicode neutral/forward/backward variants 
 <quoted-string> ::= <single-quoted-string> | <double-quoted-string>
 
 <single-quoted-string> ::= <single-quote> <single-quote-chars> <single-quote>
 
-<double-quoted-string> ::= '"' <double-quote-chars> '"'
+<double-quoted-string> ::= <double-quote> <double-quote-chars> <double-quote>
 
 <single-quote-chars> ::= (<any-char-except-single-quote-or-backslash> | <escaped-char>)*
 
 <double-quote-chars> ::= (<any-char-except-double-quote-or-backslash> | <escaped-char>)*
 
-// Backslash escapes ANY following character, not just quotes ("\x" == "x").
-<escaped-char> ::= "\" <any-char>
+// Backslash escapes are defined ONLY for quote characters (any variant) and
+// backslash itself; a backslash before any other character in a quoted string
+// is an error. Outside quotes, backslash is not an escape (it is rejected like
+// any other illegal unquoted character).
+<escaped-char> ::= "\" (<single-quote> | <double-quote> | "\")
 
 // A set may be empty ("clearance:{}" is accepted and is equivalent to the
 // bare key-presence "clearance:"). Sets do NOT nest. A quoted set value may
@@ -211,12 +209,15 @@
 
 <set-value> ::= <unquoted-value> | <quoted-string>
 
-// A quoted string opened with one single-quote flavor may be closed by the
-// other ("'foo`" is valid).
-<single-quote> ::= "'" | "`"
+// A quoted string opened with one flavor from a family may be closed by any
+// other flavor of the same family ("'foo`" and "“foo\"" are valid), but the
+// families do not mix ("'foo\"" is unterminated).
+<single-quote> ::= "'" | "`" | "´" | "‘" | "’"     
 
-<letter> ::= "a".."z" | "A".."Z"
+<double-quote> ::= '"' | '“' | '”'                
 
-<digit> ::= "0".."9"
+<letter> ::= any Unicode alphabetic character (Rust char::is_alphabetic)
+
+<digit> ::= any Unicode numeric character (Rust char::is_numeric)
 
 <comment> ::= "#" <any-chars-to-eol> | "//" <any-chars-to-eol>

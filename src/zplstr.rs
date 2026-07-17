@@ -138,7 +138,7 @@ impl ZPLStrBuilder {
     }
 
     /// Push supplied character onto the name or value depending on mode.
-    /// TODO: Currently only accepts ASCII alphanumerics, '-', '_', and '.' (for names).
+    /// Accepts alphanumerics, '-', '_', and '.' (for names).
     pub fn push(
         &mut self,
         c: char,
@@ -147,7 +147,7 @@ impl ZPLStrBuilder {
         col: usize,
     ) -> Result<(), CompilationError> {
         if self.input_to_value {
-            if !quoted && !c.is_ascii_alphanumeric() && !matches!(c, '.' | '-' | '_') {
+            if !quoted && !c.is_alphanumeric() && !matches!(c, '.' | '-' | '_') {
                 return Err(CompilationError::IllegalStringLiteralChar(c, line, col));
             }
             if quoted {
@@ -158,7 +158,7 @@ impl ZPLStrBuilder {
             self.current_value.value.push(c);
         } else {
             // The name part of a tuple is allowed to contain periods without needing quotes.
-            if !quoted && !c.is_ascii_alphanumeric() && !matches!(c, '.' | '-' | '_') {
+            if !quoted && !c.is_alphanumeric() && !matches!(c, '.' | '-' | '_') {
                 return Err(CompilationError::IllegalNameLiteralChar(c, line, col));
             }
             self.name.push(c);

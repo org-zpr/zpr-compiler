@@ -619,6 +619,29 @@ mod test {
     }
 
     #[test]
+    fn test_utf8_and_quote_variants() {
+        let zpl = "define foo as user with color:pürple, “role”:“man \\” ager”, and tag ‘naïve’";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        println!("{:?}", tokens);
+        assert_eq!(tokens.len(), 12);
+        assert_eq!(tokens[5].tt, tuple_from_strs("color", "pürple"));
+        assert_eq!(tokens[7].tt, tuple_from_strs("role", "man ” ager"));
+        assert_eq!(tokens[11].tt, TokenType::Literal(String::from("naïve")));
+    }
+
+    #[test]
+    fn test_utf8_unquoted_name() {
+        let zpl = "define pürple as user with größe:blau";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        println!("{:?}", tokens);
+        assert_eq!(tokens.len(), 6);
+        assert_eq!(tokens[1].tt, TokenType::Literal(String::from("pürple")));
+        assert_eq!(tokens[5].tt, tuple_from_strs("größe", "blau"));
+    }
+
+    #[test]
     fn test_tuple_literal_sets() {
         let zpl = "define foo as user with colors:{purple,yellow}, `roles`:{`manager`, chef}, office:`fris:co`, and tag `foo bar`";
         let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
@@ -1115,6 +1138,32 @@ mod test {
     fn test_unterminated_quote_eof() {
         // A quoted string that reaches EOF without a closing quote is an error.
         let zpl = "\"unterminated";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::UnterminatedQuote(_, _)
+        ));
+    }
+
+    // --- Error: bad backslash escape ---
+
+    #[test]
+    fn test_invalid_escape_in_quotes() {
+        let zpl = "define foo as user with tag \"a\\xb\"";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default());
+        assert!(tz.is_err());
+        assert!(matches!(
+            tz.unwrap_err(),
+            super::CompilationError::BackslashError(_, _)
+        ));
+    }
+
+    // --- Error: quote families don't mix ---
+
+    #[test]
+    fn test_mismatched_quote_families() {
+        let zpl = "define foo as user with tag “abc'";
         let tz = super::tokenize_str(zpl, &CompilationCtx::default());
         assert!(tz.is_err());
         assert!(matches!(
