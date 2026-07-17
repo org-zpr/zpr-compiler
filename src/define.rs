@@ -32,24 +32,21 @@ pub fn parse_define(
     //        ^^^^^^^^^^
     let class_name = putil::return_literal(root_tok, tokens.next(), "class name", "define")?;
 
-    // define class_name AKA plural
-    //                   ^^^ ^^^^^^
-    let aka_name: String;
-
-    if let Some(next_tok) = tokens.peek() {
-        match next_tok.tt {
-            TokenType::AkA => {
-                let aka = tokens.next().unwrap(); // consume the AKA
-                aka_name = putil::return_literal(aka, tokens.next(), "aka name", "aka")?;
-            }
-            _ => {
-                // No AKA, so aka_name is just plural.
-                aka_name = putil::pluralize(&class_name);
-            }
-        }
+    // define class_name aka aka_name
+    //                   ^^^ ^^^^^^^^
+    let aka_name = if tokens.peek().is_some_and(|t| t.tt == TokenType::AkA) {
+        let aka = tokens.next().unwrap(); // consume the AKA
+        Some(putil::return_literal(
+            aka,
+            tokens.next(),
+            "aka name",
+            "aka",
+        )?)
     } else {
-        aka_name = putil::pluralize(&class_name);
-    }
+        None
+    };
+
+    let plural_name = putil::pluralize(&class_name);
 
     // define class_name [ aka foo ] as a parent-class-name with
     //                               ^^
@@ -67,15 +64,15 @@ pub fn parse_define(
     // the classes are defined. To give meaning full error may need to track
     // the define token or something.
     let flavor = match parent_class_name.to_lowercase().as_str() {
-        zpl::DEF_CLASS_USER_NAME | zpl::DEF_CLASS_USER_AKA => {
+        zpl::DEF_CLASS_USER_NAME | zpl::DEF_CLASS_USER_PLURAL => {
             parent_class_name = String::from(zpl::DEF_CLASS_USER_NAME);
             ClassFlavor::User
         }
-        zpl::DEF_CLASS_SERVICE_NAME | zpl::DEF_CLASS_SERVICE_AKA => {
+        zpl::DEF_CLASS_SERVICE_NAME | zpl::DEF_CLASS_SERVICE_PLURAL => {
             parent_class_name = String::from(zpl::DEF_CLASS_SERVICE_NAME);
             ClassFlavor::Service
         }
-        zpl::DEF_CLASS_ENDPOINT_NAME | zpl::DEF_CLASS_ENDPOINT_AKA => {
+        zpl::DEF_CLASS_ENDPOINT_NAME | zpl::DEF_CLASS_ENDPOINT_PLURAL => {
             parent_class_name = String::from(zpl::DEF_CLASS_ENDPOINT_NAME);
             ClassFlavor::Endpoint
         }
@@ -88,6 +85,7 @@ pub fn parse_define(
         parent: parent_class_name.clone(),
         name: class_name.clone(),
         aka: aka_name.clone(),
+        plural: plural_name.clone(),
         pos: root_tok.into(),
         with_attrs: Vec::new(),
         extensible: true,
@@ -582,7 +580,19 @@ mod test {
         let tz = tokenize_str(statement, &ctx).unwrap();
         let class = parse_define(&tz.tokens, 1).unwrap();
         assert_eq!(class.name, "mouse");
-        assert_eq!(class.aka, "mice");
+        assert_eq!(class.aka.as_deref(), Some("mice"));
+        assert_eq!(class.plural, "mouses")
+    }
+
+    // Without an AKA clause, aka must be None and the auto-plural still populated.
+    #[test]
+    fn test_no_aka_defaults() {
+        let statement = "define box as a user with id";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &ctx).unwrap();
+        let class = parse_define(&tz.tokens, 1).unwrap();
+        assert_eq!(class.aka, None);
+        assert_eq!(class.plural, "boxes");
     }
 
     // The "optional" modifier on a tag must set attr.optional = true; it is only

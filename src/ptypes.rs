@@ -251,7 +251,8 @@ pub struct Class {
     pub flavor: ClassFlavor,
     pub parent: String,
     pub name: String,
-    pub aka: String,
+    pub aka: Option<String>,
+    pub plural: String,
     pub pos: FPos, // location of the define token
     pub with_attrs: Vec<Attribute>,
     pub extensible: bool,
@@ -274,7 +275,8 @@ impl Class {
             flavor: ClassFlavor::User,
             parent: zpl::DEF_CLASS_USER_NAME.to_string(),
             name: zpl::DEF_CLASS_USER_NAME.to_string(),
-            aka: zpl::DEF_CLASS_USER_AKA.to_string(),
+            aka: None,
+            plural: zpl::DEF_CLASS_USER_PLURAL.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
             extensible: true,
@@ -286,7 +288,8 @@ impl Class {
             flavor: ClassFlavor::Service,
             parent: zpl::DEF_CLASS_SERVICE_NAME.to_string(),
             name: zpl::DEF_CLASS_SERVICE_NAME.to_string(),
-            aka: zpl::DEF_CLASS_SERVICE_AKA.to_string(),
+            aka: None,
+            plural: zpl::DEF_CLASS_SERVICE_PLURAL.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
             extensible: true,
@@ -298,7 +301,8 @@ impl Class {
             flavor: ClassFlavor::Service,
             parent: zpl::DEF_CLASS_SERVICE_NAME.to_string(),
             name: zpl::DEF_CLASS_VISA_SERVICE_NAME.to_string(),
-            aka: zpl::DEF_CLASS_VISA_SERVICE_AKA.to_string(),
+            aka: None,
+            plural: zpl::DEF_CLASS_VISA_SERVICE_PLURAL.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
             extensible: false,
@@ -310,7 +314,8 @@ impl Class {
             flavor: ClassFlavor::Endpoint,
             parent: zpl::DEF_CLASS_ENDPOINT_NAME.to_string(),
             name: zpl::DEF_CLASS_ENDPOINT_NAME.to_string(),
-            aka: zpl::DEF_CLASS_ENDPOINT_AKA.to_string(),
+            aka: None,
+            plural: zpl::DEF_CLASS_ENDPOINT_PLURAL.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
             extensible: true,
@@ -322,5 +327,11 @@ impl Class {
             || self.name == zpl::DEF_CLASS_SERVICE_NAME
             || self.name == zpl::DEF_CLASS_ENDPOINT_NAME
             || self.name == zpl::DEF_CLASS_VISA_SERVICE_NAME
+    }
+
+    pub fn iterate_all_names(&self) -> impl Iterator<Item = &String> {
+        [&self.name, &self.plural]
+            .into_iter()
+            .chain(self.aka.as_ref())
     }
 }
