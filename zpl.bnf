@@ -216,8 +216,9 @@
 
 <double-quote> ::= '"' | '“' | '”'                
 
-<letter> ::= any Unicode alphabetic character (Rust char::is_alphabetic)
+// In code: Rust's char::is_alphabetic and char::is_numeric.
+<letter> ::= ? Unicode Alphabetic ?
 
-<digit> ::= any Unicode numeric character (Rust char::is_numeric)
+<digit> ::= ? Unicode Number ?
 
 <comment> ::= "#" <any-chars-to-eol> | "//" <any-chars-to-eol>
