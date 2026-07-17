@@ -72,14 +72,12 @@
 // may follow the signal clause.
 <signal-clause> ::= ","? "and"? "signal" <name> "to" <service-class-name>
 
-// Every defined class gets an AKA: the explicit one, or an auto-pluralized (appending "s" or "es", putile::pluralize)
-// form of its name ("employee" -> "employees", "box" -> "boxes"). Class references in allow/never
-// statements accept either the canonical name or the AKA.
-//
-// SPEC DIVERGENCE: ZRFC 15 says an explicit
-// AKA is an ADDITIONAL synonym (both "mouses" and "mice" work). In the compiler an explicit AKA
-// REPLACES the auto-plural: after "define mouse aka mice ...", "mouses" is
-// not a defined name.
+// Every defined class gets an auto-pluralized form of its name ("employee" ->
+// "employees", "box" -> "boxes"; putil::pluralize appends "s" or "es"). An
+// explicit AKA is an additional synonym. Class references in allow/never
+// statements accept the canonical name, the auto-plural, or the AKA, all
+// matched case-insensitively. A define whose name, plural, or AKA collides
+// with any existing class name/plural/AKA is a Redefinition error.
 <aka-clause> ::= "aka" <name>
 
 // --- Class definition attribute list (define.rs::parse_attributes) ---

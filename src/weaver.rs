@@ -527,6 +527,14 @@ impl Weaver {
                     self.wctx
                         .add_used_trusted_service(zpl::DEFAULT_TRUSTED_SERVICE_ID);
                 }
+                // zpr.addr is a compiler-internal attribute vouched for by the default
+                // trusted service, not something an external service reports.
+                // See https://github.com/org-zpr/zpr-compiler/issues/133
+                zpl::KATTR_ADDR => {
+                    resolved_attrs.push(zpl_attr.clone());
+                    self.wctx
+                        .add_used_trusted_service(zpl::DEFAULT_TRUSTED_SERVICE_ID);
+                }
                 _ => {
                     // TODO: This should be cached
                     // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
@@ -1442,7 +1450,8 @@ mod test {
             flavor: ClassFlavor::Service,
             parent: zpl::DEF_CLASS_SERVICE_NAME.to_string(),
             name: "foo".to_string(),
-            aka: "foos".to_string(),
+            aka: None,
+            plural: "foos".to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
             extensible: true,
@@ -1517,5 +1526,40 @@ mod test {
         let id_attrs = fsvc.identity_attrs.as_ref().unwrap();
         assert_eq!(id_attrs.len(), 1);
         assert!(id_attrs.contains(&String::from("id")));
+    }
+
+    #[test]
+    fn test_resolve_attributes_allows_zpr_addr() {
+        // zpr.addr is a compiler-internal attribute; it should resolve without
+        // appearing in any trusted service's returns_attributes.
+        let cfg = r#"
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["endpoint.zpr.adapter.cn", "fee"]]
+
+        [trusted_services.bas]
+        api = "validation/2"
+        provider = [["endpoint.zpr.adapter.cn", "fee"]]
+        returns_attributes = ["id -> user.id"]
+        "#;
+
+        let ctx = CompilationCtx::default();
+        let config = ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), &ctx)
+            .expect("failed to parse config");
+
+        let mut w = Weaver::new(WeavingContext::default());
+        let addr = Attribute::try_zpr_internal_attr(zpl::KATTR_ADDR, "fd5a:5052:8888::8")
+            .expect("failed to build zpr.addr attribute");
+
+        let resolved = w
+            .resolve_attributes(&[addr], &config)
+            .expect("zpr.addr should resolve");
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].zpl_key(), zpl::KATTR_ADDR);
+        assert!(
+            w.wctx
+                .used_trusted_services
+                .contains(zpl::DEFAULT_TRUSTED_SERVICE_ID)
+        );
     }
 }

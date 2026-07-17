@@ -1,14 +1,14 @@
 pub const DEF_CLASS_SERVICE_NAME: &str = "service";
-pub const DEF_CLASS_SERVICE_AKA: &str = "services";
+pub const DEF_CLASS_SERVICE_PLURAL: &str = "services";
 
 pub const DEF_CLASS_VISA_SERVICE_NAME: &str = "VisaService";
-pub const DEF_CLASS_VISA_SERVICE_AKA: &str = "VisaServices";
+pub const DEF_CLASS_VISA_SERVICE_PLURAL: &str = "VisaServices";
 
 pub const DEF_CLASS_USER_NAME: &str = "user";
-pub const DEF_CLASS_USER_AKA: &str = "users";
+pub const DEF_CLASS_USER_PLURAL: &str = "users";
 
 pub const DEF_CLASS_ENDPOINT_NAME: &str = "endpoint";
-pub const DEF_CLASS_ENDPOINT_AKA: &str = "endpoints";
+pub const DEF_CLASS_ENDPOINT_PLURAL: &str = "endpoints";
 
 pub const DEFAULT_TRUSTED_SERVICE_ID: &str = "default";
 pub const DEFAULT_TRUSTED_SERVICE_API: &str = TS_API_V1;

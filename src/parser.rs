@@ -105,15 +105,16 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
     // Construct an index that adds entries for all the AKAs.
     let mut class_index: HashMap<String, String> = HashMap::new();
     for (name, class) in classes.iter() {
-        class_index.insert(name.to_lowercase(), name.clone());
-        class_index.insert(class.aka.to_lowercase(), name.clone());
+        for n in class.iterate_all_names() {
+            class_index.insert(n.to_lowercase(), name.clone());
+        }
     }
 
     // Define statements create classes.
     for (i, statement) in statements.iter().enumerate() {
         if statement[0].tt == TokenType::Define {
             let class = parse_define(statement, i + 1)?;
-            for new_name in [&class.name, &class.aka] {
+            for new_name in class.iterate_all_names() {
                 if class_index.contains_key(&new_name.to_lowercase()) {
                     return Err(CompilationError::Redefinition(
                         new_name.clone(),
@@ -123,8 +124,9 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
                 }
             }
             let cname = class.name.clone();
-            class_index.insert(cname.to_lowercase(), cname.clone());
-            class_index.insert(class.aka.to_lowercase(), cname.clone());
+            for n in class.iterate_all_names() {
+                class_index.insert(n.to_lowercase(), cname.clone());
+            }
             classes.insert(cname, class);
         }
     }
@@ -577,6 +579,26 @@ allow marketing-emps to access role:marketing services.
         assert_eq!(user_clause.class, "mouse");
     }
 
+    // The auto-plural must resolve in an allow statement even when the class
+    // also has an explicit AKA.
+    #[test]
+    fn test_plural_in_allow_with_aka() {
+        let input =
+            "define mouse AKA mice as a user with device-id\nallow mouses to access services";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        assert_eq!(pr.policy.allows.len(), 1);
+
+        let allow = &pr.policy.allows[0];
+        let user_clause = allow
+            .client
+            .iter()
+            .find(|c| c.flavor == ClassFlavor::User)
+            .expect("user clause missing from LHS");
+        assert_eq!(user_clause.class, "mouse");
+    }
+
     // resolve_class_flavors must iterate until all classes are resolved, even
     // when the inheritance chain is more than two levels deep.  This tests a
     // three-level chain: engineer → employee → worker → user (built-in).
@@ -661,6 +683,33 @@ allow marketing-emps to access role:marketing services.
                 "unexpected error: {e:?}"
             ),
         }
+    }
+
+    // A class name colliding with another class's auto-plural must be a
+    // Redefinition error, not a silent overwrite of the index entry.
+    #[test]
+    fn test_plural_collision_error() {
+        let input = "define box as a user with id \n define boxes as a user with id";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        match parse(tz.tokens, &ctx) {
+            Ok(_) => panic!("should have failed: 'boxes' collides with plural of 'box'"),
+            Err(e) => assert!(
+                matches!(e, CompilationError::Redefinition(_, _, _)),
+                "unexpected error: {e:?}"
+            ),
+        }
+    }
+
+    // An explicit AKA that happens to equal the class's own auto-plural must
+    // NOT be treated as a collision with itself.
+    #[test]
+    fn test_aka_equal_to_own_plural_ok() {
+        let input = "define box AKA boxes as a user with id";
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("AKA matching own plural should parse");
+        assert_eq!(pr.policy.defines.len(), 1);
     }
 
     // A literal token that appears before any statement keyword (allow/define/never)
