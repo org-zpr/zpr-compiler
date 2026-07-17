@@ -584,7 +584,7 @@ allow marketing-emps to access role:marketing services.
     #[test]
     fn test_plural_in_allow_with_aka() {
         let input =
-            "define mouse AKA mice as a user with device-id\nallow mouses to access services";
+            "define mouse AKA mice as a user with device-id.\nallow mouses to access services.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");
@@ -689,7 +689,7 @@ allow marketing-emps to access role:marketing services.
     // Redefinition error, not a silent overwrite of the index entry.
     #[test]
     fn test_plural_collision_error() {
-        let input = "define box as a user with id \n define boxes as a user with id";
+        let input = "define box as a user with id.\ndefine boxes as a user with id.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {
@@ -705,7 +705,7 @@ allow marketing-emps to access role:marketing services.
     // NOT be treated as a collision with itself.
     #[test]
     fn test_aka_equal_to_own_plural_ok() {
-        let input = "define box AKA boxes as a user with id";
+        let input = "define box AKA boxes as a user with id.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("AKA matching own plural should parse");
