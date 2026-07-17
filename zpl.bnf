@@ -145,7 +145,7 @@
 // is matched verbatim), and a quoted segment cannot take a prefix or suffix.
 <unquoted-name> ::= <name-char>+
 
-<name-char> ::= <letter> | <digit> | "-" | "_" | "."
+<name-char> ::= <identifier-char> | "-" | "_" | "."
 
 <class-name> ::= <built-in-class-name> | <name>
 
@@ -180,7 +180,7 @@
 
 <decimal-number> ::= <digit>+ "." <digit>+
 
-<value-char> ::= <letter> | <digit> | "-" | "_"
+<value-char> ::= <identifier-char> | "-" | "_"
 
 // Quoted strings may not span lines. Strings are UTF-8, and the
 // quote characters include the Unicode neutral/forward/backward variants 
@@ -214,9 +214,10 @@
 
 <double-quote> ::= '"' | '“' | '”'                
 
-// In code: Rust's char::is_alphabetic and char::is_numeric.
-<letter> ::= ? Unicode Alphabetic ?
+// Decimal numbers use ASCII digits only. Unicode digits in an identifier 
+// are just opaque characters ("level:٣" is an ordinary value word, not a number).
+<identifier-char> ::= ? Unicode alphanumeric ?
 
-<digit> ::= ? Unicode Number ?
+<digit> ::= "0".."9"
 
 <comment> ::= "#" <any-chars-to-eol> | "//" <any-chars-to-eol>
