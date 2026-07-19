@@ -41,9 +41,8 @@
 //     multi-line statement.
 //   - Comment-only lines are likewise insignificant.
 //   - Two statements can never share a line: nothing but whitespace or a
-//     comment may follow the terminating period on its line (a trailing
-//     comment is accepted as a deliberate leniency, but must be separated
-//     from the period by whitespace: ".#" or ".//" is an error).
+//     comment may follow the terminating period on its line. The trailing
+//     comment may directly follow the period (".#" and ".//" are legal).
 //   - Leading whitespace (indentation) before a statement is allowed.
 <statement> ::= (<permission-statement> | <denial-statement> | <define-statement>)
                 <statement-terminator>
@@ -143,8 +142,8 @@
 
 // Dots inside an unquoted word are namespace separators ("user.clearance",
 // "zpr.adapter.cn"). This is purely lexical: quoted segments do NOT join with
-// dots ('"a b".c' is two separate tokens). A dot followed by whitespace (or
-// EOF) terminates the statement instead. There is no leading-letter rule:
+// dots ('"a b".c' is two separate tokens). A dot followed by whitespace, a
+// comment, or EOF terminates the statement instead. There is no leading-letter rule:
 // digits or a dot may start a name ("9abc", "42", "4.2" are all valid names).
 // Consecutive dots ("foo..bar") only produce a warning. Unicode alphanumerics
 // are accepted ("pürple", "日本語").

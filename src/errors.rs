@@ -120,7 +120,4 @@ pub enum CompilationError {
     MissingNewline(usize, usize),
     #[error("Illegal charecter following backslash within quote at line {0}, column {1}")]
     BackslashError(usize, usize),
-
-    #[error("comment must be separated from '.' by space at line {0}, column {1}")]
-    MissingSpaceBeforeComment(usize, usize),
 }
