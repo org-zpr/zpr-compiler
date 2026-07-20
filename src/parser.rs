@@ -13,53 +13,80 @@ pub struct ParsingResult {
     pub policy: Policy,
 }
 
+// State of statement
+enum StatementState {
+    Waiting,
+    InStatement,
+}
 pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, CompilationError> {
     let mut result = ParsingResult::default();
     let mut statements = Vec::new();
     let mut current_statement = Vec::new();
 
     // Convert the tokens into statements, which are just sub-lists of the tokens.
-    // Currently the compiler only accepts ALLOW statements and DEFINE statements.
-    // Periods are still optional, but if you use them incorrectly they parser will
-    // complain.
-    let mut in_statement = false;
-    let mut in_never: bool = false;
+    // Every statement begins on a new line and is terminated by a
+    // period followed by a newline (end of input also qualifies). Blank lines
+    // and comment-only lines are insignificant.
+    let mut state = StatementState::Waiting;
+    let mut in_never = false;
+    let mut period_line = 0;
     for tok in tokens {
         match tok.tt {
-            TokenType::Period => {
-                if !current_statement.is_empty() {
+            TokenType::Period => match state {
+                StatementState::InStatement => {
                     statements.push(current_statement);
                     current_statement = Vec::new();
+                    in_never = false;
+                    period_line = tok.line;
+                    state = StatementState::Waiting;
                 }
-                in_statement = false;
-                in_never = false;
-            }
+                _ => {
+                    return Err(CompilationError::ParseError(
+                        "unexpected '.'".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+            },
             TokenType::Allow if in_never => {
+                in_never = false;
                 current_statement.push(tok);
             }
-            TokenType::Allow | TokenType::Define | TokenType::Never => {
-                if !current_statement.is_empty() {
-                    statements.push(current_statement);
-                    current_statement = Vec::new();
+            TokenType::Allow | TokenType::Define | TokenType::Never => match state {
+                StatementState::Waiting => {
+                    if tok.line == period_line {
+                        return Err(CompilationError::MissingNewline(tok.line, tok.col));
+                    }
+                    in_never = tok.tt == TokenType::Never;
+                    current_statement.push(tok);
+                    state = StatementState::InStatement;
                 }
-                in_never = tok.tt == TokenType::Never;
-                current_statement.push(tok);
-                in_statement = true;
-            }
-            _ if in_statement => {
-                current_statement.push(tok);
-            }
-            _ => {
-                return Err(CompilationError::ParseError(
-                    "unexpected token".to_string(),
-                    tok.line,
-                    tok.col,
-                ));
-            }
+                StatementState::InStatement => {
+                    return Err(CompilationError::MissingStatementTerminator(
+                        tok.line, tok.col,
+                    ));
+                }
+            },
+            _ => match state {
+                StatementState::InStatement => current_statement.push(tok),
+                StatementState::Waiting => {
+                    if tok.line == period_line {
+                        return Err(CompilationError::MissingNewline(tok.line, tok.col));
+                    }
+                    return Err(CompilationError::ParseError(
+                        "unexpected token".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+            },
         }
     }
-    if !current_statement.is_empty() {
-        statements.push(current_statement);
+    if let StatementState::InStatement = state {
+        let last = current_statement.last().expect("open statement has tokens");
+        return Err(CompilationError::MissingStatementTerminator(
+            last.line, last.col,
+        ));
     }
 
     if statements.is_empty() {
@@ -178,13 +205,13 @@ mod test {
     #[test]
     fn test_parse_define() {
         let valids = vec![
-            "define employee as a user with an id",
-            "define employee as a user with an id \n define marketing-emp as an employee with rule:marketing and tag full-time",
-            "define employee as a user with an ID-number, multiple roles and optional tags full-time, part-time, and intern",
-            "define employee as a user with an `ID number`, multiple roles and optional tags full-time, part-time, and intern and with color:purple, size:`extra:large`",
-            "define gateway as a service with an external-network-connection",
-            "define gateway as a service with an external-network-connection \n define internet-gateway as a gateway with external-network-connection:public-internet",
-            "define peripheral as a user with function \n define mouse AKA mice as a peripheral with function:pointing",
+            "define employee as a user with an id.",
+            "define employee as a user with an id.\ndefine marketing-emp as an employee with rule:marketing and tag full-time.",
+            "define employee as a user with an ID-number, multiple roles and optional tags full-time, part-time, and intern.",
+            "define employee as a user with an `ID number`, multiple roles and optional tags full-time, part-time, and intern and with color:purple, size:`extra:large`.",
+            "define gateway as a service with an external-network-connection.",
+            "define gateway as a service with an external-network-connection.\ndefine internet-gateway as a gateway with external-network-connection:public-internet.",
+            "define peripheral as a user with function.\ndefine mouse AKA mice as a peripheral with function:pointing.",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -205,11 +232,11 @@ mod test {
     fn test_short_policy() {
         let pp = r#"
 define employee as a user with an ID-number, multiple roles and
-optional tags full-time, part-time, and intern
+optional tags full-time, part-time, and intern.
 
-define marketing-emp as an employee with rule:marketing and tag full-time
+define marketing-emp as an employee with rule:marketing and tag full-time.
 
-allow marketing-emps to access role:marketing services
+allow marketing-emps to access role:marketing services.
 "#;
         let ctx = CompilationCtx::default();
         let tz: Result<Tokenization, CompilationError> = tokenize_str(pp, &ctx).or_else(|e| {
@@ -269,7 +296,7 @@ allow marketing-emps to access role:marketing services
 
     #[test]
     fn test_base_allow() {
-        let valids = vec!["allow color:green users to access services"];
+        let valids = vec!["allow color:green users to access services."];
         let ctx = CompilationCtx::default();
         for valid in valids {
             let tokens: Result<Tokenization, CompilationError> =
@@ -277,7 +304,7 @@ allow marketing-emps to access role:marketing services
                     panic!("failed to tokenize '{}': {:?}", valid, e);
                 });
             let toks = tokens.unwrap().tokens;
-            assert_eq!(6, toks.len());
+            assert_eq!(7, toks.len());
             let _pol = match parse(toks, &ctx) {
                 Ok(policy) => policy,
                 Err(e) => {
@@ -290,8 +317,8 @@ allow marketing-emps to access role:marketing services
     #[test]
     fn test_postifx_attr_prohibited() {
         let valids = vec![
-            "allow endpoints with users with loc:italy to access services",
-            "allow endpoints with users to access services with color:green",
+            "allow endpoints with users with loc:italy to access services.",
+            "allow endpoints with users to access services with color:green.",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -316,10 +343,10 @@ allow marketing-emps to access role:marketing services
     #[test]
     fn test_omit_device() {
         let valids = vec![
-            "allow color:red users to access services",
-            "allow managed users to access services",
-            "allow color:red users to access services",
-            "allow managed, color:red users to access services",
+            "allow color:red users to access services.",
+            "allow managed users to access services.",
+            "allow color:red users to access services.",
+            "allow managed, color:red users to access services.",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -339,9 +366,9 @@ allow marketing-emps to access role:marketing services
     #[test]
     fn test_omit_user() {
         let valids = vec![
-            "allow managed endpoints to access services",
-            "allow color:red endpoints to access services",
-            "allow managed, color:red endpoints to access services",
+            "allow managed endpoints to access services.",
+            "allow color:red endpoints to access services.",
+            "allow managed, color:red endpoints to access services.",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -361,8 +388,8 @@ allow marketing-emps to access role:marketing services
     #[test]
     fn test_verbose_device() {
         let valids = vec![
-            "allow managed, color:red users on color:green endpoints to access green services",
-            "allow color:red, managed users on color:green endpoints to access color:blue services",
+            "allow managed, color:red users on color:green endpoints to access green services.",
+            "allow color:red, managed users on color:green endpoints to access color:blue services.",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -379,13 +406,23 @@ allow marketing-emps to access role:marketing services
         }
     }
 
-    // Test splitting statements with a period. Will work anyway since we
-    // use Allow and Define as our statement delimiters.
+    // Statements must be terminated by a period followed by a newline
+    // (end of input also qualifies). Blank lines are insignificant.
     #[test]
     fn test_use_periods() {
         let valids = vec![
-            "Define Alien as a user with color:green. Allow Aliens to access services.",
-            ".",
+            // A newline after the period is all that is required between statements.
+            "Define Alien as a user with color:green.\nAllow Aliens to access services.",
+            // Blank lines between, before, and after statements are fine.
+            "\n\nDefine Alien as a user with color:green.\n\n\n\nAllow Aliens to access services.\n\n",
+            // Even a blank line inside a multi-line statement is fine.
+            "Allow users\n\nto access services.",
+            // A comment-only line does not interrupt a multi-line statement...
+            "Allow users\n# comment\nto access services.",
+            // ...nor a statement boundary.
+            "Define Alien as a user with color:green.\n# comment\nAllow Aliens to access services.",
+            // A trailing comment may follow the terminating period.
+            "Allow users to access services. # comment",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -399,6 +436,56 @@ allow marketing-emps to access role:marketing services
                     panic!("failed to parse '{}': {:?}", valid, e);
                 }
             };
+        }
+    }
+
+    // Violations of the ZRFC 15 statement layout rules.
+    #[test]
+    fn test_statement_delimiter_errors() {
+        use std::mem::discriminant;
+
+        // (input, expected error variant — fields are ignored, only the variant matters)
+        let cases = [
+            // Two statements sharing a line: the period must be followed by a newline.
+            (
+                "Define Alien as a user with color:green. Allow Aliens to access services.",
+                CompilationError::MissingNewline(0, 0),
+            ),
+            // Any trailing token after the period, keyword or not, is rejected the same way.
+            (
+                "Allow Aliens to access services. foo",
+                CompilationError::MissingNewline(0, 0),
+            ),
+            // Missing period: at end of input, and before the next statement keyword.
+            (
+                "Allow Aliens to access services",
+                CompilationError::MissingStatementTerminator(0, 0),
+            ),
+            (
+                "Define Alien as a user with color:green\nAllow Aliens to access services.",
+                CompilationError::MissingStatementTerminator(0, 0),
+            ),
+            // An unterminated "never allow" must not swallow the next allow statement.
+            (
+                "never allow color:green users to access services\nallow color:red users to access services.",
+                CompilationError::MissingStatementTerminator(0, 0),
+            ),
+            // A bare period with no statement before it.
+            (".", CompilationError::ParseError(String::new(), 0, 0)),
+        ];
+
+        let ctx = CompilationCtx::default();
+        for (input, expected) in cases {
+            let tz = tokenize_str(input, &ctx).unwrap();
+            let err = match parse(tz.tokens, &ctx) {
+                Ok(_) => panic!("should not have parsed '{input}'"),
+                Err(e) => e,
+            };
+            assert_eq!(
+                discriminant(&err),
+                discriminant(&expected),
+                "wrong error for '{input}': {err:?}"
+            );
         }
     }
 
@@ -426,7 +513,7 @@ allow marketing-emps to access role:marketing services
 
     #[test]
     fn test_cannot_subclass_visa_service() {
-        let invalids = vec!["Define MyVs as a VisaService with endpoint.color:green"];
+        let invalids = vec!["Define MyVs as a VisaService with endpoint.color:green."];
         let ctx = CompilationCtx::default();
         for valid in invalids {
             let tokens: Result<Tokenization, CompilationError> =
@@ -453,7 +540,7 @@ allow marketing-emps to access role:marketing services
     // registry lookup path in parse_allow.
     #[test]
     fn test_custom_class_in_allow() {
-        let input = "define employee as a user with id\nallow employees to access services";
+        let input = "define employee as a user with id.\nallow employees to access services.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");
@@ -475,7 +562,8 @@ allow marketing-emps to access role:marketing services
     #[test]
     fn test_aka_name_in_allow() {
         // "mice" is the AKA for "mouse"; the allow statement uses the AKA.
-        let input = "define mouse AKA mice as a user with device-id\nallow mice to access services";
+        let input =
+            "define mouse AKA mice as a user with device-id.\nallow mice to access services.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");
@@ -496,7 +584,7 @@ allow marketing-emps to access role:marketing services
     #[test]
     fn test_plural_in_allow_with_aka() {
         let input =
-            "define mouse AKA mice as a user with device-id\nallow mouses to access services";
+            "define mouse AKA mice as a user with device-id.\nallow mouses to access services.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");
@@ -517,9 +605,9 @@ allow marketing-emps to access role:marketing services
     #[test]
     fn test_multi_level_inheritance() {
         let input = "\
-            define worker as a user with id\n\
-            define employee as a worker with role\n\
-            define engineer as an employee with specialty";
+            define worker as a user with id.\n\
+            define employee as a worker with role.\n\
+            define engineer as an employee with specialty.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");
@@ -541,7 +629,7 @@ allow marketing-emps to access role:marketing services
     // Redefinition error, not silently overwrite the first definition.
     #[test]
     fn test_redefinition_error() {
-        let input = "define employee as a user with id \n define employee as a user with id";
+        let input = "define employee as a user with id.\ndefine employee as a user with id.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {
@@ -560,7 +648,7 @@ allow marketing-emps to access role:marketing services
     fn test_class_name_case_insensitive() {
         let ctx = CompilationCtx::default();
 
-        let input = "define employee as a user with id\nallow EMPLOYEES to access services";
+        let input = "define employee as a user with id.\nallow EMPLOYEES to access services.";
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");
         let user_clause = pr.policy.allows[0]
@@ -571,7 +659,7 @@ allow marketing-emps to access role:marketing services
         assert_eq!(user_clause.class, "employee");
         assert!(user_clause.with.is_empty(), "'EMPLOYEES' must not be a tag");
 
-        let input = "define employee as a user with id \n define Employee as a user with id";
+        let input = "define employee as a user with id.\ndefine Employee as a user with id.";
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {
             Ok(_) => panic!("should have failed: class redefined with different case"),
@@ -585,7 +673,7 @@ allow marketing-emps to access role:marketing services
     // An AKA colliding with an existing name/AKA must be a Redefinition error,
     #[test]
     fn test_aka_collision_error() {
-        let input = "define bad AKA Users as endpoint";
+        let input = "define bad AKA Users as endpoint.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {
@@ -601,7 +689,7 @@ allow marketing-emps to access role:marketing services
     // Redefinition error, not a silent overwrite of the index entry.
     #[test]
     fn test_plural_collision_error() {
-        let input = "define box as a user with id \n define boxes as a user with id";
+        let input = "define box as a user with id.\ndefine boxes as a user with id.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {
@@ -617,7 +705,7 @@ allow marketing-emps to access role:marketing services
     // NOT be treated as a collision with itself.
     #[test]
     fn test_aka_equal_to_own_plural_ok() {
-        let input = "define box AKA boxes as a user with id";
+        let input = "define box AKA boxes as a user with id.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("AKA matching own plural should parse");
@@ -644,7 +732,7 @@ allow marketing-emps to access role:marketing services
     // at the top-level parse stage (the error propagates up from parse_never).
     #[test]
     fn test_never_without_allow_at_parser_level() {
-        let input = "never users to access services";
+        let input = "never users to access services.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {
@@ -658,7 +746,7 @@ allow marketing-emps to access role:marketing services
 
     #[test]
     fn test_base_never() {
-        let valids = vec!["never allow color:green users to access services"];
+        let valids = vec!["never allow color:green users to access services."];
         let ctx = CompilationCtx::default();
         for valid in valids {
             let tokens: Result<Tokenization, CompilationError> =
@@ -666,7 +754,7 @@ allow marketing-emps to access role:marketing services
                     panic!("failed to tokenize '{}': {:?}", valid, e);
                 });
             let toks = tokens.unwrap().tokens;
-            assert_eq!(7, toks.len());
+            assert_eq!(8, toks.len());
             let pol = match parse(toks, &ctx) {
                 Ok(policy) => policy,
                 Err(e) => {
@@ -683,7 +771,7 @@ allow marketing-emps to access role:marketing services
     // before its define in the source file must still resolve correctly.
     #[test]
     fn test_forward_reference_in_allow() {
-        let input = "allow employees to access services\ndefine employee as a user with id";
+        let input = "allow employees to access services.\ndefine employee as a user with id.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("forward reference should resolve");
@@ -695,7 +783,7 @@ allow marketing-emps to access role:marketing services
     // accessible on the resulting AllowClause with the correct message and target.
     #[test]
     fn test_signal_clause_through_full_parse() {
-        let input = r#"allow users to access services and signal "hello" to service"#;
+        let input = r#"allow users to access services and signal "hello" to service."#;
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");
@@ -714,9 +802,9 @@ allow marketing-emps to access role:marketing services
     #[test]
     fn test_multi_statement_counts() {
         let input = "\
-            allow users to access services\n\
-            allow color:green users to access services\n\
-            never allow color:red users to access services";
+            allow users to access services.\n\
+            allow color:green users to access services.\n\
+            never allow color:red users to access services.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         let pr = parse(tz.tokens, &ctx).expect("should parse");

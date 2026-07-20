@@ -109,6 +109,15 @@ pub enum CompilationError {
     )]
     ReservedPreposition(String, usize, usize),
 
+    #[error(
+        "statement is not terminated at line {0}, column {1}. Statements must end with periods"
+    )]
+    MissingStatementTerminator(usize, usize),
+
+    #[error(
+        "expected newline after statement-terminating period at line {0}, column {1} (each statement must begin on its own line)"
+    )]
+    MissingNewline(usize, usize),
     #[error("Illegal charecter following backslash within quote at line {0}, column {1}")]
     BackslashError(usize, usize),
 }

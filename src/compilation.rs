@@ -552,8 +552,8 @@ mod test {
     #[test]
     fn simple_compile() {
         let zpl = r#"
-        define Webby as service with endpoint.zpr.adapter.cn
-        allow zpr.adapter.cn: endpoints to access Webby
+        define Webby as service with endpoint.zpr.adapter.cn.
+        allow zpr.adapter.cn: endpoints to access Webby.
         "#;
 
         let tempdir = TempDir::new("simple_compile");
@@ -580,8 +580,8 @@ mod test {
     #[test]
     fn define_requires_with() {
         let zpl = r#"
-        define Webby as service
-        allow zpr.adapter.cn: endpoints to access Webby
+        define Webby as service.
+        allow zpr.adapter.cn: endpoints to access Webby.
         "#;
 
         let tempdir = TempDir::new("define_requires_with");
@@ -633,8 +633,8 @@ mod test {
         "#;
 
         let zpl = r#"
-        define Webby as service
-        allow zpr.adapter.cn: endpoints to access Webby
+        define Webby as service.
+        allow zpr.adapter.cn: endpoints to access Webby.
         "#;
 
         let tempdir = TempDir::new("define_ok_without_with");
@@ -660,8 +660,8 @@ mod test {
     #[test]
     fn cannot_use_cn_as_tag() {
         let zpl = r#"
-        define Webby as service with endpoint.zpr.adapter.cn
-        allow zpr.adapter.cn endpoints to access Webby
+        define Webby as service with endpoint.zpr.adapter.cn.
+        allow zpr.adapter.cn endpoints to access Webby.
         "#;
 
         let tempdir = TempDir::new("cannot_use_cn_as_tag");
@@ -689,8 +689,8 @@ mod test {
     #[test]
     fn test_svc_attrs_must_be_defined() {
         let zpl = r#"
-        define Webby as service with unknown_attr
-        allow cn: endpoints to access services
+        define Webby as service with unknown_attr.
+        allow cn: endpoints to access services.
         "#;
 
         let tempdir = TempDir::new("test_svc_attrs_must_be_defined");
@@ -718,8 +718,8 @@ mod test {
     #[test]
     fn test_allow_attrs_must_be_defined() {
         let zpl = r#"
-        define Webby as service with endpoint.zpr.adapter.cn
-        allow unknown_attr: endpoints to access services
+        define Webby as service with endpoint.zpr.adapter.cn.
+        allow unknown_attr: endpoints to access services.
         "#;
 
         let tempdir = TempDir::new("test_allow_attrs_must_be_defined");

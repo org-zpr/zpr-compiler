@@ -15,4 +15,4 @@ Allow MyWeb to access MyDb.
 
 
 # If you put a service class on the LHS, implies actor must provide a service.
-# AND match the attribute. 
+# AND match the attribute.

@@ -338,12 +338,20 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                 } else {
                     true // none (end of input)
                 };
+                // A comment may directly follow the terminating period (".#", ".//").
+                let mut following_chars = chars.clone();
+                let followed_by_comment = match following_chars.next() {
+                    Some('#') => true,
+                    Some('/') => following_chars.next() == Some('/'),
+                    _ => false,
+                };
+                let ends_statement = followed_by_whitespace || followed_by_comment;
                 if !current_word.is_empty() && quoting.is_quoting() {
                     current_word.push(c, true, line, col)?;
                 } else if !current_word.is_empty() {
-                    // We have a word going, we are not quoting. A period followed by whitespace ends the statement.
-                    // Otherwise it is assumed to be part of the word.
-                    if followed_by_whitespace {
+                    // We have a word going, we are not quoting. A period followed by whitespace,
+                    // a comment, or end of input ends the statement.
+                    if ends_statement {
                         if reading_set {
                             return Err(CompilationError::UnterminatedSet(line, col));
                         }
@@ -368,7 +376,7 @@ pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, Com
                             }
                         }
                     }
-                } else if followed_by_whitespace {
+                } else if ends_statement {
                     tokens.push(Token::new(TokenType::Period, line, col, 1));
                 } else {
                     current_word.push(c, quoting.is_quoting(), line, col)?; // I guess it is allowed to start a "word" with a period?
@@ -1117,6 +1125,16 @@ mod test {
         assert_eq!(tokens[2].col, 1);
     }
 
+    #[test]
+    fn test_comment_line_is_not_blank() {
+        let zpl = "foo\n# comment\nbar";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0].tt, super::TokenType::Literal("foo".to_string()));
+        assert_eq!(tokens[1].tt, super::TokenType::Literal("bar".to_string()));
+    }
+
     // --- Warnings as errors (werror) ---
 
     #[test]
@@ -1196,6 +1214,22 @@ mod test {
             tz.unwrap_err(),
             super::CompilationError::IllegalColon(_, _)
         ));
+    }
+
+    // --- Comments may directly follow a terminating period ---
+
+    #[test]
+    fn test_comment_directly_after_period() {
+        for zpl in [
+            "allow users to access services.# comment",
+            "allow users to access services .# comment",
+            "allow users to access services.// comment",
+        ] {
+            let tz = super::tokenize_str(zpl, &CompilationCtx::default())
+                .unwrap_or_else(|e| panic!("failed to tokenize [{zpl}]: {e}"));
+            assert_eq!(tz.tokens.len(), 6, "wrong token count for [{zpl}]");
+            assert_eq!(tz.tokens[5].tt, super::TokenType::Period);
+        }
     }
 
     // --- Error: illegal set delimiters ---

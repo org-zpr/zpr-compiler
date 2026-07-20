@@ -34,12 +34,6 @@ allow clearance:public users to access ServiceRequiresEncrypted.
 define AuthService as a service.
 
 # Here is an endpoint clause without ON since there is no user clause.
-allow zpr.adapter.cn: endpoints to access AuthService
+allow zpr.adapter.cn: endpoints to access AuthService.
 define NetAdmins as users with endpoint.zpr.adapter.cn:'admin.zpr.org'.
-allow NetAdmins to access VisaService
-
-
-
-
-
-
+allow NetAdmins to access VisaService.
