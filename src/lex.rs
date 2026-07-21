@@ -20,7 +20,7 @@ pub enum TokenType {
     AkA,
     Tag,
     Tags,
-    On, // starts an endpoint clause
+    On, // starts an device clause
     Optional,
     Multiple,
     Literal(String),
@@ -848,7 +848,7 @@ mod test {
 
     #[test]
     fn test_keyword_on() {
-        let zpl = "allow users on green endpoints to access services on red endpoints";
+        let zpl = "allow users on green devices to access services on red devices";
         let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
         let tokens = tz.tokens;
         println!("{:?}", tokens);
@@ -861,7 +861,7 @@ mod test {
 
     #[test]
     fn test_keyword_never() {
-        let zpl = "never allow users on green endpoints to access services";
+        let zpl = "never allow users on green devices to access services";
         let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
         let tokens = tz.tokens;
         println!("{:?}", tokens);
@@ -872,8 +872,7 @@ mod test {
 
     #[test]
     fn test_keyword_signal() {
-        let zpl =
-            "allow users on green endpoints to access services and signal \"sig\" to database";
+        let zpl = "allow users on green devices to access services and signal \"sig\" to database";
         let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
         let tokens = tz.tokens;
         println!("{:?}", tokens);

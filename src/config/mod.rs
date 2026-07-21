@@ -1062,10 +1062,10 @@ mod test {
         assert_eq!(ts.returns_attrs.len(), 1);
         assert_eq!(
             ts.returns_attrs[zpl::KATTR_CN].zpl_key(),
-            "endpoint.zpr.adapter.cn"
+            "device.zpr.adapter.cn"
         );
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert_eq!(ts.identity_attrs[0], "endpoint.zpr.adapter.cn");
+        assert_eq!(ts.identity_attrs[0], "device.zpr.adapter.cn");
     }
 
     #[test]
@@ -1127,7 +1127,7 @@ mod test {
         api = "validation/2"
         cert_path = "foo.pem"
         prefix = "bar.hop"
-        returns_attributes = ["foo -> user.foo", "fee -> user.fee", "foo -> #endpoint.foo"]
+        returns_attributes = ["foo -> user.foo", "fee -> user.fee", "foo -> #device.foo"]
         identity_attributes = ["foo"]
         provider = [["foo", "bar"]]
         "##;

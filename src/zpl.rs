@@ -7,8 +7,8 @@ pub const DEF_CLASS_VISA_SERVICE_PLURAL: &str = "VisaServices";
 pub const DEF_CLASS_USER_NAME: &str = "user";
 pub const DEF_CLASS_USER_PLURAL: &str = "users";
 
-pub const DEF_CLASS_ENDPOINT_NAME: &str = "endpoint";
-pub const DEF_CLASS_ENDPOINT_PLURAL: &str = "endpoints";
+pub const DEF_CLASS_DEVICE_NAME: &str = "device";
+pub const DEF_CLASS_DEVICE_PLURAL: &str = "devices";
 
 pub const DEFAULT_TRUSTED_SERVICE_ID: &str = "default";
 pub const DEFAULT_TRUSTED_SERVICE_API: &str = TS_API_V1;
@@ -21,7 +21,7 @@ pub const ICMP_INTERACTION_ONESHOT: &str = "oneshot";
 
 pub const VISA_SERVICE_CN: &str = "vs.zpr";
 
-pub const DEFAULT_TS_PREFIX: &str = "endpoint.zpr.adapter";
+pub const DEFAULT_TS_PREFIX: &str = "device.zpr.adapter";
 
 pub const DEFAULT_ATTR: &str = "cn";
 
@@ -32,7 +32,7 @@ pub const RESERVED_NODE_IDS: [&'static str; 1] = ["visaservice"];
 pub const VS_SERVICE_NAME: &str = "/zpr/visaservice";
 
 pub const KATTR_ROLE: &str = "zpr.role";
-pub const KATTR_CN: &str = "endpoint.zpr.adapter.cn";
+pub const KATTR_CN: &str = "device.zpr.adapter.cn";
 pub const KATTR_ADDR: &str = "zpr.addr";
 
 /// TODO: Add a "link" default class?

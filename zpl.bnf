@@ -2,15 +2,6 @@
 // allow.rs, define.rs, never.rs). Originally extracted from ZRFC 15, then
 // reconciled against the code.
 //
-// TERMINOLOGY DRIFT — "device" vs "endpoint":
-//   ZRFC 15 uses the term ***device***/***devices*** (with a predefined subclass
-//   ***servers***) for the entity that connects to the ZPRnet. The compiler has
-//   NOT adopted this rename: it still uses the older term "endpoint"/"endpoints"
-//   throughout (TokenType, ClassFlavor::Endpoint, DEF_CLASS_ENDPOINT_NAME, ...).
-//   This BNF follows the CODE, so it uses "endpoint" below. Everywhere you see
-//   <endpoint-spec>, <endpoint-class-name>, "endpoint", or "endpoints", the ZRFC
-//   would say "device"/"devices".
-//
 // NOT YET IMPLEMENTED (documented in ZRFC 15 but absent from the compiler):
 //   - the predefined "servers" class (a subclass of devices with a set-valued
 //     "services" attribute)
@@ -59,11 +50,11 @@
 
 <p-statement> ::= <subject-clause> "to" "access" <object-clause> <signal-clause>?
 
-<subject-clause> ::= <user-spec> | <service-spec> | <endpoint-spec> |
-                     <user-spec> "on" <endpoint-spec> |
-                     <service-spec> "on" <endpoint-spec>
+<subject-clause> ::= <user-spec> | <service-spec> | <device-spec> |
+                     <user-spec> "on" <device-spec> |
+                     <service-spec> "on" <device-spec>
 
-<object-clause> ::= <service-spec> | <service-spec> "on" <endpoint-spec>
+<object-clause> ::= <service-spec> | <service-spec> "on" <device-spec>
 
 // The "and"/"," before "signal" are optional delimiters (consumed but not required).
 // The message may be any <name> (quoting is conventional but not required).
@@ -114,9 +105,9 @@
 // A <user-class-name> must be, or descend from, the built-in "user" class.
 <user-class-name> ::= <name> | <built-in-user-class-name>
 
-<endpoint-spec> ::= (<attribute-expr> | <endpoint-class-name>) (<and-token>? (<attribute-expr> | <endpoint-class-name>))*
-// An <endpoint-class-name> must be, or descend from, the built-in "endpoint" class.
-<endpoint-class-name> ::= <name> | <built-in-endpoint-class-name>
+<device-spec> ::= (<attribute-expr> | <device-class-name>) (<and-token>? (<attribute-expr> | <device-class-name>))*
+// A <device-class-name> must be, or descend from, the built-in "device" class.
+<device-class-name> ::= <name> | <built-in-device-class-name>
 
 <service-spec> ::= (<attribute-expr> | <service-class-name>) (<and-token>? (<attribute-expr> | <service-class-name>))*
 // A <service-class-name> must be, or descend from, the built-in "service" class.
@@ -159,13 +150,12 @@
 
 <class-name> ::= <built-in-class-name> | <name>
 
-<built-in-class-name> ::= <built-in-endpoint-class-name> |
+<built-in-class-name> ::= <built-in-device-class-name> |
                           <built-in-service-class-name> |
                           <built-in-user-class-name>
 
-// ZRFC 15 calls this class "device"/"devices" (with subclass "server"/"servers");
-// the compiler has not yet adopted that rename and only accepts "endpoint"/"endpoints".
-<built-in-endpoint-class-name> ::= "endpoint" | "endpoints"
+// ZRFC 15 also defines a subclass "server"/"servers", not yet implemented.
+<built-in-device-class-name> ::= "device" | "devices"
 
 // "VisaService"/"VisaServices" is a predefined service class (Class::defaults()),
 // but it is NOT extensible: it may not be used as a parent in a define statement.

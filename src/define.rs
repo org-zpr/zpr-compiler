@@ -56,7 +56,7 @@ pub fn parse_define(
     // define class_name [ aka foo ] as a parent-class-name with
     //                                    ^^^^^^^^^^^^^^^^^
     //
-    // baked in classes are: user, service, endpoint (was called device) (and their plurals)
+    // baked in classes are: user, service, device (was called device) (and their plurals)
     let mut parent_class_name =
         putil::return_literal(root_tok, tokens.next(), "parent class name", "as")?;
 
@@ -72,9 +72,9 @@ pub fn parse_define(
             parent_class_name = String::from(zpl::DEF_CLASS_SERVICE_NAME);
             ClassFlavor::Service
         }
-        zpl::DEF_CLASS_ENDPOINT_NAME | zpl::DEF_CLASS_ENDPOINT_PLURAL => {
-            parent_class_name = String::from(zpl::DEF_CLASS_ENDPOINT_NAME);
-            ClassFlavor::Endpoint
+        zpl::DEF_CLASS_DEVICE_NAME | zpl::DEF_CLASS_DEVICE_PLURAL => {
+            parent_class_name = String::from(zpl::DEF_CLASS_DEVICE_NAME);
+            ClassFlavor::Device
         }
         _ => ClassFlavor::Undefined,
     };
