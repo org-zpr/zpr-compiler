@@ -26,7 +26,7 @@ zpr_address = "fd5a..."
 ```
 * `provider` - The set of attributes required in order to provide the node "service". These
 attributes cannot come from an external service they must be "built in".  Typically the
-only attribute you can use here is `endpoint.zpr.adapter.cn` which is the `CN` value from
+only attribute you can use here is `device.zpr.adapter.cn` which is the `CN` value from
 the nodes Noise certificate.
 * `zpr_address` - IPv6 ZPRnet address for the node. Node must be preconfigured with this
 same address.
@@ -86,7 +86,7 @@ Syntax:
 ```
 
 The **TSNAME** of `default` is special and is used to check the adapter CN values.
-It is responsible for the property: `endpoint.zpr.adapter.cn`.  The default
+It is responsible for the property: `device.zpr.adapter.cn`.  The default
 service requires a `cert_path` which should be set to the certificate of the
 authority which has signed the NOISE certs given to the adapters.
 
@@ -153,11 +153,11 @@ port = 1234
 An attribute is of the form: `<NAMESPACE>.<ATTR_KEY>`.  There may be additional periods
 in the `<ATTR_KEY>` value.
 
-Every attribute must be in one of the ZPR namespaces: "endpoint", "user", or "service".
+Every attribute must be in one of the ZPR namespaces: "device", "user", or "service".
 
 Valid attribute examples:
 * `user.id`
-* `endpoint.tmp.key_hash`
+* `device.tmp.key_hash`
 * `service.type`
 
 Attributes from services may be single value, multi value, or tags.  An attribute list
@@ -166,14 +166,14 @@ the attribute is set as:
 
 * **Single Value** - Just a plain string, eg `"user.clearance"`.
 * **Multi Value** - Add a '{}' to the end, eg `"user.role{}"`.
-* **Tag** - Prefixed with a hash mark (`#`), eg `"#endpoint.secure`.
+* **Tag** - Prefixed with a hash mark (`#`), eg `"#device.secure`.
 
 When specifying the `returns_attributes` use a map format with an arrow '->':
 
 
 ```toml
 returns_attributes = [
-  "tint -> endpoint.tint",
+  "tint -> device.tint",
   "color -> user.color",
   "govt -> #user.government",
   "bas_id -> user.id",
@@ -268,7 +268,7 @@ come from the ZPL, but you can also put them in the configuration.  Eg,
 [service.WebService]
 protocol = "http"
 port = 80
-provider = [[ "endpoint.zpr.adapter.cn", "foo.blah"]]
+provider = [[ "device.zpr.adapter.cn", "foo.blah"]]
 ```
 
 If you need a static address for a service, the service adapter needs to specify
@@ -279,7 +279,7 @@ with a `zpr.addr` attribute.  For example,
 [service.WebService]
 protocol = "http"
 port = 80
-provider = [[ "endpoint.zpr.adapter.cn", "foo.blah"], ["zpr.addr", "fd5a:5052:2020::19"]]
+provider = [[ "device.zpr.adapter.cn", "foo.blah"], ["zpr.addr", "fd5a:5052:2020::19"]]
 ```
 
 

@@ -317,8 +317,8 @@ allow marketing-emps to access role:marketing services.
     #[test]
     fn test_postifx_attr_prohibited() {
         let valids = vec![
-            "allow endpoints with users with loc:italy to access services.",
-            "allow endpoints with users to access services with color:green.",
+            "allow devices with users with loc:italy to access services.",
+            "allow devices with users to access services with color:green.",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -366,9 +366,9 @@ allow marketing-emps to access role:marketing services.
     #[test]
     fn test_omit_user() {
         let valids = vec![
-            "allow managed endpoints to access services.",
-            "allow color:red endpoints to access services.",
-            "allow managed, color:red endpoints to access services.",
+            "allow managed devices to access services.",
+            "allow color:red devices to access services.",
+            "allow managed, color:red devices to access services.",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -388,8 +388,8 @@ allow marketing-emps to access role:marketing services.
     #[test]
     fn test_verbose_device() {
         let valids = vec![
-            "allow managed, color:red users on color:green endpoints to access green services.",
-            "allow color:red, managed users on color:green endpoints to access color:blue services.",
+            "allow managed, color:red users on color:green devices to access green services.",
+            "allow color:red, managed users on color:green devices to access color:blue services.",
         ];
         let ctx = CompilationCtx::default();
         for valid in valids {
@@ -513,7 +513,7 @@ allow marketing-emps to access role:marketing services.
 
     #[test]
     fn test_cannot_subclass_visa_service() {
-        let invalids = vec!["Define MyVs as a VisaService with endpoint.color:green."];
+        let invalids = vec!["Define MyVs as a VisaService with device.color:green."];
         let ctx = CompilationCtx::default();
         for valid in invalids {
             let tokens: Result<Tokenization, CompilationError> =
@@ -673,7 +673,7 @@ allow marketing-emps to access role:marketing services.
     // An AKA colliding with an existing name/AKA must be a Redefinition error,
     #[test]
     fn test_aka_collision_error() {
-        let input = "define bad AKA Users as endpoint.";
+        let input = "define bad AKA Users as device.";
         let ctx = CompilationCtx::default();
         let tz = tokenize_str(input, &ctx).unwrap();
         match parse(tz.tokens, &ctx) {

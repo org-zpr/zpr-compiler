@@ -58,20 +58,20 @@ impl fmt::Display for FPos {
 /// A parsed "allow" statement.
 ///
 /// Originally this was parsed into three clauses that mapped to a permission
-/// statement: and ENDPOINT cluase, a USER clause and a SERVICE clause.  The
-/// endpoint and user clauses were assumed to be on the LHS of the statment,
-/// and the service clause on the RHS. Think: users on endpoints can access services.
+/// statement: and DEVICE cluase, a USER clause and a SERVICE clause.  The
+/// device and user clauses were assumed to be on the LHS of the statment,
+/// and the service clause on the RHS. Think: users on devices can access services.
 ///
 /// However, over time it has become clear that it is better to think in terms
 /// of CLIENTS and SERVERS.  Clients access services on servers.  Clients are LHS (left hand side) and
 /// serviers are RHS.  Both clients and servers can have attributes in any of the
-/// three classes (user, endpoint, service).  A client may also indicate that
+/// three classes (user, device, service).  A client may also indicate that
 /// it is a service.
 ///
 /// The server side (RHS) must always have at least a service clause.
 ///
 /// Attributes of the classes may not always be in the domain of the class. For example, the
-/// service clause may have endpoint attributes in it.
+/// service clause may have device attributes in it.
 #[derive(Clone, Debug)]
 pub struct AllowClause {
     pub clause_id: usize, // Within a given zpl policy, each allow clause gets a unique id.
@@ -217,7 +217,7 @@ impl fmt::Display for Signal {
 pub enum ClassFlavor {
     #[default]
     Undefined, // they all start here
-    Endpoint,
+    Device,
     User,
     Service,
 }
@@ -225,7 +225,7 @@ pub enum ClassFlavor {
 impl Display for ClassFlavor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ClassFlavor::Endpoint => write!(f, "endpoint"),
+            ClassFlavor::Device => write!(f, "device"),
             ClassFlavor::User => write!(f, "user"),
             ClassFlavor::Service => write!(f, "service"),
             ClassFlavor::Undefined => write!(f, "undefined"),
@@ -236,7 +236,7 @@ impl Display for ClassFlavor {
 impl Into<AttrDomain> for ClassFlavor {
     fn into(self) -> AttrDomain {
         match self {
-            ClassFlavor::Endpoint => AttrDomain::Endpoint,
+            ClassFlavor::Device => AttrDomain::Device,
             ClassFlavor::User => AttrDomain::User,
             ClassFlavor::Service => AttrDomain::Service,
             ClassFlavor::Undefined => AttrDomain::Unspecified,
@@ -245,7 +245,7 @@ impl Into<AttrDomain> for ClassFlavor {
 }
 
 /// A class is created from a ZPL define statement.
-/// There are also three built in classes: user, service, and endpoint.
+/// There are also three built in classes: user, service, and device.
 #[derive(Debug, Clone)]
 pub struct Class {
     pub flavor: ClassFlavor,
@@ -266,7 +266,7 @@ impl Class {
         vec![
             Class::default_user(),
             Class::default_service(),
-            Class::default_endpoint(),
+            Class::default_device(),
             Class::default_visa_service(),
         ]
     }
@@ -309,13 +309,13 @@ impl Class {
             class_id: usize::MAX - 3,
         }
     }
-    pub fn default_endpoint() -> Class {
+    pub fn default_device() -> Class {
         Class {
-            flavor: ClassFlavor::Endpoint,
-            parent: zpl::DEF_CLASS_ENDPOINT_NAME.to_string(),
-            name: zpl::DEF_CLASS_ENDPOINT_NAME.to_string(),
+            flavor: ClassFlavor::Device,
+            parent: zpl::DEF_CLASS_DEVICE_NAME.to_string(),
+            name: zpl::DEF_CLASS_DEVICE_NAME.to_string(),
             aka: None,
-            plural: zpl::DEF_CLASS_ENDPOINT_PLURAL.to_string(),
+            plural: zpl::DEF_CLASS_DEVICE_PLURAL.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
             extensible: true,
@@ -325,7 +325,7 @@ impl Class {
     pub fn is_builtin(&self) -> bool {
         self.name == zpl::DEF_CLASS_USER_NAME
             || self.name == zpl::DEF_CLASS_SERVICE_NAME
-            || self.name == zpl::DEF_CLASS_ENDPOINT_NAME
+            || self.name == zpl::DEF_CLASS_DEVICE_NAME
             || self.name == zpl::DEF_CLASS_VISA_SERVICE_NAME
     }
 

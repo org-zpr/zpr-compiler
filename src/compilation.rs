@@ -495,7 +495,7 @@ mod test {
     zpr_address = "fd5a:5052:90de::1"
     interfaces = [ "in1" ]
     in1.netaddr = "127.0.0.1:5000"
-    provider = [["endpoint.zpr.adapter.cn", "fee"]]
+    provider = [["device.zpr.adapter.cn", "fee"]]
 
     [visa_service]
     dock_node = "n0"
@@ -518,7 +518,7 @@ mod test {
     zpr_address = "fd5a:5052:90de::1"
     interfaces = [ "in1" ]
     in1.netaddr = "127.0.0.1:5000"
-    provider = [["endpoint.zpr.adapter.cn", "fee"]]
+    provider = [["device.zpr.adapter.cn", "fee"]]
 
     [visa_service]
     dock_node = "n0"
@@ -532,7 +532,7 @@ mod test {
     cert_path = ""
     returns_attributes = [ "color -> user.color", "content -> service.content", "bas_id -> user.bas_id" ]
     identity_attributes = [ "bas_id" ]
-    provider = [[ "endpoint.zpr.adapter.cn", "bas.zpr.org" ]]
+    provider = [[ "device.zpr.adapter.cn", "bas.zpr.org" ]]
 
 
     [protocols.http]
@@ -552,8 +552,8 @@ mod test {
     #[test]
     fn simple_compile() {
         let zpl = r#"
-        define Webby as service with endpoint.zpr.adapter.cn.
-        allow zpr.adapter.cn: endpoints to access Webby.
+        define Webby as service with device.zpr.adapter.cn.
+        allow zpr.adapter.cn: devices to access Webby.
         "#;
 
         let tempdir = TempDir::new("simple_compile");
@@ -581,7 +581,7 @@ mod test {
     fn define_requires_with() {
         let zpl = r#"
         define Webby as service.
-        allow zpr.adapter.cn: endpoints to access Webby.
+        allow zpr.adapter.cn: devices to access Webby.
         "#;
 
         let tempdir = TempDir::new("define_requires_with");
@@ -615,7 +615,7 @@ mod test {
         zpr_address = "fd5a:5052:90de::1"
         interfaces = [ "in1" ]
         in1.netaddr = "127.0.0.1:5000"
-        provider = [["endpoint.zpr.adapter.cn", "fee"]]
+        provider = [["device.zpr.adapter.cn", "fee"]]
 
         [visa_service]
         dock_node = "n0"
@@ -629,12 +629,12 @@ mod test {
 
         [services.Webby]
         protocol = "http"
-        provider = [["endpoint.zpr.adapter.cn", ""]]
+        provider = [["device.zpr.adapter.cn", ""]]
         "#;
 
         let zpl = r#"
         define Webby as service.
-        allow zpr.adapter.cn: endpoints to access Webby.
+        allow zpr.adapter.cn: devices to access Webby.
         "#;
 
         let tempdir = TempDir::new("define_ok_without_with");
@@ -660,8 +660,8 @@ mod test {
     #[test]
     fn cannot_use_cn_as_tag() {
         let zpl = r#"
-        define Webby as service with endpoint.zpr.adapter.cn.
-        allow zpr.adapter.cn endpoints to access Webby.
+        define Webby as service with device.zpr.adapter.cn.
+        allow zpr.adapter.cn devices to access Webby.
         "#;
 
         let tempdir = TempDir::new("cannot_use_cn_as_tag");
@@ -690,7 +690,7 @@ mod test {
     fn test_svc_attrs_must_be_defined() {
         let zpl = r#"
         define Webby as service with unknown_attr.
-        allow cn: endpoints to access services.
+        allow cn: devices to access services.
         "#;
 
         let tempdir = TempDir::new("test_svc_attrs_must_be_defined");
@@ -718,8 +718,8 @@ mod test {
     #[test]
     fn test_allow_attrs_must_be_defined() {
         let zpl = r#"
-        define Webby as service with endpoint.zpr.adapter.cn.
-        allow unknown_attr: endpoints to access services.
+        define Webby as service with device.zpr.adapter.cn.
+        allow unknown_attr: devices to access services.
         "#;
 
         let tempdir = TempDir::new("test_allow_attrs_must_be_defined");
@@ -738,7 +738,7 @@ mod test {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("endpoint.unknown_attr: not found"),
+            err_msg.contains("device.unknown_attr: not found"),
             "unexpected error message: {}",
             err_msg
         );

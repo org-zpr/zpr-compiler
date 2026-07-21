@@ -889,14 +889,14 @@ mod test {
 
         [nodes.n0]
         zpr_address = "fd5a:5052:90de::1"
-        provider = [["endpoint.zpr.adapter.cn", "n0.zpr.org"]]
+        provider = [["device.zpr.adapter.cn", "n0.zpr.org"]]
 
         [nodes.n0.substrate_addrs]
         eth0 = "10.0.0.1:5000"
 
         [nodes.n1]
         zpr_address = "fd5a:5052:90de::2"
-        provider = [["endpoint.zpr.adapter.cn", "n1.zpr.org"]]
+        provider = [["device.zpr.adapter.cn", "n1.zpr.org"]]
 
         [nodes.n1.substrate_addrs]
         eth0 = "10.0.0.2:5000"
@@ -980,14 +980,14 @@ mod test {
 
         [nodes.n0]
         zpr_address = "fd5a:5052:90de::1"
-        provider = [["endpoint.zpr.adapter.cn", "n0.zpr.org"]]
+        provider = [["device.zpr.adapter.cn", "n0.zpr.org"]]
 
         [nodes.n0.substrate_addrs]
         eth0 = "10.0.0.1:5000"
 
         [nodes.n1]
         zpr_address = "fd5a:5052:90de::2"
-        provider = [["endpoint.zpr.adapter.cn", "n1.zpr.org"]]
+        provider = [["device.zpr.adapter.cn", "n1.zpr.org"]]
 
         [nodes.n1.substrate_addrs]
         eth0 = "10.0.0.2:5000"
@@ -1020,21 +1020,21 @@ mod test {
 
         [nodes.n0]
         zpr_address = "fd5a:5052:90de::1"
-        provider = [["endpoint.zpr.adapter.cn", "n0.zpr.org"]]
+        provider = [["device.zpr.adapter.cn", "n0.zpr.org"]]
 
         [nodes.n0.substrate_addrs]
         eth0 = "10.0.0.1:5000"
 
         [nodes.n1]
         zpr_address = "fd5a:5052:90de::2"
-        provider = [["endpoint.zpr.adapter.cn", "n1.zpr.org"]]
+        provider = [["device.zpr.adapter.cn", "n1.zpr.org"]]
 
         [nodes.n1.substrate_addrs]
         eth0 = "10.0.0.2:5000"
 
         [nodes.n2]
         zpr_address = "fd5a:5052:90de::3"
-        provider = [["endpoint.zpr.adapter.cn", "n2.zpr.org"]]
+        provider = [["device.zpr.adapter.cn", "n2.zpr.org"]]
 
         [nodes.n2.substrate_addrs]
         eth0 = "10.0.0.3:5000"

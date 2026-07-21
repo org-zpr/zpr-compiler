@@ -48,7 +48,7 @@ mod test {
     use super::*;
     use crate::{context::CompilationCtx, lex::tokenize_str};
 
-    /// Build the default class registry (user, service, endpoint, VisaService)
+    /// Build the default class registry (user, service, device, VisaService)
     /// plus a corresponding name→canonical-name index that includes AKA entries.
     fn make_classes() -> (HashMap<String, String>, HashMap<String, Class>) {
         let mut classes: HashMap<String, Class> = HashMap::new();

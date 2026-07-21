@@ -231,15 +231,15 @@ mod test {
 
     #[test]
     fn test_parse_attribute_mapping_tag() {
-        let mapping = "service_key -> #endpoint.tag";
+        let mapping = "service_key -> #device.tag";
         let result = parse_attribute_mapping(mapping);
 
         assert!(result.is_ok());
         let (service_key_name, attr) = result.unwrap();
 
         assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), AttrDomain::Endpoint);
-        assert_eq!(attr.zpl_value(), "endpoint.tag");
+        assert_eq!(*attr.get_domain_ref(), AttrDomain::Device);
+        assert_eq!(attr.zpl_value(), "device.tag");
         assert_eq!(attr.get_values(), None);
         assert_eq!(attr.is_multi_valued(), false);
         assert_eq!(attr.is_tag(), true);

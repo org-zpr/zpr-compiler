@@ -10,7 +10,7 @@ order = ["hosts", "dns"]
 "my.service" = "fd5a:5052:1::8080" # ZPR contact addr
 
 [nodes."node.zpr.org"]
-provider = [ ["endpoint.zpr.adapter.cn", "node.zpr.org"] ]
+provider = [ ["device.zpr.adapter.cn", "node.zpr.org"] ]
 zpr_address = "n0.zpr"
 
 [trusted_services.default]

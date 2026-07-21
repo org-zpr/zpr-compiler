@@ -13,7 +13,7 @@ use zpr::policy_types::{AttrDomain, Attribute};
 #[derive(Debug, Default)]
 struct ParseAllowState {
     root_tok: Token,
-    client_endpoint_clause: Option<Clause>,
+    client_device_clause: Option<Clause>,
     client_user_clause: Option<Clause>,
     client_service_clause: Option<Clause>,
     service_clause: Option<Clause>,
@@ -30,18 +30,18 @@ impl ParseAllowState {
 
     /// True when we have none of the client clauses set.
     fn client_clauses_is_none(&self) -> bool {
-        self.client_endpoint_clause.is_none()
+        self.client_device_clause.is_none()
             && self.client_user_clause.is_none()
             && self.client_service_clause.is_none()
     }
 
     /// This consumes all the clauses or panics.
     ///
-    /// Note that every allow clause will get a user and endpoint clause in the client vector
+    /// Note that every allow clause will get a user and device clause in the client vector
     /// even if they are just the default.
     ///
     /// The `server` vector in the [AllowClause] will just have one element -- a service clause
-    /// that may have attributes from other domains (eg, endpoint or user attributes).
+    /// that may have attributes from other domains (eg, device or user attributes).
     fn to_allow_clause(&mut self, clause_id: usize, last_tok: Token) -> AllowClause {
         let mut client_user_clause = self.client_user_clause.take().unwrap_or(Clause::new(
             ClassFlavor::User,
@@ -49,18 +49,18 @@ impl ParseAllowState {
             self.root_tok.clone(),
         ));
 
-        let mut client_endpoint_clause = self.client_endpoint_clause.take().unwrap_or(Clause::new(
-            ClassFlavor::Endpoint,
-            zpl::DEF_CLASS_ENDPOINT_NAME,
+        let mut client_device_clause = self.client_device_clause.take().unwrap_or(Clause::new(
+            ClassFlavor::Device,
+            zpl::DEF_CLASS_DEVICE_NAME,
             self.root_tok.clone(),
         ));
 
         // For now keep service as none if it is not yet defined.
         let mut opt_client_service_clause = self.client_service_clause.take();
 
-        // Move any non endpoint attributes from the endpoint clause into the correct one.
+        // Move any non device attributes from the device clause into the correct one.
         let mut keep_attrs = Vec::new();
-        for attr in client_endpoint_clause.with {
+        for attr in client_device_clause.with {
             match attr.get_domain_ref() {
                 &AttrDomain::Service => {
                     if let Some(ref mut sc) = opt_client_service_clause {
@@ -79,7 +79,7 @@ impl ParseAllowState {
                 _ => keep_attrs.push(attr),
             }
         }
-        client_endpoint_clause.with = keep_attrs;
+        client_device_clause.with = keep_attrs;
 
         // Move any non user attributes from the user clause into the correct one.
         let mut keep_attrs = Vec::new();
@@ -98,7 +98,7 @@ impl ParseAllowState {
                         opt_client_service_clause = Some(cl)
                     }
                 }
-                &AttrDomain::Endpoint => client_endpoint_clause.with.push(attr),
+                &AttrDomain::Device => client_device_clause.with.push(attr),
                 _ => keep_attrs.push(attr),
             }
         }
@@ -106,7 +106,7 @@ impl ParseAllowState {
 
         let mut client_clauses = Vec::new();
         client_clauses.push(client_user_clause);
-        client_clauses.push(client_endpoint_clause);
+        client_clauses.push(client_device_clause);
         if let Some(sc) = opt_client_service_clause.take() {
             client_clauses.push(sc);
         }
@@ -130,14 +130,14 @@ impl ParseAllowState {
 ///
 /// Format of the allow statement is:
 ///
-/// allow (<user-clause>|<service-clause>) on <endpoint-clause> to access <service-clause>
+/// allow (<user-clause>|<service-clause>) on <device-clause> to access <service-clause>
 ///
-/// If there are both endpoint and user/service clauses they are separated by 'on'.
-/// You can omit either user or endpoint clauses:
+/// If there are both device and user/service clauses they are separated by 'on'.
+/// You can omit either user or device clauses:
 ///
 /// allow <user-clause> to access <service-clause>
 /// allow <service-clause> to access <service-clause>
-/// allow <endpoint-clause> to access <service-clause>
+/// allow <device-clause> to access <service-clause>
 ///
 /// `classes_idx` maps class names and AKA names to their canonical names (eg, "services" -> "service").
 /// `classs_map` maps class canonical name to [Class] struct.
@@ -171,7 +171,7 @@ pub fn parse_allow(
         Some(tok) => {
             let cn = ps.class_name.as_ref().unwrap();
 
-            // If we hit a TO then we expect one to have parsed an endpoint, user or even service clause.
+            // If we hit a TO then we expect one to have parsed an device, user or even service clause.
             // The LHS can only name one class.  There may be other attributes in different classes
             // applied.  Eg, 'service.blue, orange users'.
             match tok.tt {
@@ -182,9 +182,9 @@ pub fn parse_allow(
                             let uc = ps.to_clause(ClassFlavor::User)?;
                             parse_state.client_user_clause = Some(uc);
                         }
-                        ClassFlavor::Endpoint => {
-                            let dc = ps.to_clause(ClassFlavor::Endpoint)?;
-                            parse_state.client_endpoint_clause = Some(dc);
+                        ClassFlavor::Device => {
+                            let dc = ps.to_clause(ClassFlavor::Device)?;
+                            parse_state.client_device_clause = Some(dc);
                         }
                         ClassFlavor::Service => {
                             let dc = ps.to_clause(ClassFlavor::Service)?;
@@ -202,7 +202,7 @@ pub fn parse_allow(
 
                 // If we hit an ON then we expect to have parsed a user or service clause.
                 TokenType::On => {
-                    // Hit ON which means we must have parsed a user clause, and we expect an endpoint clause to follow.
+                    // Hit ON which means we must have parsed a user clause, and we expect an device clause to follow.
                     match classes_map.get(cn).unwrap().flavor {
                         ClassFlavor::User => {
                             let dc = ps.to_clause(ClassFlavor::User)?;
@@ -243,7 +243,7 @@ pub fn parse_allow(
     }
 
     // If we get this far, we have parsed up to a ON or a TO.
-    // If it's a ON then we expect an endpoint clause next.
+    // If it's a ON then we expect an device clause next.
     // If it's a TO then we expect a RHS service clause next.
     let tok = tokens.next().unwrap();
     match tok.tt {
@@ -251,15 +251,15 @@ pub fn parse_allow(
             if parse_state.client_clauses_is_none() {
                 panic!("assertion fails - no client clauses on LHS");
             }
-            if parse_state.client_endpoint_clause.is_some() {
+            if parse_state.client_device_clause.is_some() {
                 return Err(CompilationError::AllowStmtParseError(
-                    format!("endpoint clause on RHS preceeds ON"),
+                    format!("device clause on RHS preceeds ON"),
                     parse_state.root_tok.line,
                     parse_state.root_tok.col,
                 ));
             }
-            // Ok, now parse an ENDPOINT clause, returns having found but not parsed 'TO'.
-            if !try_parse_allow_endpoint_clause(
+            // Ok, now parse an DEVICE clause, returns having found but not parsed 'TO'.
+            if !try_parse_allow_device_clause(
                 &mut parse_state,
                 &mut tokens,
                 classes_idx,
@@ -267,7 +267,7 @@ pub fn parse_allow(
             )? {
                 // Hmm, a non error failure?
                 return Err(CompilationError::AllowStmtParseError(
-                    "expected an endpoint clause to follow ON".to_string(),
+                    "expected an device clause to follow ON".to_string(),
                     tok.line,
                     tok.col,
                 ));
@@ -358,14 +358,14 @@ fn check_clause_composition(
     for clause in clauses {
         match clause.flavor {
             ClassFlavor::User => usr_ep_svc.0 += 1,
-            ClassFlavor::Endpoint => usr_ep_svc.1 += 1,
+            ClassFlavor::Device => usr_ep_svc.1 += 1,
             ClassFlavor::Service => usr_ep_svc.2 += 1,
             _ => (),
         }
     }
     if let Some(err_msg) = match usr_ep_svc {
         (a, _, _) if a > 1 => Some(format!("too many user clauses {explain}")),
-        (_, b, _) if b > 1 => Some(format!("too may endpoint clauses {explain}")),
+        (_, b, _) if b > 1 => Some(format!("too may device clauses {explain}")),
         (_, _, c) if c > 1 => Some(format!("too many service clauses {explain}")),
         _ => None,
     } {
@@ -378,9 +378,9 @@ fn check_clause_composition(
     Ok(())
 }
 
-/// Parse from <endpoint-clause> up to the 'TO' (of 'TO ACCESS')
-/// If this succeeds, it sets the endpoint clause in the [ParseAllowState].
-fn try_parse_allow_endpoint_clause<'a, I>(
+/// Parse from <device-clause> up to the 'TO' (of 'TO ACCESS')
+/// If this succeeds, it sets the device clause in the [ParseAllowState].
+fn try_parse_allow_device_clause<'a, I>(
     pa_state: &mut ParseAllowState,
     tokens: &mut Peekable<I>,
     classes_idx: &HashMap<String, String>,
@@ -395,17 +395,17 @@ where
         tokens,
         classes_idx,
         &ParseOpts::stop_at(TokenType::To),
-        "endpoint clause",
+        "device clause",
     )?;
 
-    // This is a good parse if we actually got a endpoint flavor class.
+    // This is a good parse if we actually got a device flavor class.
     let cn = ps.class_name.as_ref().unwrap();
-    if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
-        let ec = ps.to_clause(ClassFlavor::Endpoint)?;
-        pa_state.client_endpoint_clause = Some(ec);
+    if classes_map.get(cn).unwrap().flavor == ClassFlavor::Device {
+        let ec = ps.to_clause(ClassFlavor::Device)?;
+        pa_state.client_device_clause = Some(ec);
         Ok(true)
     } else {
-        Ok(false) // not an endpoint clause
+        Ok(false) // not an device clause
     }
 }
 
@@ -413,7 +413,7 @@ where
 /// The passed tokens MUST start with "ACCESS". There may be a "SIGNAL"
 /// token after the "ACCESS" tokens
 ///
-/// The service clause may have a trailing ON <endpoint-clause>.
+/// The service clause may have a trailing ON <device-clause>.
 /// There may also be a signal clause after the service clause. If there is a
 /// signal clause, tokens will remain in the queue after this function, otherwise
 /// this function will process all the tokens.
@@ -471,41 +471,41 @@ where
                     tokens,
                     classes_idx,
                     &ParseOpts::stop_at_any(&[TokenType::Eos, TokenType::Signal]),
-                    "service endpoint clause",
+                    "service device clause",
                 )?;
 
-                // This is a good parse if we actually got a endpoint or signal flavor class.
+                // This is a good parse if we actually got a device or signal flavor class.
                 let cn = nested_ps.class_name.as_ref().unwrap();
-                if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
-                    let service_ec = nested_ps.to_clause(ClassFlavor::Endpoint)?;
+                if classes_map.get(cn).unwrap().flavor == ClassFlavor::Device {
+                    let service_ec = nested_ps.to_clause(ClassFlavor::Device)?;
 
                     // Since ZPL could use a defined class in the on clause we need to walk the tree and
                     // gather any attributes.
-                    let mut all_endpoint_attrs =
+                    let mut all_device_attrs =
                         collect_all_attributes(&service_ec.class, classes_map);
-                    all_endpoint_attrs.extend(service_ec.with);
+                    all_device_attrs.extend(service_ec.with);
 
-                    for ec_attr in &all_endpoint_attrs {
+                    for ec_attr in &all_device_attrs {
                         let mut domained_attr = ec_attr.clone();
                         if domained_attr.is_unspecified_domain() {
-                            domained_attr.set_domain(AttrDomain::Endpoint);
-                        } else if !domained_attr.is_domain(AttrDomain::Endpoint) {
-                            // This is not permitted. You can only talk about endpoints in the ON clause.
+                            domained_attr.set_domain(AttrDomain::Device);
+                        } else if !domained_attr.is_domain(AttrDomain::Device) {
+                            // This is not permitted. You can only talk about devices in the ON clause.
                             return Err(CompilationError::AllowStmtParseError(
                                 format!(
-                                    "illegal non-endpoint attribute in service ON clause: '{}'",
+                                    "illegal non-device attribute in service ON clause: '{}'",
                                     domained_attr.to_instance_string()
                                 ),
                                 pa_state.root_tok.line,
                                 pa_state.root_tok.col,
                             ));
                         }
-                        service_clause.with.push(domained_attr); // TODO: Are these already in endpoint domain?
+                        service_clause.with.push(domained_attr); // TODO: Are these already in device domain?
                     }
                 } else {
                     return Err(CompilationError::AllowStmtParseError(
                         format!(
-                            "expected an endpoint class in service ON clause, got: '{}'",
+                            "expected an device class in service ON clause, got: '{}'",
                             cn
                         ),
                         pa_state.root_tok.line,
@@ -865,13 +865,13 @@ mod test {
     #[test]
     fn test_parses_valid_on_clause() {
         let valids = vec![
-            "allow blue users to access services on level:seven endpoints",
-            "allow blue users to access services on orange endpoints",
-            "allow blue users to access services on orange, level:seven endpoints",
-            "allow blue users on green endpoints to access services",
+            "allow blue users to access services on level:seven devices",
+            "allow blue users to access services on orange devices",
+            "allow blue users to access services on orange, level:seven devices",
+            "allow blue users on green devices to access services",
             "allow blue users to access services and signal \"blue\" to service",
-            "allow blue users on green endpoints to access services and signal \"blue\" to service",
-            "allow blue users to access services on level:seven endpoints and signal \"blue\" to service",
+            "allow blue users on green devices to access services and signal \"blue\" to service",
+            "allow blue users to access services on level:seven devices and signal \"blue\" to service",
         ];
 
         let mut classes: HashMap<String, Class> = HashMap::new();
@@ -908,7 +908,7 @@ mod test {
     fn test_fails_on_invalid_on_clause() {
         let invalids = vec![
             "allow blue users to access services on",
-            "allow blue users to access services on level:seven on endpoints",
+            "allow blue users to access services on level:seven on devices",
             "allow on blue users to access services",
             "allow blue users to access services on orange",
             "allow blue users to signal to services",
@@ -947,7 +947,7 @@ mod test {
 
     #[test]
     fn test_sets_attrs_correctly_trailing_on() {
-        let statement = "allow blue users to access services on level:seven endpoints";
+        let statement = "allow blue users to access services on level:seven devices";
 
         let mut classes: HashMap<String, Class> = HashMap::new();
         for defclass in Class::defaults() {
@@ -967,7 +967,7 @@ mod test {
 
         // Blue tag goes on user.
 
-        assert_eq!(2, clause.client.len(), "{:?}", clause.client); // user & endpoint
+        assert_eq!(2, clause.client.len(), "{:?}", clause.client); // user & device
         let mut matched = false;
         for lhs_clause in &clause.client {
             if lhs_clause.flavor == ClassFlavor::User {
@@ -982,7 +982,7 @@ mod test {
         assert!(matched, "failed to find a user clause");
         matched = false;
 
-        // level:seven attr goes in as an endpoint domain attribute on the service.
+        // level:seven attr goes in as an device domain attribute on the service.
         assert_eq!(1, clause.server.len(), "{:?}", clause.server); // service only
         for rhs_clause in &clause.server {
             if rhs_clause.flavor == ClassFlavor::Service {
@@ -990,16 +990,16 @@ mod test {
                 rhs_clause
                     .with
                     .iter()
-                    .find(|a| a.to_instance_string() == "endpoint.level:seven")
+                    .find(|a| a.to_instance_string() == "device.level:seven")
                     .expect("level:seven tag missing from service clause");
             }
         }
-        assert!(matched, "failed to find endpoint class in RHS");
+        assert!(matched, "failed to find device class in RHS");
     }
 
     #[test]
     fn test_sets_attrs_correctly_user_on() {
-        let statement = "allow blue users on level:seven endpoints to access services";
+        let statement = "allow blue users on level:seven devices to access services";
 
         let mut classes: HashMap<String, Class> = HashMap::new();
         for defclass in Class::defaults() {
@@ -1017,9 +1017,9 @@ mod test {
         let tokens = tz.tokens;
         let clause = parse_allow(&tokens, 1, &class_index, &classes).unwrap();
 
-        assert_eq!(2, clause.client.len()); // users, endpoints
+        assert_eq!(2, clause.client.len()); // users, devices
         let mut matched_user = false;
-        let mut matched_endpoint = false;
+        let mut matched_device = false;
         for lhs_clause in clause.client {
             // Blue tag goes on user.
             if lhs_clause.flavor == ClassFlavor::User {
@@ -1029,24 +1029,24 @@ mod test {
                     .iter()
                     .find(|a| a.to_instance_string() == "#user.blue")
                     .expect("blue tag missing from user clause");
-            } else if lhs_clause.flavor == ClassFlavor::Endpoint {
-                // level:seven attr goes in as an endpoint attribute
-                matched_endpoint = true;
+            } else if lhs_clause.flavor == ClassFlavor::Device {
+                // level:seven attr goes in as an device attribute
+                matched_device = true;
                 lhs_clause
                     .with
                     .iter()
-                    .find(|a| a.to_instance_string() == "endpoint.level:seven")
-                    .expect("level:seven tag missing from endpoint clause");
+                    .find(|a| a.to_instance_string() == "device.level:seven")
+                    .expect("level:seven tag missing from device clause");
             }
         }
         assert!(matched_user, "failed to locate user clause in LHS");
-        assert!(matched_endpoint, "failed to locate endpoint clause in LHS");
+        assert!(matched_device, "failed to locate device clause in LHS");
     }
 
     #[test]
     fn test_sets_attrs_correctly_two_on() {
         let statement =
-            "allow blue users on level:seven endpoints to access services on level:eight endpoints";
+            "allow blue users on level:seven devices to access services on level:eight devices";
 
         let mut classes: HashMap<String, Class> = HashMap::new();
         for defclass in Class::defaults() {
@@ -1064,11 +1064,11 @@ mod test {
         let tokens = tz.tokens;
         let clause = parse_allow(&tokens, 1, &class_index, &classes).unwrap();
 
-        assert_eq!(2, clause.client.len()); // users, endpoints
+        assert_eq!(2, clause.client.len()); // users, devices
         assert_eq!(1, clause.server.len()); // services
 
         let mut matched_user = false;
-        let mut matched_endpoint = false;
+        let mut matched_device = false;
         let mut matched_service = false;
 
         for lhs_clause in clause.client {
@@ -1082,20 +1082,20 @@ mod test {
                         .find(|a| a.to_instance_string() == "#user.blue")
                         .expect("blue tag missing from user clause");
                 }
-                ClassFlavor::Endpoint => {
-                    // level:seven attr goes in as an endpoint attribute
-                    matched_endpoint = true;
+                ClassFlavor::Device => {
+                    // level:seven attr goes in as an device attribute
+                    matched_device = true;
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_instance_string() == "endpoint.level:seven")
-                        .expect("level:seven tag missing from endpoint clause");
+                        .find(|a| a.to_instance_string() == "device.level:seven")
+                        .expect("level:seven tag missing from device clause");
                 }
                 _ => (),
             }
         }
         assert!(matched_user, "failed to locate user clause in LHS");
-        assert!(matched_endpoint, "failed to locate endpoint clause in LHS");
+        assert!(matched_device, "failed to locate device clause in LHS");
 
         for rhs_clause in clause.server {
             match rhs_clause.flavor {
@@ -1104,7 +1104,7 @@ mod test {
                     rhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_instance_string() == "endpoint.level:eight")
+                        .find(|a| a.to_instance_string() == "device.level:eight")
                         .expect("level:eight tag missing from service clause");
                 }
                 _ => (),
@@ -1115,7 +1115,8 @@ mod test {
 
     #[test]
     fn test_sets_service_attrs_lhs() {
-        let statement = "allow blue services on level:seven endpoints to access services on level:eight endpoints";
+        let statement =
+            "allow blue services on level:seven devices to access services on level:eight devices";
 
         let mut classes: HashMap<String, Class> = HashMap::new();
         for defclass in Class::defaults() {
@@ -1133,11 +1134,11 @@ mod test {
         let tokens = tz.tokens;
         let clause = parse_allow(&tokens, 1, &class_index, &classes).unwrap();
 
-        assert_eq!(3, clause.client.len()); // services, users, endpoints
+        assert_eq!(3, clause.client.len()); // services, users, devices
         assert_eq!(1, clause.server.len()); // services
 
         let mut matched_user = false;
-        let mut matched_endpoint = false;
+        let mut matched_device = false;
         let mut matched_service = false;
 
         for lhs_clause in clause.client {
@@ -1160,20 +1161,20 @@ mod test {
                                 .as_str(),
                         );
                 }
-                ClassFlavor::Endpoint => {
-                    // level:seven attr goes in as an endpoint attribute
-                    matched_endpoint = true;
+                ClassFlavor::Device => {
+                    // level:seven attr goes in as an device attribute
+                    matched_device = true;
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_instance_string() == "endpoint.level:seven")
-                        .expect("level:seven tag missing from endpoint clause");
+                        .find(|a| a.to_instance_string() == "device.level:seven")
+                        .expect("level:seven tag missing from device clause");
                 }
                 _ => (),
             }
         }
         assert!(matched_user, "failed to locate user clause in LHS");
-        assert!(matched_endpoint, "failed to locate endpoint clause in LHS");
+        assert!(matched_device, "failed to locate device clause in LHS");
         assert!(matched_service, "failed to locate service clause in LHS");
 
         for rhs_clause in clause.server {
@@ -1183,7 +1184,7 @@ mod test {
                     rhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_instance_string() == "endpoint.level:eight")
+                        .find(|a| a.to_instance_string() == "device.level:eight")
                         .expect("level:eight tag missing from service clause");
                 }
                 _ => (),
@@ -1194,7 +1195,7 @@ mod test {
 
     #[test]
     fn test_multi_value_attrs() {
-        let statement = "allow colors:{blue, red} users on levels:{1, 2} endpoints to access services on levels:{9, 10} endpoints";
+        let statement = "allow colors:{blue, red} users on levels:{1, 2} devices to access services on levels:{9, 10} devices";
 
         let mut classes: HashMap<String, Class> = HashMap::new();
         for defclass in Class::defaults() {
@@ -1212,11 +1213,11 @@ mod test {
         let tokens = tz.tokens;
         let clause = parse_allow(&tokens, 1, &class_index, &classes).unwrap();
 
-        assert_eq!(2, clause.client.len()); // users, endpoints
+        assert_eq!(2, clause.client.len()); // users, devices
         assert_eq!(1, clause.server.len()); // services
 
         let mut matched_user = false;
-        let mut matched_endpoint = false;
+        let mut matched_device = false;
         let mut matched_service = false;
 
         for lhs_clause in clause.client {
@@ -1229,19 +1230,19 @@ mod test {
                         .find(|a| a.to_instance_string() == "user.colors:{blue, red}")
                         .expect("colors{blue,red} missing from user clause");
                 }
-                ClassFlavor::Endpoint => {
-                    matched_endpoint = true;
+                ClassFlavor::Device => {
+                    matched_device = true;
                     lhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_instance_string() == "endpoint.levels:{1, 2}")
-                        .expect("levels{1,2} missing from endpoint clause");
+                        .find(|a| a.to_instance_string() == "device.levels:{1, 2}")
+                        .expect("levels{1,2} missing from device clause");
                 }
                 _ => (),
             }
         }
         assert!(matched_user, "failed to locate user clause in LHS");
-        assert!(matched_endpoint, "failed to locate endpoint clause in LHS");
+        assert!(matched_device, "failed to locate device clause in LHS");
 
         for rhs_clause in clause.server {
             match rhs_clause.flavor {
@@ -1250,7 +1251,7 @@ mod test {
                     rhs_clause
                         .with
                         .iter()
-                        .find(|a| a.to_instance_string() == "endpoint.levels:{9, 10}")
+                        .find(|a| a.to_instance_string() == "device.levels:{9, 10}")
                         .expect("levels{9,10} missing from service clause");
                 }
                 _ => (),
@@ -1353,18 +1354,18 @@ mod test {
         }
     }
 
-    // Using a non-endpoint class (e.g. "users") in the ON clause on the RHS of
-    // an allow statement (after the service) must fail because only endpoint
+    // Using a non-device class (e.g. "users") in the ON clause on the RHS of
+    // an allow statement (after the service) must fail because only device
     // classes are valid there.
     #[test]
-    fn test_service_on_non_endpoint_class() {
+    fn test_service_on_non_device_class() {
         let statement = "allow blue users to access services on users";
         let (class_index, classes) = default_classes();
         let cctx = CompilationCtx::default();
         let tz = tokenize_str(statement, &cctx).unwrap();
         match parse_allow(&tz.tokens, 1, &class_index, &classes) {
-            Ok(c) => panic!("should have failed: ON clause class is not an endpoint: {c:?}"),
-            Err(e) => assert!(e.to_string().contains("endpoint"), "unexpected error: {e}"),
+            Ok(c) => panic!("should have failed: ON clause class is not an device: {c:?}"),
+            Err(e) => assert!(e.to_string().contains("device"), "unexpected error: {e}"),
         }
     }
 }

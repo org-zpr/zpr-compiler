@@ -219,7 +219,7 @@ impl Weaver {
 
             // TODO: User may be able to shoot themselves in the foot here if they add
             // too many attributes to VisaService. May want to consider disallowing
-            // any attributes on the service (but allow on user and endpoint).
+            // any attributes on the service (but allow on user and device).
 
             // The admin access attributes are all the attributes declared on the client side of
             // the clause.
@@ -849,9 +849,9 @@ impl Weaver {
             // Here we collect all attributes -- some will have no values.
             let mut attrs = Vec::new();
 
-            // Grab the LHS endpoint, service and user attributes.
+            // Grab the LHS device, service and user attributes.
             for lhs_class in &ac.client {
-                if lhs_class.flavor == ClassFlavor::Endpoint
+                if lhs_class.flavor == ClassFlavor::Device
                     || lhs_class.flavor == ClassFlavor::User
                     || lhs_class.flavor == ClassFlavor::Service
                 {
@@ -1378,7 +1378,7 @@ mod test {
         zpr_address = "fd5a:5052:90de::1"
         interfaces = [ "in1" ]
         in1.netaddr = "127.0.0.1:5000"
-        provider = [["endpoint.zpr.adapter.cn", "fee"]]
+        provider = [["device.zpr.adapter.cn", "fee"]]
 
         [visa_service]
         dock_node = "n0"
@@ -1389,7 +1389,7 @@ mod test {
 
         [services.foo]
         protocol = "fee"
-        provider = [["endpoint.zpr.adapter.cn", "fee"]]
+        provider = [["device.zpr.adapter.cn", "fee"]]
 
         [services.bar]
         protocol = "fee"
@@ -1433,7 +1433,7 @@ mod test {
             clause_id: 1,
             span: (FPos::default(), FPos::default()),
             client: vec![
-                Clause::new(ClassFlavor::Endpoint, "endpoint", Token::default()),
+                Clause::new(ClassFlavor::Device, "device", Token::default()),
                 Clause::new(ClassFlavor::User, "user", Token::default()),
             ],
             server: vec![Clause::new(ClassFlavor::Service, "foo", Token::default())],
@@ -1478,14 +1478,14 @@ mod test {
         zpr_address = "fd5a:5052:90de::1"
         interfaces = [ "in1" ]
         in1.netaddr = "127.0.0.1:5000"
-        provider = [["endpoint.zpr.adapter.cn", "fee"]]
+        provider = [["device.zpr.adapter.cn", "fee"]]
 
         [visa_service]
         dock_node = "n0"
 
         [trusted_services.bas]
         api = "validation/2"
-        provider = [["endpoint.zpr.adapter.cn", "fee"]]
+        provider = [["device.zpr.adapter.cn", "fee"]]
         returns_attributes = ["id -> user.id", "email -> user.email"]
         identity_attributes = ["id"]
 
@@ -1535,11 +1535,11 @@ mod test {
         let cfg = r#"
         [nodes.n0]
         zpr_address = "fd5a:5052:90de::1"
-        provider = [["endpoint.zpr.adapter.cn", "fee"]]
+        provider = [["device.zpr.adapter.cn", "fee"]]
 
         [trusted_services.bas]
         api = "validation/2"
-        provider = [["endpoint.zpr.adapter.cn", "fee"]]
+        provider = [["device.zpr.adapter.cn", "fee"]]
         returns_attributes = ["id -> user.id"]
         "#;
 

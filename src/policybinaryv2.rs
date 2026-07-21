@@ -639,7 +639,7 @@ mod test {
             .value("admin")
             .build()
             .unwrap();
-        let attr_tag = Attribute::tag("endpoint.hardened").build().unwrap();
+        let attr_tag = Attribute::tag("device.hardened").build().unwrap();
 
         let key_a = JPKey::new(&[attr_role.clone(), attr_tag.clone()]);
         let key_b = JPKey::new(&[attr_tag, attr_role]);
@@ -721,7 +721,7 @@ mod test {
     fn test_jp_builder_add_provides_appends_and_flags() {
         let mut builder = JPBuilder::default();
         let conditions = vec![
-            Attribute::tuple("endpoint.env")
+            Attribute::tuple("device.env")
                 .single()
                 .value("prod")
                 .build()
