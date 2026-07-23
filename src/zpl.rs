@@ -15,6 +15,7 @@ pub const DEFAULT_TRUSTED_SERVICE_API: &str = TS_API_V1;
 
 pub const TS_API_V1: &str = "validation/1";
 pub const TS_API_V2: &str = "validation/2";
+pub const TS_API_FILE: &str = "file";
 
 pub const ICMP_INTERACION_REQUEST_RESPONSE: &str = "request-response";
 pub const ICMP_INTERACTION_ONESHOT: &str = "oneshot";
