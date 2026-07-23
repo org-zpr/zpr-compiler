@@ -9,7 +9,7 @@ use std::net::IpAddr;
 use crate::errors::CompilationError;
 use crate::protocols::{PortSpec, Protocol};
 use crate::ptypes::Signal;
-use zpr::policy_types::{Attribute, ServiceType};
+use zpr::policy_types::{AttrMapping, Attribute, ServiceType, TrustedService};
 
 /// A service oriented view of the network.
 #[derive(Debug, Clone, Default)]
@@ -33,8 +33,7 @@ pub struct FabricService {
     pub service_type: ServiceType,
     pub certificate: Option<Vec<u8>>, // Certificate for this (trusted) service
     pub client_service_name: Option<String>, // For an AUTH service, the name of the optional client service.
-    pub returns_attrs: Option<HashMap<String, Attribute>>, // list of attribute keys (with domains) -- only for trusted services
-    pub identity_attrs: Option<Vec<String>>, // list of attribute keys (with domains) -- only for trusted services
+    pub trusted_service: Option<TrustedService>, // Shared metadata record -- only for trusted services
 }
 
 #[derive(Debug, Clone)]
@@ -247,16 +246,24 @@ impl Fabric {
     }
 
     /// You must add client services associated with the trusted service before adding a trusted service.
+    ///
+    /// `protocol` is `None` for a `file` service (which has no network endpoints); the policy
+    /// writer turns that into an empty endpoint list. `client_service_name`/`certificate` are
+    /// `None` for services without an adapter-facing component or cert. Builds the shared
+    /// [`TrustedService`] metadata record from the ordered `returns_attrs`, `identity_attrs`,
+    /// and `expiration_seconds`.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_trusted_service(
         &mut self,
         id: &str,
-        protocol: &Protocol,
+        protocol: Option<&Protocol>,
         api: &str,
         provider_attrs: &[Attribute],
         certificate: Option<Vec<u8>>,
-        client_service_name: &str,
-        returns_attrs: Option<HashMap<String, Attribute>>,
-        identity_attrs: Option<Vec<String>>,
+        client_service_name: Option<&str>,
+        returns_attrs: Vec<AttrMapping>,
+        identity_attrs: Vec<String>,
+        expiration_seconds: u32,
     ) -> Result<(), CompilationError> {
         for s in &self.services {
             if s.config_id == id {
@@ -269,14 +276,18 @@ impl Fabric {
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: id.to_string(),
-            protocol: Some(protocol.clone()),
+            protocol: protocol.cloned(),
             provider_attrs: provider_attrs.to_vec(),
             client_policies: Vec::new(),
             service_type: ServiceType::Trusted(api.to_string()),
             certificate,
-            client_service_name: Some(client_service_name.to_string()),
-            returns_attrs: returns_attrs,
-            identity_attrs: identity_attrs,
+            client_service_name: client_service_name.map(|s| s.to_string()),
+            trusted_service: Some(TrustedService {
+                service_id: id.to_string(),
+                expiration_seconds,
+                returns_attrs,
+                identity_attrs,
+            }),
         };
         self.services.push(fs);
         Ok(())
@@ -342,8 +353,7 @@ impl Fabric {
             service_type: stype,
             certificate: None,
             client_service_name: None,
-            returns_attrs: None,
-            identity_attrs: None,
+            trusted_service: None,
         };
         self.services.push(fs);
         Ok(fabric_id)
@@ -390,8 +400,7 @@ impl Fabric {
             service_type: ServiceType::BuiltIn,
             certificate: None,
             client_service_name: None,
-            returns_attrs: None,
-            identity_attrs: None,
+            trusted_service: None,
         };
         self.services.push(fs);
         Ok(fabric_id)

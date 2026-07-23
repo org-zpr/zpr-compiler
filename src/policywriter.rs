@@ -4,12 +4,7 @@ use std::net::IpAddr;
 use crate::errors::CompilationError;
 use crate::protocols::Protocol;
 use crate::ptypes::Signal;
-use zpr::policy_types::{Attribute, PFlags, ServiceType};
-
-pub enum TSType {
-    VsAuth,    // trusted service <-> visa service
-    ActorAuth, // trusted service <-> adapter
-}
+use zpr::policy_types::{Attribute, PFlags, ServiceType, TrustedService};
 
 /// To support multiple policy output formats, this trait defines the interface for writing policies.
 pub trait PolicyWriter {
@@ -21,13 +16,14 @@ pub trait PolicyWriter {
     fn write_policy_metadata(&mut self, metadata: &str);
     fn write_max_visa_lifetime(&mut self, lifetime: std::time::Duration);
 
+    /// Write a join policy for a service provider. `endpoint` is `None` for services with no
+    /// network endpoints (a `file` trusted service) which yields an empty endpoint list.
     fn write_connect_match_for_provider(
         &mut self,
         svc_attrs: &[Attribute],
         svc_id: &str,
         stype: &ServiceType,
-        //endpoint: &str,
-        endpoint: &Protocol,
+        endpoint: Option<&Protocol>,
         flags: Option<PFlags>,
     );
 
@@ -54,15 +50,8 @@ pub trait PolicyWriter {
         value_table: &HashMap<String, usize>,
     );
 
-    fn write_trusted_service(
-        &mut self,
-        svc_id: &str,
-        ts_type: TSType,
-        query_uri: Option<&str>,
-        validate_uri: Option<&str>,
-        returns_attrs: Option<&HashMap<String, Attribute>>,
-        identity_attrs: Option<&Vec<String>>,
-    );
+    /// Emit one shared `TrustedService` metadata record into the policy's `trustedServices` list.
+    fn write_trusted_service_record(&mut self, ts: TrustedService);
 
     fn write_link(
         &mut self,

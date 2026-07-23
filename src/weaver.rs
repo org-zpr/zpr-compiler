@@ -540,13 +540,14 @@ impl Weaver {
                     // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.
                     let mut matched = false;
                     for ts_name in &trusted_service_names {
-                        let ts_attrs = config.must_get_attr_map(&format!(
+                        let ts_attrs = config.must_get_attr_mappings(&format!(
                             "/trusted_services/{}/attributes",
                             ts_name
                         ));
 
-                        // "a" is the attribute referenced in the ZPL, so this will turn up on the RIGHT side of the map.
-                        // The left side (the strings) are the names of the raw attributes returned by the service.
+                        // "a" is the attribute referenced in the ZPL, so it appears on the RHS
+                        // (the decoded `mapping.attr`) of a return mapping. The LHS
+                        // (`service_attr_key`) is the raw name the service reports.
 
                         // As we search we need to consider that a tuple type attribute could match
                         // either the service plain key eg, "user.role" or the service multi-value key, eg, "user.role{}".
@@ -557,14 +558,13 @@ impl Weaver {
                             None
                         };
 
-                        let found = ts_attrs.iter().find(|(_k, v)| {
-                            v.zplc_key() == search_str
+                        let found = ts_attrs.iter().find(|m| {
+                            m.attr.zplc_key() == search_str
                                 || alt_search_str.is_some()
-                                    && &v.zplc_key() == alt_search_str.as_ref().unwrap()
+                                    && &m.attr.zplc_key() == alt_search_str.as_ref().unwrap()
                         });
 
-                        //if ts_attrs.contains(&search_name) {
-                        if let Some((_svcname, attr_spec)) = found {
+                        if let Some(mapping) = found {
                             if matched {
                                 return Err(CompilationError::ConfigError(format!(
                                     "attribute {} found in multiple trusted services",
@@ -573,7 +573,7 @@ impl Weaver {
                             }
                             let mut new_attr = zpl_attr.clone();
                             // If the service indicates that this attribute is multi-valued then we keep that info.
-                            if attr_spec.is_multi_valued() {
+                            if mapping.attr.is_multi_valued() {
                                 new_attr.set_multi_valued()?;
                             }
                             resolved_attrs.push(new_attr);
@@ -1015,6 +1015,16 @@ impl Weaver {
                     continue;
                 }
                 checked_services.insert(ts_name.clone());
+
+                // A `file` service is offered by the Visa Service itself and has no provider
+                // attributes to resolve.
+                let ts_api = config
+                    .must_get(&format!("/trusted_services/{ts_name}/api"))
+                    .to_string();
+                if ts_api == zpl::TS_API_FILE {
+                    continue;
+                }
+
                 let ts_provider_attrs =
                     match config.get(&format!("/trusted_services/{ts_name}/provider")) {
                         Some(ConfigItem::AttrList(attrs)) => vec_to_attributes(&attrs)?,
@@ -1043,9 +1053,11 @@ impl Weaver {
     ) -> Result<(), CompilationError> {
         self.resolve_trusted_service_providers(config, ctx)?;
 
-        // Copy the used trusted service names into a stand alone vector to avoid
-        // holding an immutable ref to self in the following loop.
-        let used_trusted_service_names = self.wctx.used_trusted_services.clone();
+        // Copy the used trusted service names into a stand alone, sorted vector: it avoids
+        // holding an immutable ref to self in the loop below and gives deterministic weave order.
+        let mut used_trusted_service_names: Vec<String> =
+            self.wctx.used_trusted_services.iter().cloned().collect();
+        used_trusted_service_names.sort();
 
         for ts_name in used_trusted_service_names {
             if ts_name == zpl::DEFAULT_TRUSTED_SERVICE_ID {
@@ -1055,6 +1067,43 @@ impl Weaver {
             let ts_api = config
                 .must_get(&format!("/trusted_services/{ts_name}/api"))
                 .to_string();
+
+            // Return mappings and expiration are common to every trusted-service API.
+            let ts_returns_attrs =
+                config.must_get_attr_mappings(&format!("/trusted_services/{ts_name}/attributes"));
+            let expiration_seconds =
+                config.must_get_u32(&format!("/trusted_services/{ts_name}/expiration_seconds"));
+
+            // A `file` service has no network presence (no client/vs interface, provider, cert, or
+            // protocol). It is offered by the Visa Service (vs.zpr) itself, so it lands in the VS
+            // join policy via the ServiceType::Trusted path with an empty endpoint list, and gets
+            // no communication policy.
+            if ts_api == zpl::TS_API_FILE {
+                let vs_cn_attr = Attribute::tuple(zpl::KATTR_CN)
+                    .single()
+                    .value(zpl::VISA_SERVICE_CN)
+                    .build()?;
+                self.fabric
+                    .add_trusted_service(
+                        &ts_name,
+                        None,
+                        &ts_api,
+                        &[vs_cn_attr],
+                        None,
+                        None,
+                        ts_returns_attrs,
+                        Vec::new(),
+                        expiration_seconds,
+                    )
+                    .map_err(|e| {
+                        CompilationError::ConfigError(format!(
+                            "error adding trusted service: {}",
+                            e
+                        ))
+                    })?;
+                continue;
+            }
+
             let client_svc = config
                 .must_get(&format!("/trusted_services/{ts_name}/client_service"))
                 .to_string();
@@ -1086,21 +1135,11 @@ impl Weaver {
             let vs_svc_protocol =
                 self.check_ts_components(config, ctx, &ts_name, &client_svc, &vs_svc, &ts_api)?;
 
-            // The trusted service must return some attributes, and may return some identity attributes.
-            let ts_returns_attrs =
-                match config.get(&format!("/trusted_services/{ts_name}/attributes")) {
-                    Some(ConfigItem::AttributeMap(map)) => map,
-                    _ => {
-                        return Err(CompilationError::ConfigError(format!(
-                            "trusted service {} missing return attributes",
-                            ts_name
-                        )));
-                    }
-                };
+            // The trusted service may return some identity attributes.
             let ts_identity_attrs =
                 match config.get(&format!("/trusted_services/{ts_name}/id_attributes")) {
-                    Some(ConfigItem::KeySet(attrs)) => Some(attrs),
-                    _ => None,
+                    Some(ConfigItem::KeySet(attrs)) => attrs,
+                    _ => Vec::new(),
                 };
 
             if vs_svc_protocol.is_none() {
@@ -1112,13 +1151,14 @@ impl Weaver {
             self.fabric
                 .add_trusted_service(
                     &ts_name,
-                    &vs_svc_protocol.unwrap(),
+                    Some(&vs_svc_protocol.unwrap()),
                     &ts_api,
                     &ts_provider_attrs,
                     ts_cert,
-                    &client_svc,
-                    Some(ts_returns_attrs),
+                    Some(&client_svc),
+                    ts_returns_attrs,
                     ts_identity_attrs,
+                    expiration_seconds,
                 )
                 .map_err(|e| {
                     CompilationError::ConfigError(format!("error adding trusted service: {}", e))
@@ -1519,11 +1559,20 @@ mod test {
 
         let fsvc = &w.fabric.services[0];
         assert_eq!(fsvc.fabric_id, "bas");
-        let return_attrs = fsvc.returns_attrs.as_ref().unwrap();
+        let ts = fsvc.trusted_service.as_ref().unwrap();
+        let return_attrs = &ts.returns_attrs;
         assert_eq!(return_attrs.len(), 2);
-        assert!(return_attrs["id"].to_schema_string() == "user.id");
-        assert!(return_attrs["email"].to_schema_string() == "user.email");
-        let id_attrs = fsvc.identity_attrs.as_ref().unwrap();
+        let spec = |k: &str| {
+            return_attrs
+                .iter()
+                .find(|m| m.service_attr_key == k)
+                .unwrap()
+                .attr
+                .to_schema_string()
+        };
+        assert_eq!(spec("id"), "user.id");
+        assert_eq!(spec("email"), "user.email");
+        let id_attrs = &ts.identity_attrs;
         assert_eq!(id_attrs.len(), 1);
         assert!(id_attrs.contains(&String::from("id")));
     }
@@ -1561,5 +1610,110 @@ mod test {
                 .used_trusted_services
                 .contains(zpl::DEFAULT_TRUSTED_SERVICE_ID)
         );
+    }
+
+    #[test]
+    fn test_file_trusted_service_used_only() {
+        // Two file services; only one is referenced by the (simulated) ZPL.
+        let cfg = r#"
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["device.zpr.adapter.cn", "fee"]]
+
+        [trusted_services.used_fs]
+        api = "file"
+        returns_attributes = ["a -> user.usedattr"]
+
+        [trusted_services.unused_fs]
+        api = "file"
+        returns_attributes = ["b -> user.unusedattr"]
+        "#;
+        let ctx = CompilationCtx::default();
+        let config = ConfigApi::new_from_toml_content(cfg, &env::temp_dir(), &ctx)
+            .expect("failed to parse config");
+
+        let mut w = Weaver::new(WeavingContext::default());
+
+        // Referencing user.usedattr marks only used_fs as in-use.
+        let attr = Attribute::tuple("user.usedattr")
+            .single()
+            .value("x")
+            .build()
+            .unwrap();
+        let resolved = w
+            .resolve_attributes(&[attr], &config)
+            .expect("attr should resolve");
+        assert_eq!(resolved.len(), 1);
+        assert!(w.wctx.used_trusted_services.contains("used_fs"));
+        assert!(!w.wctx.used_trusted_services.contains("unused_fs"));
+
+        // Only the used file service is woven into the fabric; the unused one is dropped.
+        w.add_trusted_services(&config, &ctx)
+            .expect("add_trusted_services");
+        let trusted: Vec<&str> = w
+            .fabric
+            .services
+            .iter()
+            .filter(|s| matches!(s.service_type, ServiceType::Trusted(_)))
+            .map(|s| s.fabric_id.as_str())
+            .collect();
+        assert_eq!(trusted, vec!["used_fs"]);
+    }
+
+    #[test]
+    fn test_trusted_service_transitive_use() {
+        // `outer` is referenced directly; its provider attribute is vouched for by `inner`,
+        // so `inner` must be discovered transitively and woven too.
+        let cfg = r#"
+        [nodes.n0]
+        zpr_address = "fd5a:5052:90de::1"
+        provider = [["device.zpr.adapter.cn", "fee"]]
+
+        [trusted_services.inner]
+        api = "validation/2"
+        provider = [["device.zpr.adapter.cn", "fee"]]
+        returns_attributes = ["ia -> user.innerattr"]
+
+        [trusted_services.outer]
+        api = "validation/2"
+        provider = [["user.innerattr", "someval"]]
+        returns_attributes = ["oa -> user.outerattr"]
+
+        [services.inner-vs]
+        protocol = "zpr-validation2"
+        port = 3999
+
+        [services.outer-vs]
+        protocol = "zpr-validation2"
+        port = 3998
+        "#;
+        let ctx = CompilationCtx::default();
+        let config = ConfigApi::new_from_toml_content(cfg, &env::temp_dir(), &ctx)
+            .expect("failed to parse config");
+
+        let mut w = Weaver::new(WeavingContext::default());
+        // Reference an attribute only `outer` provides.
+        let attr = Attribute::tuple("user.outerattr")
+            .single()
+            .value("y")
+            .build()
+            .unwrap();
+        w.resolve_attributes(&[attr], &config)
+            .expect("attr should resolve");
+        assert!(w.wctx.used_trusted_services.contains("outer"));
+        assert!(!w.wctx.used_trusted_services.contains("inner"));
+
+        // Weaving discovers `inner` transitively through `outer`'s provider attribute.
+        w.add_trusted_services(&config, &ctx)
+            .expect("add_trusted_services");
+        let mut trusted: Vec<&str> = w
+            .fabric
+            .services
+            .iter()
+            .filter(|s| matches!(s.service_type, ServiceType::Trusted(_)))
+            .map(|s| s.fabric_id.as_str())
+            .collect();
+        trusted.sort();
+        assert_eq!(trusted, vec!["inner", "outer"]);
     }
 }
