@@ -1,9 +1,12 @@
 use bytes::Bytes;
 use std::env;
+use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zplc::compilation::{CompilationBuilder, OutputFormat};
 use zplc::dumpv2::dump_v2;
+use zpr::policy::v1 as policy_capnp;
+use zpr::policy_types::TrustedService;
 
 fn get_zpl_dir() -> PathBuf {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -238,4 +241,221 @@ fn can_compile_misc_test_policies() {
             }
         }
     }
+}
+
+// ---- issue #138: `file` trusted services — end-to-end + regression ----
+
+/// Compile `<stem>.zpl` (with its companion `<stem>.zplc`) to a V2 policy and return the inner
+/// policy bytes (already unwrapped from the container).
+fn compile_policy_bytes(stem: &str, temp: &TempDir) -> Vec<u8> {
+    let path = get_zpl_dir().join(format!("{stem}.zpl"));
+    let cb = CompilationBuilder::new(path)
+        .output_format(OutputFormat::V2)
+        .output_directory(&temp.path);
+    let mut comp = cb.build();
+    comp.compile()
+        .unwrap_or_else(|e| panic!("failed to compile {stem}.zpl: {e}"));
+    let encoded = std::fs::read(&comp.output_file).expect("read binary policy");
+    let container_rdr = capnp::serialize::read_message(
+        &mut Cursor::new(encoded),
+        capnp::message::ReaderOptions::new(),
+    )
+    .expect("decode container");
+    let container = container_rdr
+        .get_root::<policy_capnp::policy_container::Reader>()
+        .expect("container root");
+    container.get_policy().expect("policy bytes").to_vec()
+}
+
+/// Total endpoints across every join-policy Service with the given id, asserting each such
+/// Service is `Trusted(expected_api)`.
+fn trusted_service_endpoint_count(
+    policy: &policy_capnp::policy::Reader,
+    id: &str,
+    expected_api: &str,
+) -> usize {
+    let mut count = 0usize;
+    for jp in policy.get_join_policies().unwrap().iter() {
+        let provides = match jp.get_provides() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        for s in provides.iter() {
+            if s.get_id().unwrap().to_str().unwrap() == id {
+                match s.get_kind().which().unwrap() {
+                    policy_capnp::service::kind::Which::Trusted(n) => {
+                        assert_eq!(n.unwrap().to_str().unwrap(), expected_api);
+                    }
+                    _ => panic!("service {id} must be Trusted({expected_api})"),
+                }
+                count += s.get_endpoints().unwrap().len() as usize;
+            }
+        }
+    }
+    count
+}
+
+fn decode_records(policy: &policy_capnp::policy::Reader) -> Vec<TrustedService> {
+    policy
+        .get_trusted_services()
+        .unwrap()
+        .iter()
+        .map(|r| TrustedService::try_from(r).expect("decode trusted service record"))
+        .collect()
+}
+
+fn mappings(ts: &TrustedService) -> Vec<(&str, &str)> {
+    ts.returns_attrs
+        .iter()
+        .map(|m| (m.service_attr_key.as_str(), m.zpr_attr_spec.as_str()))
+        .collect()
+}
+
+#[test]
+fn test_file_trusted_service_end_to_end() {
+    let temp = TempDir::new("file-e2e");
+    let pbytes = compile_policy_bytes("test-file", &temp);
+    let rdr = capnp::serialize::read_message(
+        &mut Cursor::new(pbytes.as_slice()),
+        capnp::message::ReaderOptions::new(),
+    )
+    .unwrap();
+    let policy = rdr.get_root::<policy_capnp::policy::Reader>().unwrap();
+
+    // --- trustedServices: deterministic order, bas + attrfile once each ---
+    assert!(
+        policy.has_trusted_services(),
+        "policy must have trustedServices"
+    );
+    let records = decode_records(&policy);
+    let ids: Vec<&str> = records.iter().map(|r| r.service_id.as_str()).collect();
+    assert_eq!(ids, vec!["attrfile", "bas"]);
+
+    // attrfile: expiration 3600, TOML-ordered mappings, empty identity.
+    let attrfile = records.iter().find(|r| r.service_id == "attrfile").unwrap();
+    assert_eq!(attrfile.expiration_seconds, 3600);
+    assert!(attrfile.identity_attrs.is_empty());
+    assert_eq!(
+        mappings(attrfile),
+        vec![("hair_color", "user.hair_color"), ("lazy", "#user.lazy")]
+    );
+
+    // bas validation/2 record retained (default expiration + identity preserved).
+    let bas = records.iter().find(|r| r.service_id == "bas").unwrap();
+    assert_eq!(bas.expiration_seconds, 0);
+    assert_eq!(bas.identity_attrs, vec!["bas_id".to_string()]);
+
+    // --- attrfile join Service: Trusted("file"), zero endpoints, selected by cn = vs.zpr ---
+    let mut attrfile_svc_found = false;
+    for jp in policy.get_join_policies().unwrap().iter() {
+        let provides = match jp.get_provides() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let svc = match provides
+            .iter()
+            .find(|s| s.get_id().unwrap().to_str().unwrap() == "attrfile")
+        {
+            Some(s) => s,
+            None => continue,
+        };
+        attrfile_svc_found = true;
+
+        // The join policy is selected by exactly device.zpr.adapter.cn EQ vs.zpr.
+        let match_exprs = jp.get_match().unwrap();
+        assert_eq!(match_exprs.len(), 1);
+        let e = match_exprs.get(0);
+        assert_eq!(
+            e.get_key().unwrap().to_str().unwrap(),
+            "device.zpr.adapter.cn"
+        );
+        assert!(matches!(e.get_op().unwrap(), policy_capnp::AttrOp::Eq));
+        let vals: Vec<&str> = e
+            .get_value()
+            .unwrap()
+            .iter()
+            .map(|v| v.unwrap().to_str().unwrap())
+            .collect();
+        assert_eq!(vals, vec!["vs.zpr"]);
+
+        // The service itself is Trusted("file") with zero endpoints.
+        match svc.get_kind().which().unwrap() {
+            policy_capnp::service::kind::Which::Trusted(n) => {
+                assert_eq!(n.unwrap().to_str().unwrap(), "file")
+            }
+            _ => panic!("attrfile must be Trusted(file)"),
+        }
+        assert_eq!(
+            svc.get_endpoints().unwrap().len(),
+            0,
+            "file service must have zero endpoints"
+        );
+    }
+    assert!(attrfile_svc_found, "attrfile join Service not found");
+
+    // --- no communication policy for the file service ---
+    if policy.has_com_policies() {
+        for cp in policy.get_com_policies().unwrap().iter() {
+            assert_ne!(
+                cp.get_service_id().unwrap().to_str().unwrap(),
+                "attrfile",
+                "file service must have no communication policy"
+            );
+        }
+    }
+
+    // --- validation/2 (bas) service unchanged: retains its real endpoint ---
+    assert!(
+        trusted_service_endpoint_count(&policy, "bas", "validation/2") > 0,
+        "validation/2 service must retain its endpoint"
+    );
+}
+
+#[test]
+fn test_validation2_regression() {
+    // test-bas is validation/2-only; the sole new artifact is the `bas` trustedServices record.
+    // Its join/communication policies must be unchanged by the feature.
+    let temp = TempDir::new("val2-regression");
+    let pbytes = compile_policy_bytes("test-bas", &temp);
+    let rdr = capnp::serialize::read_message(
+        &mut Cursor::new(pbytes.as_slice()),
+        capnp::message::ReaderOptions::new(),
+    )
+    .unwrap();
+    let policy = rdr.get_root::<policy_capnp::policy::Reader>().unwrap();
+
+    // Exactly one record — the validation/2 `bas` service — with its mappings intact.
+    let records = decode_records(&policy);
+    let ids: Vec<&str> = records.iter().map(|r| r.service_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["bas"],
+        "only the validation/2 record should be emitted"
+    );
+    let bas = &records[0];
+    assert_eq!(bas.expiration_seconds, 0);
+    assert_eq!(bas.identity_attrs, vec!["bas_id".to_string()]);
+    assert_eq!(
+        mappings(bas),
+        vec![
+            ("tint", "device.tint"),
+            ("color", "user.color"),
+            ("government", "#user.government"),
+            ("govpc", "#device.government"),
+            ("clearance", "user.clearance"),
+            ("classified", "#service.classified"),
+            ("roles", "user.role{}"),
+            ("bas_id", "user.bas_id"),
+        ]
+    );
+
+    // Join policy for bas still carries its real validation/2 endpoint.
+    assert!(
+        trusted_service_endpoint_count(&policy, "bas", "validation/2") > 0,
+        "validation/2 endpoint missing"
+    );
+
+    // Communication policies are still emitted (join/comm behavior unchanged).
+    assert!(policy.has_com_policies());
+    assert!(policy.get_com_policies().unwrap().len() > 0);
 }

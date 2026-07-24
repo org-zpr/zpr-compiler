@@ -8,10 +8,11 @@ use zpr::write_to::WriteTo;
 
 use crate::compiler::get_compiler_version;
 use crate::errors::CompilationError;
-use crate::policywriter::{PolicyContainer, PolicyWriter, TSType};
+use crate::policywriter::{PolicyContainer, PolicyWriter};
 use crate::protocols::{IcmpFlowType, PortSpec, Protocol, ProtocolDetails};
 use crate::ptypes::Signal;
 
+use zpr::policy_types::TrustedService;
 use zpr::policy_types::write_attributes;
 use zpr::policy_types::{AttrExp, AttrOp, Attribute, PFlags};
 use zpr::policy_types::{JoinPolicy, Scope, ScopeFlag};
@@ -27,6 +28,7 @@ pub struct PolicyBinaryV2 {
     bootstrap_keys: Vec<BootstrapKey>,
     join_policies: JPBuilder,
     topology: Vec<Peering>,
+    trusted_services: Vec<TrustedService>,
 }
 
 #[allow(dead_code)]
@@ -259,14 +261,18 @@ impl PolicyWriter for PolicyBinaryV2 {
         svc_attrs: &[Attribute],
         svc_id: &str,
         stype: &ServiceType,
-        endpoint: &Protocol,
+        endpoint: Option<&Protocol>,
         flags: Option<PFlags>,
     ) {
         // assumption: service type is set.
         if stype == &ServiceType::Undefined {
             panic!("service cannot have undefined type");
         }
-        let endpoints = new_scope_from_protocol(endpoint);
+        // No protocol -> no endpoints (a `file` trusted service).
+        let endpoints = match endpoint {
+            Some(prot) => new_scope_from_protocol(prot),
+            None => Vec::new(),
+        };
         let service = Service {
             id: svc_id.into(),
             endpoints,
@@ -349,16 +355,8 @@ impl PolicyWriter for PolicyBinaryV2 {
         self.topology.push(peering);
     }
 
-    fn write_trusted_service(
-        &mut self,
-        _svc_id: &str,
-        _ts_type: TSType,
-        _query_uri: Option<&str>,
-        _validate_uri: Option<&str>,
-        _returns_attrs: Option<&HashMap<String, Attribute>>,
-        _identity_attrs: Option<&Vec<String>>,
-    ) {
-        // nop
+    fn write_trusted_service_record(&mut self, ts: TrustedService) {
+        self.trusted_services.push(ts);
     }
 
     fn print_stats(&self) {
@@ -461,10 +459,22 @@ impl PolicyWriter for PolicyBinaryV2 {
         }
 
         if !self.topology.is_empty() {
-            let mut topl = policy.init_topology(self.topology.len() as u32);
+            let mut topl = policy.reborrow().init_topology(self.topology.len() as u32);
             for (i, peering) in self.topology.iter().enumerate() {
                 let mut p_builder = topl.reborrow().get(i as u32);
                 peering.write_to(&mut p_builder);
+            }
+        }
+
+        // Emit the shared trusted-service records, sorted by service_id for deterministic output.
+        if !self.trusted_services.is_empty() {
+            let mut ts_records = self.trusted_services.clone();
+            ts_records.sort_by(|a, b| a.service_id.cmp(&b.service_id));
+            let mut ts_list = policy
+                .reborrow()
+                .init_trusted_services(ts_records.len() as u32);
+            for (i, ts) in ts_records.iter().enumerate() {
+                ts.write_to(&mut ts_list.reborrow().get(i as u32));
             }
         }
 

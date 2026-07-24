@@ -5,7 +5,6 @@
 use base64::prelude::*;
 use colored::Colorize;
 use core::fmt;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::config::{self, Config};
@@ -13,7 +12,7 @@ use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, load_asn1data_from_pem, load_rsa_public_key};
 use crate::errors::CompilationError;
 use crate::protocols::{IanaProtocol, IcmpFlowType, PortSpec, Protocol};
-use zpr::policy_types::Attribute;
+use zpr::policy_types::AttrMapping;
 
 /// ConfigApi wraps a pseudo RESTFUL api around the config data.
 /// Access is visa the [ConfigApi::get] method.
@@ -112,7 +111,11 @@ pub enum ConfigItem {
     /// A set of key values (eg, a set of node IDs)
     KeySet(Vec<String>),
 
-    AttributeMap(HashMap<String, Attribute>),
+    /// An unsigned 32-bit value (eg, a trusted service's expiration_seconds).
+    U32(u32),
+
+    /// Ordered trusted-service return-attribute mappings.
+    AttrMappings(Vec<AttrMapping>),
 
     /// A set of attributes as key value pairs
     AttrList(Vec<(String, String)>),
@@ -142,16 +145,17 @@ impl fmt::Display for ConfigItem {
                 }
                 write!(f, "]")
             }
-            ConfigItem::AttributeMap(attrs) => {
+            ConfigItem::U32(n) => write!(f, "{}", n),
+            ConfigItem::AttrMappings(mappings) => {
                 let mut first = true;
                 write!(f, "[")?;
-                for (k, v) in attrs {
+                for m in mappings {
                     if first {
                         first = false;
                     } else {
                         write!(f, ", ")?;
                     }
-                    write!(f, "{}: {}", k, v.to_schema_string())?;
+                    write!(f, "{}: {}", m.service_attr_key, m.zpr_attr_spec)?;
                 }
                 write!(f, "]")
             }
@@ -401,10 +405,17 @@ impl ConfigApi {
         }
     }
 
-    pub fn must_get_attr_map(&self, key: &str) -> HashMap<String, Attribute> {
+    pub fn must_get_u32(&self, key: &str) -> u32 {
         match self.must_get(key) {
-            ConfigItem::AttributeMap(map) => map,
-            _ => panic!("not an AttributeMap"),
+            ConfigItem::U32(v) => v,
+            _ => panic!("not a U32"),
+        }
+    }
+
+    pub fn must_get_attr_mappings(&self, key: &str) -> Vec<AttrMapping> {
+        match self.must_get(key) {
+            ConfigItem::AttrMappings(mappings) => mappings,
+            _ => panic!("not AttrMappings"),
         }
     }
 
@@ -572,10 +583,10 @@ impl ConfigApi {
                 Some(provider) => Some(ConfigItem::AttrList(provider.clone())),
                 None => None,
             },
-            // TODO: Just like when parsing config, we need a notation to express the attribute properties.
-            // Eg, multi-value or tag, required or optional.
-            // For now we assume all attributes are tuple-type.
-            "attributes" => Some(ConfigItem::AttributeMap(svc.returns_attrs.clone())),
+            "expiration_seconds" => Some(ConfigItem::U32(svc.expiration_seconds)),
+            // Ordered service-key -> attribute-spec mappings; consumers read `mapping.attr`
+            // for the decoded form.
+            "attributes" => Some(ConfigItem::AttrMappings(svc.returns_attrs.clone())),
             "id_attributes" => Some(ConfigItem::KeySet(svc.identity_attrs.clone())),
             _ => panic!("unknown key {}", key),
         }

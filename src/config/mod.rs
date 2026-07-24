@@ -14,7 +14,7 @@ use crate::crypto::sha256;
 use crate::errors::CompilationError;
 use crate::protocols::{IcmpFlowType, PortSpec, Protocol, ProtocolError, ZPR_L7_BUILTINS};
 use crate::zpl;
-use zpr::policy_types::Attribute;
+use zpr::policy_types::{AttrMapping, parse_attribute_mapping};
 
 mod node_link;
 mod protocol;
@@ -24,7 +24,7 @@ mod trusted_service;
 use node_link::{parse_link, parse_node, parse_substrate_addrs};
 use protocol::parse_protocol;
 use service::parse_service;
-use trusted_service::parse_trusted_service;
+use trusted_service::{parse_trusted_service, validate_ts_id};
 
 /// Helper to create a ConfigError. Works with a single string (or &str) argument
 /// (really anything that has a to_string function), or with two args: a format string and arguments.
@@ -144,15 +144,15 @@ pub struct Bootstrap {
 }
 
 /// Trusted Service table ("trusted_services")
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TrustedService {
     pub id: String,
     pub api: String,
+    pub expiration_seconds: u32, // 0 = service/VS default
     pub service: Option<String>, // Name of service for VS operations
     pub client: Option<String>,  // Name of service for client operations
     pub cert_path: Option<PathBuf>,
-    pub returns_attrs: HashMap<String, Attribute>,
+    pub returns_attrs: Vec<AttrMapping>, // ordered service-key -> attribute mappings
     pub identity_attrs: Vec<String>,
     pub provider: Option<Vec<(String, String)>>, // required for non-default
 }
@@ -490,6 +490,7 @@ impl ConfigParse {
         let mut trusted_services = Vec::new();
         let mut default_creates = 0;
         for (ts_id, v) in ts {
+            validate_ts_id(ts_id)?;
             let ts = parse_trusted_service(
                 ts_id,
                 v.as_table()
@@ -505,13 +506,14 @@ impl ConfigParse {
             trusted_services.push(ts);
         }
         if default_creates == 0 {
-            let returns = HashMap::from([(
-                zpl::KATTR_CN.to_string(),
-                Attribute::tuple(zpl::KATTR_CN).single().build().unwrap(),
-            )]);
+            let returns = vec![
+                parse_attribute_mapping(&format!("{} -> {}", zpl::KATTR_CN, zpl::KATTR_CN))
+                    .unwrap(),
+            ];
             let ts = TrustedService {
                 id: zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string(),
                 api: zpl::DEFAULT_TRUSTED_SERVICE_API.to_string(),
+                expiration_seconds: 0,
                 cert_path: None,
                 returns_attrs: returns,
                 identity_attrs: vec![zpl::KATTR_CN.to_string()],
@@ -1060,10 +1062,8 @@ mod test {
         assert_eq!(ts.api, zpl::DEFAULT_TRUSTED_SERVICE_API);
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
         assert_eq!(ts.returns_attrs.len(), 1);
-        assert_eq!(
-            ts.returns_attrs[zpl::KATTR_CN].zpl_key(),
-            "device.zpr.adapter.cn"
-        );
+        assert_eq!(ts.returns_attrs[0].service_attr_key, zpl::KATTR_CN);
+        assert_eq!(ts.returns_attrs[0].attr.zpl_key(), "device.zpr.adapter.cn");
         assert_eq!(ts.identity_attrs.len(), 1);
         assert_eq!(ts.identity_attrs[0], "device.zpr.adapter.cn");
     }
@@ -1113,8 +1113,16 @@ mod test {
         assert_eq!(ts.api, "validation/2");
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
         assert_eq!(ts.returns_attrs.len(), 2);
-        assert_eq!(ts.returns_attrs["a"].zpl_key(), "user.a");
-        assert_eq!(ts.returns_attrs["c"].zpl_key(), "user.c");
+        let get = |k: &str| {
+            ts.returns_attrs
+                .iter()
+                .find(|m| m.service_attr_key == k)
+                .unwrap()
+                .attr
+                .zpl_key()
+        };
+        assert_eq!(get("a"), "user.a");
+        assert_eq!(get("c"), "user.c");
         assert_eq!(ts.identity_attrs.len(), 1);
         assert!(ts.identity_attrs[0] == "c");
     }

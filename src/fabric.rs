@@ -9,7 +9,7 @@ use std::net::IpAddr;
 use crate::errors::CompilationError;
 use crate::protocols::{PortSpec, Protocol};
 use crate::ptypes::Signal;
-use zpr::policy_types::{Attribute, ServiceType};
+use zpr::policy_types::{AttrMapping, Attribute, ServiceType, TrustedService};
 
 /// A service oriented view of the network.
 #[derive(Debug, Clone, Default)]
@@ -22,7 +22,6 @@ pub struct Fabric {
     pub links: Vec<FabricLink>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FabricService {
     pub config_id: String, // Service name as specified in configuration and ZPL.
@@ -33,8 +32,21 @@ pub struct FabricService {
     pub service_type: ServiceType,
     pub certificate: Option<Vec<u8>>, // Certificate for this (trusted) service
     pub client_service_name: Option<String>, // For an AUTH service, the name of the optional client service.
-    pub returns_attrs: Option<HashMap<String, Attribute>>, // list of attribute keys (with domains) -- only for trusted services
-    pub identity_attrs: Option<Vec<String>>, // list of attribute keys (with domains) -- only for trusted services
+    pub trusted_service: Option<TrustedService>, // Shared metadata record -- only for trusted services
+}
+
+/// Parameters for [`Fabric::add_trusted_service`].
+#[derive(Debug, Clone, Default)]
+pub struct TrustedServiceSpec {
+    pub id: String,
+    pub api: String,
+    pub protocol: Option<Protocol>,
+    pub provider_attrs: Vec<Attribute>,
+    pub certificate: Option<Vec<u8>>,
+    pub client_service_name: Option<String>,
+    pub returns_attrs: Vec<AttrMapping>,
+    pub identity_attrs: Vec<String>,
+    pub expiration_seconds: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -246,37 +258,39 @@ impl Fabric {
         &self.bootstrap_records
     }
 
-    /// You must add client services associated with the trusted service before adding a trusted service.
+    /// You must add client services associated with the trusted service before
+    /// adding a trusted service.
+    ///
+    /// Builds the shared [`TrustedService`] metadata record from the ordered
+    /// `returns_attrs`, `identity_attrs`, and `expiration_seconds` (see [TrustedServiceSpec]).
     pub fn add_trusted_service(
         &mut self,
-        id: &str,
-        protocol: &Protocol,
-        api: &str,
-        provider_attrs: &[Attribute],
-        certificate: Option<Vec<u8>>,
-        client_service_name: &str,
-        returns_attrs: Option<HashMap<String, Attribute>>,
-        identity_attrs: Option<Vec<String>>,
+        spec: TrustedServiceSpec,
     ) -> Result<(), CompilationError> {
         for s in &self.services {
-            if s.config_id == id {
+            if s.config_id == spec.id {
                 return Err(CompilationError::BuildError(format!(
-                    "cannot add duplicate trusted service: already exists: {id}"
+                    "cannot add duplicate trusted service: already exists: {}",
+                    spec.id
                 )));
             }
         }
 
         let fs = FabricService {
-            config_id: id.to_string(),
-            fabric_id: id.to_string(),
-            protocol: Some(protocol.clone()),
-            provider_attrs: provider_attrs.to_vec(),
+            config_id: spec.id.clone(),
+            fabric_id: spec.id.clone(),
+            protocol: spec.protocol,
+            provider_attrs: spec.provider_attrs,
             client_policies: Vec::new(),
-            service_type: ServiceType::Trusted(api.to_string()),
-            certificate,
-            client_service_name: Some(client_service_name.to_string()),
-            returns_attrs: returns_attrs,
-            identity_attrs: identity_attrs,
+            service_type: ServiceType::Trusted(spec.api),
+            certificate: spec.certificate,
+            client_service_name: spec.client_service_name,
+            trusted_service: Some(TrustedService {
+                service_id: spec.id,
+                expiration_seconds: spec.expiration_seconds,
+                returns_attrs: spec.returns_attrs,
+                identity_attrs: spec.identity_attrs,
+            }),
         };
         self.services.push(fs);
         Ok(())
@@ -342,8 +356,7 @@ impl Fabric {
             service_type: stype,
             certificate: None,
             client_service_name: None,
-            returns_attrs: None,
-            identity_attrs: None,
+            trusted_service: None,
         };
         self.services.push(fs);
         Ok(fabric_id)
@@ -390,8 +403,7 @@ impl Fabric {
             service_type: ServiceType::BuiltIn,
             certificate: None,
             client_service_name: None,
-            returns_attrs: None,
-            identity_attrs: None,
+            trusted_service: None,
         };
         self.services.push(fs);
         Ok(fabric_id)

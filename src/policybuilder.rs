@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::context::CompilationCtx;
 use crate::errors::CompilationError;
 use crate::fabric::Fabric;
-use crate::policywriter::{PolicyWriter, TSType};
+use crate::policywriter::PolicyWriter;
 use crate::protocols::{PortSpec, Protocol};
 use crate::zpl;
 use zpr::policy_types::{Attribute, PFlags, ServiceType};
@@ -108,7 +108,7 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
         self.set_topology(fabric)?;
         self.set_default_auth(fabric, ctx)?;
         self.set_bootstrap(fabric, ctx)?;
-        self.set_auth_services(fabric, ctx)?;
+        self.set_trusted_service_records(fabric, ctx)?;
 
         if self.verbose {
             self.policy_writer.print_stats();
@@ -130,84 +130,42 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
         Ok(())
     }
 
-    fn set_auth_services(
+    /// Emit one shared `TrustedService` metadata record per woven `file` or
+    /// `validation/2` service. There is no record for the builtin `default`
+    /// service (it is not a fabric `Trusted` service) nor for the validation/2
+    /// adapter-facing authentication service (it is tied to its vs-facing
+    /// `validation/2` service which does get a record). Validation/2 network
+    /// join/communication policies are also emitted through the normal fabric
+    /// paths (`set_connects`/`set_policies`).
+    fn set_trusted_service_records(
         &mut self,
         fabric: &Fabric,
         _ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         for svc in &fabric.services {
-            let apiname: String = match svc.service_type {
-                ServiceType::Trusted(ref t) => t.clone(),
-                _ => {
-                    continue; // not a trusted service
-                }
-            };
+            match svc.service_type {
+                ServiceType::Trusted(_) => {}
+                _ => continue, // not a trusted service
+            }
 
-            if apiname != zpl::TS_API_V2 {
-                return Err(CompilationError::ConfigError(format!(
-                    "trusted service {}: only 'validation/2' api supported, not '{}'",
-                    svc.config_id, apiname
+            let record = svc.trusted_service.as_ref().ok_or_else(|| {
+                CompilationError::BuildError(format!(
+                    "trusted service {} is missing its metadata record",
+                    svc.fabric_id
+                ))
+            })?;
+
+            // Trusted-service IDs are restricted, so the fabric id is used unchanged for both the
+            // join-policy `Service.id` and `TrustedService.service_id`; they must be identical.
+            if svc.fabric_id != record.service_id {
+                return Err(CompilationError::BuildError(format!(
+                    "trusted service fabric id '{}' does not match record service_id '{}'",
+                    svc.fabric_id, record.service_id
                 )));
             }
 
-            if svc.client_service_name.is_none() {
-                return Err(CompilationError::ConfigError(format!(
-                    "trusted service {}: missing client facing service name",
-                    svc.config_id
-                )));
-            }
-
-            // The trusted service actually has two addresses.
-            // The vs-address which is service named <id>-vs
-            // And the adapter auth address whic is at <id>-<client-service-name>
-
-            // The VS facing service details have been copied out of config.
-
-            let canonical_svc_id = self.get_canonical_service_name(&svc.config_id);
-
-            // pretty sure it is an error if config_id != fabric_id in these cases.
-            // TODO: Not sure why we are using config_id here and not fabric_id.
-            if svc.config_id != svc.fabric_id {
-                panic!(
-                    "logic error - config_id '{}' is not same as fabric id '{}'",
-                    svc.config_id, svc.fabric_id
-                );
-            }
-
-            let (l7p, port) = svc.get_l7protocol_and_port()?;
-            self.policy_writer.write_trusted_service(
-                &canonical_svc_id,
-                TSType::VsAuth,
-                None,                                       // query uri
-                Some(&format!("{}://[::1]:{}", l7p, port)), // validate uri
-                svc.returns_attrs.as_ref(),
-                svc.identity_attrs.as_ref(),
-            );
-
-            // The adapter facing auth service (if present) we register as a new-style "authentication" service.
-            if let Some(asvc) = fabric.get_service(svc.client_service_name.as_ref().unwrap()) {
-                // TODO: Not sure why we are using config_id here and not fabric_id.
-                if asvc.config_id != asvc.fabric_id {
-                    panic!(
-                        "logic error - config_id '{}' is not same as fabric id '{}'",
-                        asvc.config_id, asvc.fabric_id
-                    );
-                }
-                let canonical_asvc_id = self.get_canonical_service_name(&asvc.config_id);
-                let (l7p, port) = asvc.get_l7protocol_and_port()?;
-                self.policy_writer.write_trusted_service(
-                    &canonical_asvc_id,
-                    TSType::ActorAuth,
-                    None, // query uri
-                    Some(&format!("{}://[::1]:{}", l7p, port)),
-                    None, // not set for adapter facing
-                    None, // not set for adapter facing
-                );
-            } else {
-                // Not found. This means that either the service has no adapter facing offering
-                // (ie, it is a query only service). Or the user did not add any ZPL allowing
-                // access -- which is warned about in a previous parsing step.
-            }
+            self.policy_writer
+                .write_trusted_service_record(record.clone());
         }
         Ok(())
     }
@@ -292,17 +250,25 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                         &svc.provider_attrs,
                         &svc_id,
                         &svc.service_type,
-                        &svc.protocol.as_ref().unwrap(),
+                        Some(svc.protocol.as_ref().expect("service must have a protocol")),
                         flags,
                     )
                 }
 
-                ServiceType::Trusted(_) => {
+                ServiceType::Trusted(ref api) => {
+                    // Only a `file` trusted service may have no protocol; all network-facing
+                    // services must carry one.
+                    if svc.protocol.is_none() && api != zpl::TS_API_FILE {
+                        return Err(CompilationError::BuildError(format!(
+                            "trusted service {} of type '{}' is missing a protocol",
+                            svc.fabric_id, api
+                        )));
+                    }
                     self.policy_writer.write_connect_match_for_provider(
                         &svc.provider_attrs,
                         &svc.fabric_id,
                         &svc.service_type,
-                        &svc.protocol.as_ref().unwrap(),
+                        svc.protocol.as_ref(),
                         None,
                     );
                     if let Some(cert_data) = &svc.certificate {
@@ -333,7 +299,7 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                 &node.provider_attrs,
                 &svc_id,
                 &ServiceType::Regular,
-                &dummy_prot,
+                Some(&dummy_prot),
                 Some(PFlags::node(true)), // TODO: Not all nodes are VS docks
             );
         }

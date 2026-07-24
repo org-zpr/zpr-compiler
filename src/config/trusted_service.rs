@@ -1,10 +1,10 @@
 //! Parser for the `trusted_services` TOML section and its attribute-mapping syntax.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use toml::Table;
-use zpr::policy_types::Attribute;
+use zpr::policy_types::{AttrMapping, parse_attribute_mapping};
 
 use crate::context::CompilationCtx;
 use crate::err_config;
@@ -24,10 +24,27 @@ fn warn_unknown_ts_property(ts: &Table, ctx: &CompilationCtx) -> Result<(), Comp
             "provider" => (),
             "prefix" => (),
             "identity_attributes" => (),
+            "expiration_seconds" => (),
             _ => ctx.warn(&format!(
                 "unknown property '{elem}' detected while parsing trusted_services",
             ))?,
         }
+    }
+    Ok(())
+}
+
+/// Validate a trusted-service TOML id. It must match `[A-Za-z0-9_-]+` so it can be used
+/// unchanged as both a policy `Service.id` and the `<serviceId>.json` filename stem.
+pub(super) fn validate_ts_id(ts_id: &str) -> Result<(), CompilationError> {
+    if ts_id.is_empty()
+        || !ts_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err(err_config!(
+            "trusted_service id '{}' is invalid; must match [A-Za-z0-9_-]+",
+            ts_id
+        ));
     }
     Ok(())
 }
@@ -51,6 +68,110 @@ fn parse_string_array(ts: &Table, key: &str, ctx: &str) -> Result<Vec<String>, C
     Ok(ret)
 }
 
+/// Parse the `expiration_seconds` property: default `0`, must be a non-negative TOML integer
+/// that fits in `u32`. Rejected outright on the builtin `default` service.
+fn parse_expiration_seconds(
+    ts: &Table,
+    ts_id: &str,
+    is_default: bool,
+) -> Result<u32, CompilationError> {
+    if !ts.contains_key("expiration_seconds") {
+        return Ok(0);
+    }
+    if is_default {
+        return Err(err_config!(
+            "default trusted_service does not allow expiration_seconds"
+        ));
+    }
+    // `as_integer` rejects strings, floats, and booleans.
+    let v = ts["expiration_seconds"].as_integer().ok_or(err_config!(
+        "trusted_service {} expiration_seconds must be a non-negative integer",
+        ts_id
+    ))?;
+    if v < 0 {
+        return Err(err_config!(
+            "trusted_service {} expiration_seconds must be non-negative",
+            ts_id
+        ));
+    }
+    u32::try_from(v).map_err(|_| {
+        err_config!(
+            "trusted_service {} expiration_seconds {} exceeds u32 range",
+            ts_id,
+            v
+        )
+    })
+}
+
+/// Parse each `"<service-key> -> <attr-spec>"` string into an ordered `Vec<AttrMapping>`,
+/// rejecting duplicate service keys via a temporary set (no parallel map retained).
+fn parse_return_mappings(
+    ts_id: &str,
+    raw: &[String],
+) -> Result<Vec<AttrMapping>, CompilationError> {
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut out = Vec::new();
+    for ra in raw {
+        let m = parse_attribute_mapping(ra)
+            .map_err(|e| err_config!("trusted_service {}: {}", ts_id, e))?;
+        if !seen.insert(m.service_attr_key.clone()) {
+            return Err(err_config!(
+                "trusted_service {} contains duplicate service attribute name '{}'",
+                ts_id,
+                m.service_attr_key
+            ));
+        }
+        out.push(m);
+    }
+    Ok(out)
+}
+
+/// A `file` service has no network presence: no provider, client/service interfaces, or cert.
+/// It only declares `returns_attributes` (>= 1 mapping) and optional `expiration_seconds`.
+fn parse_file_trusted_service(
+    ts_id: &str,
+    ts: &Table,
+    expiration_seconds: u32,
+) -> Result<TrustedService, CompilationError> {
+    for forbidden in [
+        "identity_attributes",
+        "provider",
+        "client",
+        "service",
+        "cert_path",
+        "prefix",
+    ] {
+        if ts.contains_key(forbidden) {
+            return Err(err_config!(
+                "trusted_service {} with api \"file\" does not allow property '{}'",
+                ts_id,
+                forbidden
+            ));
+        }
+    }
+    if !ts.contains_key("returns_attributes") {
+        return Err(err_config!(
+            "trusted_service {} with api \"file\" requires returns_attributes",
+            ts_id
+        ));
+    }
+    let raw = parse_string_array(ts, "returns_attributes", "trusted_service")?;
+    let returns_attrs = parse_return_mappings(ts_id, &raw)?;
+    if returns_attrs.is_empty() {
+        return Err(err_config!(
+            "trusted_service {} with api \"file\" requires at least one returns_attributes mapping",
+            ts_id
+        ));
+    }
+    Ok(TrustedService {
+        id: ts_id.to_string(),
+        api: zpl::TS_API_FILE.to_string(),
+        expiration_seconds: expiration_seconds,
+        returns_attrs: returns_attrs,
+        ..Default::default()
+    })
+}
+
 // Parse an individual trusted_service table.
 pub(super) fn parse_trusted_service(
     ts_id: &str,
@@ -71,6 +192,18 @@ pub(super) fn parse_trusted_service(
     } else {
         return Err(err_config!("trusted_service {} missing api", ts_id));
     };
+
+    let expiration_seconds = parse_expiration_seconds(ts, ts_id, is_default)?;
+
+    if api == zpl::TS_API_FILE {
+        if is_default {
+            return Err(err_config!(
+                "default trusted_service cannot have api \"file\""
+            ));
+        }
+        return parse_file_trusted_service(ts_id, ts, expiration_seconds);
+    }
+
     let cert_path = if ts.contains_key("cert_path") {
         Some(PathBuf::from(ts["cert_path"].as_str().ok_or(
             err_config!("trusted_service {} cert_path is not a string", ts_id),
@@ -83,13 +216,13 @@ pub(super) fn parse_trusted_service(
         None
     };
 
-    let returns_attrs: Vec<String>;
-    let identity_attrs: Vec<String>;
+    let returns_raw: Vec<String>;
+    let identity_raw: Vec<String>;
     let client_svc: Option<String>;
     let service_svc: Option<String>;
     if !is_default {
-        returns_attrs = parse_string_array(ts, "returns_attributes", "trusted_service")?;
-        identity_attrs = parse_string_array(ts, "identity_attributes", "trusted_service")?;
+        returns_raw = parse_string_array(ts, "returns_attributes", "trusted_service")?;
+        identity_raw = parse_string_array(ts, "identity_attributes", "trusted_service")?;
 
         if ts.contains_key("client") {
             client_svc = Some(
@@ -122,205 +255,210 @@ pub(super) fn parse_trusted_service(
                 "default trusted_service does not allow custom identity_attributes"
             ));
         }
-        returns_attrs = vec![format!("{} -> {}", zpl::KATTR_CN, zpl::KATTR_CN)];
-        identity_attrs = vec![String::from(zpl::KATTR_CN)];
+        returns_raw = vec![format!("{} -> {}", zpl::KATTR_CN, zpl::KATTR_CN)];
+        identity_raw = vec![String::from(zpl::KATTR_CN)];
         client_svc = None;
         service_svc = None;
     }
 
-    let mut returns = HashMap::new();
-    for ra in &returns_attrs {
-        let (service_key_name, zpr_attr) = parse_attribute_mapping(ra)?;
-        if returns.contains_key(&service_key_name) {
-            return Err(err_config!(
-                "trusted_service {} contains duplicate service attribute name '{}'",
-                ts_id,
-                service_key_name
-            ));
-        }
-        returns.insert(service_key_name, zpr_attr);
-    }
+    let returns_attrs = parse_return_mappings(ts_id, &returns_raw)?;
 
-    let mut idents = Vec::new();
-    for ra in &identity_attrs {
+    let mut identity_attrs = Vec::new();
+    for ra in &identity_raw {
         // The ident attribute (for now) must exist in the returns attributes.
-        if !returns.contains_key(ra) {
+        if !returns_attrs.iter().any(|m| &m.service_attr_key == ra) {
             return Err(err_config!(
                 "trusted_service {} identity attribute '{}' not in returns_attributes",
                 ts_id,
                 ra
             ));
         }
-        idents.push(ra.to_string());
+        identity_attrs.push(ra.to_string());
     }
 
     let provider = if ts.contains_key("provider") {
         Some(parse_provider(&format!("trusted_service {ts_id}"), ts)?)
+    } else if !is_default {
+        return Err(err_config!("trusted_service {} missing provider", ts_id));
     } else {
-        if !is_default {
-            return Err(err_config!("trusted_service {} missing provider", ts_id));
-        }
         None
     };
 
     Ok(TrustedService {
         id: ts_id.to_string(),
         api,
+        expiration_seconds,
         cert_path,
-        returns_attrs: returns,
-        identity_attrs: idents,
+        returns_attrs,
+        identity_attrs,
         provider,
         client: client_svc,
         service: service_svc,
     })
 }
 
-/// The mapping string format is "<service-key-name> -> <attribute-spec>" where attribute
-/// spec is:
-///   - <class-name>.<attribute-name> for a regular single value attribute.
-///   - #<class-name>.<attribute-name> for a tag attribute.
-///   - <class-name>.<attribute-name>{} for a multi-valued attribute.
-///
-/// Note that we never use "optional" flag in ZPLC.
-pub(super) fn parse_attribute_mapping(
-    mapping: &str,
-) -> Result<(String, Attribute), CompilationError> {
-    let parts: Vec<&str> = mapping.split("->").collect();
-    if parts.len() != 2 {
-        return Err(err_config!(
-            "invalid attribute mapping '{}', must be of the form '<service-key-name> -> <attribute-spec>'",
-            mapping
-        ));
-    }
-    let service_key_name = parts[0].trim().to_string();
-    let attr_spec = parts[1].trim();
-
-    let zpr_attr = if let Some(stripped) = attr_spec.strip_prefix("#") {
-        Attribute::tag(stripped).build()?
-    } else if let Some(stripped) = attr_spec.strip_suffix("{}") {
-        Attribute::tuple(stripped).multi().build()?
-    } else {
-        Attribute::tuple(attr_spec).single().build()?
-    };
-
-    // In theory we can support any attribute names if they are quoted.
-    // But until we support that on VS we will not permit some characters
-    // here.
-    let valid_chars: HashSet<char> =
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-./"
-            .chars()
-            .collect();
-    for c in zpr_attr.zpl_key().chars() {
-        if !valid_chars.contains(&c) {
-            return Err(err_config!(
-                "invalid attribute name '{}' in mapping '{}', contains invalid character '{}'",
-                zpr_attr.zpl_key(),
-                mapping,
-                c
-            ));
-        }
-    }
-
-    Ok((service_key_name, zpr_attr))
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use zpr::policy_types::AttrDomain;
 
-    #[test]
-    fn test_parse_attribute_mapping_tag() {
-        let mapping = "service_key -> #device.tag";
-        let result = parse_attribute_mapping(mapping);
+    fn body(s: &str) -> Table {
+        s.parse::<Table>().unwrap()
+    }
 
-        assert!(result.is_ok());
-        let (service_key_name, attr) = result.unwrap();
-
-        assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), AttrDomain::Device);
-        assert_eq!(attr.zpl_value(), "device.tag");
-        assert_eq!(attr.get_values(), None);
-        assert_eq!(attr.is_multi_valued(), false);
-        assert_eq!(attr.is_tag(), true);
-        assert_eq!(attr.optional, false);
+    fn find<'a>(ts: &'a TrustedService, key: &str) -> &'a AttrMapping {
+        ts.returns_attrs
+            .iter()
+            .find(|m| m.service_attr_key == key)
+            .unwrap()
     }
 
     #[test]
-    fn test_parse_attribute_mapping_multi_valued() {
-        let mapping = "service_key -> user.groups{}";
-        let result = parse_attribute_mapping(mapping);
-
-        assert!(result.is_ok());
-        let (service_key_name, attr) = result.unwrap();
-
-        assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), AttrDomain::User);
-        assert_eq!(attr.zpl_key(), "user.groups");
-        assert_eq!(attr.get_values(), None);
-        assert_eq!(attr.is_multi_valued(), true);
-        assert_eq!(attr.is_tag(), false);
-        assert_eq!(attr.optional, false);
+    fn test_file_service_ordered_mappings_default_expiration() {
+        let t = body(
+            r#"
+            api = "file"
+            returns_attributes = ["color -> user.color", "hair -> #device.tag", "groups -> user.groups{}"]
+            "#,
+        );
+        let ts = parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap();
+        assert_eq!(ts.api, zpl::TS_API_FILE);
+        assert_eq!(ts.expiration_seconds, 0);
+        assert!(ts.identity_attrs.is_empty());
+        assert!(ts.provider.is_none());
+        // declaration order preserved with exact trimmed RHS spelling
+        let keys: Vec<&str> = ts
+            .returns_attrs
+            .iter()
+            .map(|m| m.service_attr_key.as_str())
+            .collect();
+        assert_eq!(keys, vec!["color", "hair", "groups"]);
+        assert_eq!(find(&ts, "hair").zpr_attr_spec, "#device.tag");
+        assert_eq!(find(&ts, "groups").zpr_attr_spec, "user.groups{}");
     }
 
     #[test]
-    fn test_parse_attribute_mapping_single_valued() {
-        let mapping = "service_key -> service.role";
-        let result = parse_attribute_mapping(mapping);
-
-        assert!(result.is_ok());
-        let (service_key_name, attr) = result.unwrap();
-
-        assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), AttrDomain::Service);
-        assert_eq!(attr.zpl_key(), "service.role");
-        assert_eq!(attr.get_values(), None);
-        assert_eq!(attr.is_multi_valued(), false);
-        assert_eq!(attr.is_tag(), false);
-        assert_eq!(attr.optional, false);
+    fn test_file_service_positive_expiration() {
+        let t = body(
+            r#"
+            api = "file"
+            expiration_seconds = 3600
+            returns_attributes = ["color -> user.color"]
+            "#,
+        );
+        let ts = parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap();
+        assert_eq!(ts.expiration_seconds, 3600);
     }
 
     #[test]
-    fn test_parse_attribute_mapping_invalid_format() {
-        let mapping = "invalid_format";
-        let result = parse_attribute_mapping(mapping);
+    fn test_expiration_negative_rejected() {
+        let t = body(
+            r#"
+            api = "file"
+            expiration_seconds = -1
+            returns_attributes = ["color -> user.color"]
+            "#,
+        );
+        let err = parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap_err();
+        assert!(err.to_string().contains("non-negative"), "{err}");
+    }
 
-        assert!(result.is_err());
-        if let Err(CompilationError::ConfigError(msg)) = result {
-            assert!(msg.contains("invalid attribute mapping"));
-            assert!(msg.contains("must be of the form"));
-        } else {
-            panic!("Expected ConfigError");
+    #[test]
+    fn test_expiration_overflow_rejected() {
+        let t = body(
+            r#"
+            api = "file"
+            expiration_seconds = 4294967296
+            returns_attributes = ["color -> user.color"]
+            "#,
+        );
+        let err = parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap_err();
+        assert!(err.to_string().contains("exceeds u32"), "{err}");
+    }
+
+    #[test]
+    fn test_expiration_wrong_types_rejected() {
+        for val in ["\"3600\"", "3.5", "true"] {
+            let t = body(&format!(
+                "api = \"file\"\nexpiration_seconds = {val}\nreturns_attributes = [\"color -> user.color\"]\n"
+            ));
+            let err =
+                parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap_err();
+            assert!(
+                err.to_string().contains("must be a non-negative integer"),
+                "value {val} gave: {err}"
+            );
         }
     }
 
     #[test]
-    fn test_parse_attribute_mapping_whitespace_handling() {
-        let mapping = "  service_key  ->  user.name  ";
-        let result = parse_attribute_mapping(mapping);
-
-        assert!(result.is_ok());
-        let (service_key_name, attr) = result.unwrap();
-
-        assert_eq!(service_key_name, "service_key");
-        assert_eq!(*attr.get_domain_ref(), AttrDomain::User);
-        assert_eq!(attr.zpl_key(), "user.name");
-        assert_eq!(attr.get_values(), None);
-        assert_eq!(attr.is_multi_valued(), false);
-        assert_eq!(attr.is_tag(), false);
-        assert_eq!(attr.optional, false);
+    fn test_file_forbidden_properties_rejected() {
+        for (prop, line) in [
+            ("identity_attributes", "identity_attributes = [\"color\"]"),
+            ("provider", "provider = [[\"foo\", \"bar\"]]"),
+            ("client", "client = \"c\""),
+            ("service", "service = \"s\""),
+            ("cert_path", "cert_path = \"x.pem\""),
+            ("prefix", "prefix = \"bar.hop\""),
+        ] {
+            let t = body(&format!(
+                "api = \"file\"\nreturns_attributes = [\"color -> user.color\"]\n{line}\n"
+            ));
+            let err =
+                parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap_err();
+            assert!(
+                err.to_string().contains(prop) && err.to_string().contains("does not allow"),
+                "property {prop} gave: {err}"
+            );
+        }
     }
 
     #[test]
-    fn test_parse_attribute_mapping_too_many_arrows() {
-        let mapping = "key -> attr -> extra";
-        let result = parse_attribute_mapping(mapping);
+    fn test_file_requires_returns_attributes() {
+        let t = body("api = \"file\"\n");
+        let err = parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap_err();
+        assert!(
+            err.to_string().contains("requires returns_attributes"),
+            "{err}"
+        );
 
-        assert!(result.is_err());
-        if let Err(CompilationError::ConfigError(msg)) = result {
-            assert!(msg.contains("invalid attribute mapping"));
-        } else {
-            panic!("Expected ConfigError");
+        let t = body("api = \"file\"\nreturns_attributes = []\n");
+        let err = parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap_err();
+        assert!(err.to_string().contains("at least one"), "{err}");
+    }
+
+    #[test]
+    fn test_file_duplicate_service_key_rejected() {
+        let t = body(
+            r#"
+            api = "file"
+            returns_attributes = ["color -> user.color", "color -> #device.tag"]
+            "#,
+        );
+        let err = parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap_err();
+        assert!(err.to_string().contains("duplicate"), "{err}");
+    }
+
+    #[test]
+    fn test_expiration_on_default_rejected() {
+        // id "default" with no api => builtin default; expiration is not allowed.
+        let t = body("expiration_seconds = 10\ncert_path = \"foo.pem\"\n");
+        let err = parse_trusted_service("default", &t, &CompilationCtx::default()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("does not allow expiration_seconds"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_ts_id() {
+        assert!(validate_ts_id("attrfile").is_ok());
+        assert!(validate_ts_id("bas-1_2").is_ok());
+        for bad in ["", "bad id", "a/b", "..", "café", "a.b"] {
+            assert!(
+                validate_ts_id(bad).is_err(),
+                "expected {bad:?} to be rejected"
+            );
         }
     }
 }

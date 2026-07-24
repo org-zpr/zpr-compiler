@@ -104,6 +104,9 @@ For non default trusted services, the field meanings are:
   * `validation/2` - An validation service.  Meaning that the service can provide
      validation of authentication to a visa service, and actor authentication services
      to an adapter.
+  * `file` - A file-backed attribute source offered by the visa service itself, with no
+     network presence. The visa service loads the attributes from a local `<TSNAME>.json`
+     file at runtime. See *File Trusted Services* below.
   * *addition values TBD*
 * `service` - Sets the service ID used in the **services** block for the visa-service
   facing service provided by this trusted service.  This is *optional* and by default
@@ -117,6 +120,13 @@ For non default trusted services, the field meanings are:
   ZPL attribute names.
 * `identity_attributes` - Subset of the `returns_attributes` that denote identity.
 * `provider` - Attribute key/value tuples of the actor (or actors) that provide this service.
+* `expiration_seconds` - Optional lifetime (in seconds) of the attributes this service vouches
+  for. Accepted on `validation/2` and `file` services; rejected on `default`. Must be a
+  non-negative integer that fits in a 32-bit unsigned value. Omitted or `0` means the visa
+  service selects the lifetime at runtime (from the service or its own default).
+
+Every trusted-service ID (the `<TSNAME>`) must match `[A-Za-z0-9_-]+`. For a `file` service this
+ID is also the filename stem — the visa service loads attributes from `<TSNAME>.json`.
 
 
 A trusted service for validation is really two services: the service that the visa service
@@ -147,6 +157,25 @@ port = 4444
 protocol = "zpr-oauthrsa"
 port = 1234
 ```
+
+### File Trusted Services
+
+A `file` trusted service supplies actor attributes from a local JSON file loaded by the visa
+service rather than over the network. Declare only `returns_attributes` (at least one mapping)
+and, optionally, `expiration_seconds`:
+
+```toml
+[trusted_services.attrfile]
+api = "file"
+returns_attributes = ["hair_color -> user.hair_color", "lazy -> #user.lazy"]
+expiration_seconds = 3600
+```
+
+Because a file service has no network presence, the `service`, `client`, `cert_path`, `provider`,
+and `identity_attributes` properties are **not** allowed. The compiler weaves it as a service
+offered by the visa service CN (`vs.zpr`) with no endpoints and no communication policy. The
+attribute mappings use the same `->` syntax (and single / `{}` multi / `#` tag forms) as any other
+trusted service (see *Attributes* below).
 
 ### Attributes
 
