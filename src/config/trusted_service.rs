@@ -196,6 +196,11 @@ pub(super) fn parse_trusted_service(
     let expiration_seconds = parse_expiration_seconds(ts, ts_id, is_default)?;
 
     if api == zpl::TS_API_FILE {
+        if is_default {
+            return Err(err_config!(
+                "default trusted_service cannot have api \"file\""
+            ));
+        }
         return parse_file_trusted_service(ts_id, ts, expiration_seconds);
     }
 
