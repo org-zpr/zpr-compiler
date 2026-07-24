@@ -269,7 +269,11 @@ fn compile_policy_bytes(stem: &str, temp: &TempDir) -> Vec<u8> {
 
 /// Total endpoints across every join-policy Service with the given id, asserting each such
 /// Service is `Trusted(expected_api)`.
-fn trusted_service_endpoint_count(policy: &policy_capnp::policy::Reader, id: &str, expected_api: &str) -> usize {
+fn trusted_service_endpoint_count(
+    policy: &policy_capnp::policy::Reader,
+    id: &str,
+    expected_api: &str,
+) -> usize {
     let mut count = 0usize;
     for jp in policy.get_join_policies().unwrap().iter() {
         let provides = match jp.get_provides() {
@@ -319,7 +323,10 @@ fn test_file_trusted_service_end_to_end() {
     let policy = rdr.get_root::<policy_capnp::policy::Reader>().unwrap();
 
     // --- trustedServices: deterministic order, bas + attrfile once each ---
-    assert!(policy.has_trusted_services(), "policy must have trustedServices");
+    assert!(
+        policy.has_trusted_services(),
+        "policy must have trustedServices"
+    );
     let records = decode_records(&policy);
     let ids: Vec<&str> = records.iter().map(|r| r.service_id.as_str()).collect();
     assert_eq!(ids, vec!["attrfile", "bas"]);
@@ -358,7 +365,10 @@ fn test_file_trusted_service_end_to_end() {
         let match_exprs = jp.get_match().unwrap();
         assert_eq!(match_exprs.len(), 1);
         let e = match_exprs.get(0);
-        assert_eq!(e.get_key().unwrap().to_str().unwrap(), "device.zpr.adapter.cn");
+        assert_eq!(
+            e.get_key().unwrap().to_str().unwrap(),
+            "device.zpr.adapter.cn"
+        );
         assert!(matches!(e.get_op().unwrap(), policy_capnp::AttrOp::Eq));
         let vals: Vec<&str> = e
             .get_value()
@@ -417,7 +427,11 @@ fn test_validation2_regression() {
     // Exactly one record — the validation/2 `bas` service — with its mappings intact.
     let records = decode_records(&policy);
     let ids: Vec<&str> = records.iter().map(|r| r.service_id.as_str()).collect();
-    assert_eq!(ids, vec!["bas"], "only the validation/2 record should be emitted");
+    assert_eq!(
+        ids,
+        vec!["bas"],
+        "only the validation/2 record should be emitted"
+    );
     let bas = &records[0];
     assert_eq!(bas.expiration_seconds, 0);
     assert_eq!(bas.identity_attrs, vec!["bas_id".to_string()]);

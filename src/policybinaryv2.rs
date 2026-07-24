@@ -12,12 +12,12 @@ use crate::policywriter::{PolicyContainer, PolicyWriter};
 use crate::protocols::{IcmpFlowType, PortSpec, Protocol, ProtocolDetails};
 use crate::ptypes::Signal;
 
+use zpr::policy_types::TrustedService;
 use zpr::policy_types::write_attributes;
 use zpr::policy_types::{AttrExp, AttrOp, Attribute, PFlags};
 use zpr::policy_types::{JoinPolicy, Scope, ScopeFlag};
 use zpr::policy_types::{NetAddr, Peering};
 use zpr::policy_types::{Service, ServiceType}; // TODO: remove refs to fabric
-use zpr::policy_types::TrustedService;
 
 #[derive(Default)]
 pub struct PolicyBinaryV2 {

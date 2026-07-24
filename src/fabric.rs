@@ -22,7 +22,6 @@ pub struct Fabric {
     pub links: Vec<FabricLink>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FabricService {
     pub config_id: String, // Service name as specified in configuration and ZPL.
@@ -34,6 +33,20 @@ pub struct FabricService {
     pub certificate: Option<Vec<u8>>, // Certificate for this (trusted) service
     pub client_service_name: Option<String>, // For an AUTH service, the name of the optional client service.
     pub trusted_service: Option<TrustedService>, // Shared metadata record -- only for trusted services
+}
+
+/// Parameters for [`Fabric::add_trusted_service`].
+#[derive(Debug, Clone, Default)]
+pub struct TrustedServiceSpec {
+    pub id: String,
+    pub api: String,
+    pub protocol: Option<Protocol>,
+    pub provider_attrs: Vec<Attribute>,
+    pub certificate: Option<Vec<u8>>,
+    pub client_service_name: Option<String>,
+    pub returns_attrs: Vec<AttrMapping>,
+    pub identity_attrs: Vec<String>,
+    pub expiration_seconds: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -245,48 +258,38 @@ impl Fabric {
         &self.bootstrap_records
     }
 
-    /// You must add client services associated with the trusted service before adding a trusted service.
+    /// You must add client services associated with the trusted service before
+    /// adding a trusted service.
     ///
-    /// `protocol` is `None` for a `file` service (which has no network endpoints); the policy
-    /// writer turns that into an empty endpoint list. `client_service_name`/`certificate` are
-    /// `None` for services without an adapter-facing component or cert. Builds the shared
-    /// [`TrustedService`] metadata record from the ordered `returns_attrs`, `identity_attrs`,
-    /// and `expiration_seconds`.
-    #[allow(clippy::too_many_arguments)]
+    /// Builds the shared [`TrustedService`] metadata record from the ordered
+    /// `returns_attrs`, `identity_attrs`, and `expiration_seconds` (see [TrustedServiceSpec]).
     pub fn add_trusted_service(
         &mut self,
-        id: &str,
-        protocol: Option<&Protocol>,
-        api: &str,
-        provider_attrs: &[Attribute],
-        certificate: Option<Vec<u8>>,
-        client_service_name: Option<&str>,
-        returns_attrs: Vec<AttrMapping>,
-        identity_attrs: Vec<String>,
-        expiration_seconds: u32,
+        spec: TrustedServiceSpec,
     ) -> Result<(), CompilationError> {
         for s in &self.services {
-            if s.config_id == id {
+            if s.config_id == spec.id {
                 return Err(CompilationError::BuildError(format!(
-                    "cannot add duplicate trusted service: already exists: {id}"
+                    "cannot add duplicate trusted service: already exists: {}",
+                    spec.id
                 )));
             }
         }
 
         let fs = FabricService {
-            config_id: id.to_string(),
-            fabric_id: id.to_string(),
-            protocol: protocol.cloned(),
-            provider_attrs: provider_attrs.to_vec(),
+            config_id: spec.id.clone(),
+            fabric_id: spec.id.clone(),
+            protocol: spec.protocol,
+            provider_attrs: spec.provider_attrs,
             client_policies: Vec::new(),
-            service_type: ServiceType::Trusted(api.to_string()),
-            certificate,
-            client_service_name: client_service_name.map(|s| s.to_string()),
+            service_type: ServiceType::Trusted(spec.api),
+            certificate: spec.certificate,
+            client_service_name: spec.client_service_name,
             trusted_service: Some(TrustedService {
-                service_id: id.to_string(),
-                expiration_seconds,
-                returns_attrs,
-                identity_attrs,
+                service_id: spec.id,
+                expiration_seconds: spec.expiration_seconds,
+                returns_attrs: spec.returns_attrs,
+                identity_attrs: spec.identity_attrs,
             }),
         };
         self.services.push(fs);

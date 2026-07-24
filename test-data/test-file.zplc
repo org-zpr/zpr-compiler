@@ -1,4 +1,4 @@
-# minimal config so that we can test parsing the RFC zpl
+# test the 'file' trusted_servce
 
 [nodes.n0]
 provider = [["device.zpr.adapter.cn", "node.zpr.org"]]

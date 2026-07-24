@@ -130,11 +130,13 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
         Ok(())
     }
 
-    /// Emit one shared `TrustedService` metadata record per woven `file` or `validation/2`
-    /// service. There is no record for the builtin `default` service (it is not a fabric
-    /// `Trusted` service) nor for the validation/2 adapter-facing authentication service (it is
-    /// a `ServiceType::Authentication` service). Validation/2 network join/communication policies
-    /// are still emitted through the normal fabric paths (`set_connects`/`set_policies`).
+    /// Emit one shared `TrustedService` metadata record per woven `file` or
+    /// `validation/2` service. There is no record for the builtin `default`
+    /// service (it is not a fabric `Trusted` service) nor for the validation/2
+    /// adapter-facing authentication service (it is tied to its vs-facing
+    /// `validation/2` service which does get a record). Validation/2 network
+    /// join/communication policies are also emitted through the normal fabric
+    /// paths (`set_connects`/`set_policies`).
     fn set_trusted_service_records(
         &mut self,
         fabric: &Fabric,

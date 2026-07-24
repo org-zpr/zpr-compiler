@@ -10,7 +10,9 @@ use crate::config_api::{ConfigApi, ConfigItem};
 use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
-use crate::fabric::{Fabric, FabricLink, FabricNode, NodeLinkAddr, PLine, SubstrateAddr};
+use crate::fabric::{
+    Fabric, FabricLink, FabricNode, NodeLinkAddr, PLine, SubstrateAddr, TrustedServiceSpec,
+};
 use crate::fabric_util::{squash_attributes, vec_to_attributes, vec_to_attributes_in_domain};
 use crate::protocols::{PortSpec, Protocol, ZPR_OAUTH_RSA, ZPR_VALIDATION_2};
 use crate::ptypes::{AllowClause, Class, ClassFlavor, FPos, Policy};
@@ -1084,17 +1086,14 @@ impl Weaver {
                     .value(zpl::VISA_SERVICE_CN)
                     .build()?;
                 self.fabric
-                    .add_trusted_service(
-                        &ts_name,
-                        None,
-                        &ts_api,
-                        &[vs_cn_attr],
-                        None,
-                        None,
-                        ts_returns_attrs,
-                        Vec::new(),
+                    .add_trusted_service(TrustedServiceSpec {
+                        id: ts_name.clone(),
+                        api: ts_api.clone(),
+                        provider_attrs: vec![vs_cn_attr],
+                        returns_attrs: ts_returns_attrs,
                         expiration_seconds,
-                    )
+                        ..Default::default()
+                    })
                     .map_err(|e| {
                         CompilationError::ConfigError(format!(
                             "error adding trusted service: {}",
@@ -1149,17 +1148,17 @@ impl Weaver {
                 )));
             }
             self.fabric
-                .add_trusted_service(
-                    &ts_name,
-                    Some(&vs_svc_protocol.unwrap()),
-                    &ts_api,
-                    &ts_provider_attrs,
-                    ts_cert,
-                    Some(&client_svc),
-                    ts_returns_attrs,
-                    ts_identity_attrs,
+                .add_trusted_service(TrustedServiceSpec {
+                    id: ts_name.clone(),
+                    api: ts_api.clone(),
+                    protocol: Some(vs_svc_protocol.unwrap()),
+                    provider_attrs: ts_provider_attrs,
+                    certificate: ts_cert,
+                    client_service_name: Some(client_svc),
+                    returns_attrs: ts_returns_attrs,
+                    identity_attrs: ts_identity_attrs,
                     expiration_seconds,
-                )
+                })
                 .map_err(|e| {
                     CompilationError::ConfigError(format!("error adding trusted service: {}", e))
                 })?;
