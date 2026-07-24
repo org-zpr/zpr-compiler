@@ -112,8 +112,8 @@ fn parse_return_mappings(
     let mut seen: HashSet<String> = HashSet::new();
     let mut out = Vec::new();
     for ra in raw {
-        let m =
-            parse_attribute_mapping(ra).map_err(|e| err_config!("trusted_service {}: {}", ts_id, e))?;
+        let m = parse_attribute_mapping(ra)
+            .map_err(|e| err_config!("trusted_service {}: {}", ts_id, e))?;
         if !seen.insert(m.service_attr_key.clone()) {
             return Err(err_config!(
                 "trusted_service {} contains duplicate service attribute name '{}'",
@@ -166,13 +166,9 @@ fn parse_file_trusted_service(
     Ok(TrustedService {
         id: ts_id.to_string(),
         api: zpl::TS_API_FILE.to_string(),
-        expiration_seconds,
-        cert_path: None,
-        returns_attrs,
-        identity_attrs: Vec::new(),
-        provider: None,
-        client: None,
-        service: None,
+        expiration_seconds: expiration_seconds,
+        returns_attrs: returns_attrs,
+        ..Default::default()
     })
 }
 
@@ -415,7 +411,10 @@ mod test {
     fn test_file_requires_returns_attributes() {
         let t = body("api = \"file\"\n");
         let err = parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap_err();
-        assert!(err.to_string().contains("requires returns_attributes"), "{err}");
+        assert!(
+            err.to_string().contains("requires returns_attributes"),
+            "{err}"
+        );
 
         let t = body("api = \"file\"\nreturns_attributes = []\n");
         let err = parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap_err();
@@ -440,7 +439,8 @@ mod test {
         let t = body("expiration_seconds = 10\ncert_path = \"foo.pem\"\n");
         let err = parse_trusted_service("default", &t, &CompilationCtx::default()).unwrap_err();
         assert!(
-            err.to_string().contains("does not allow expiration_seconds"),
+            err.to_string()
+                .contains("does not allow expiration_seconds"),
             "{err}"
         );
     }
@@ -450,7 +450,10 @@ mod test {
         assert!(validate_ts_id("attrfile").is_ok());
         assert!(validate_ts_id("bas-1_2").is_ok());
         for bad in ["", "bad id", "a/b", "..", "café", "a.b"] {
-            assert!(validate_ts_id(bad).is_err(), "expected {bad:?} to be rejected");
+            assert!(
+                validate_ts_id(bad).is_err(),
+                "expected {bad:?} to be rejected"
+            );
         }
     }
 }

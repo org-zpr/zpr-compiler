@@ -144,8 +144,7 @@ pub struct Bootstrap {
 }
 
 /// Trusted Service table ("trusted_services")
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TrustedService {
     pub id: String,
     pub api: String,
@@ -507,9 +506,10 @@ impl ConfigParse {
             trusted_services.push(ts);
         }
         if default_creates == 0 {
-            let returns =
-                vec![parse_attribute_mapping(&format!("{} -> {}", zpl::KATTR_CN, zpl::KATTR_CN))
-                    .unwrap()];
+            let returns = vec![
+                parse_attribute_mapping(&format!("{} -> {}", zpl::KATTR_CN, zpl::KATTR_CN))
+                    .unwrap(),
+            ];
             let ts = TrustedService {
                 id: zpl::DEFAULT_TRUSTED_SERVICE_ID.to_string(),
                 api: zpl::DEFAULT_TRUSTED_SERVICE_API.to_string(),

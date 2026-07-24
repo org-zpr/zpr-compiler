@@ -257,6 +257,47 @@ pub fn dump_v2(fname: &str, encoded_buf: Bytes) {
             println!();
         }
     }
+    if policy.has_trusted_services() {
+        dump::print_section_hdr("TRUSTED SERVICES");
+        for (i, ts_rdr) in policy.get_trusted_services().unwrap().iter().enumerate() {
+            // Decode via the shared TryFrom so the display shares the VS's decode path.
+            match TrustedService::try_from(ts_rdr) {
+                Ok(ts) => {
+                    let expiration = if ts.expiration_seconds == 0 {
+                        "0 (runtime default)".to_string()
+                    } else {
+                        format!("{}s", ts.expiration_seconds)
+                    };
+                    println!(
+                        "{} {}  expiration: {}",
+                        format!("{:02}", i + 1).dimmed(),
+                        ts.service_id.yellow(),
+                        expiration.yellow()
+                    );
+                    for m in &ts.returns_attrs {
+                        println!(
+                            "         {} {} -> {}",
+                            format!("{}", "󰞘").dimmed(),
+                            m.service_attr_key.yellow(),
+                            m.zpr_attr_spec.green()
+                        );
+                    }
+                    if !ts.identity_attrs.is_empty() {
+                        println!("       identity: {}", ts.identity_attrs.join(", ").yellow());
+                    }
+                }
+                Err(e) => {
+                    println!(
+                        "{} {} {}",
+                        format!("{:02}", i + 1).dimmed(),
+                        "(invalid)".red(),
+                        format!("{}", e).red()
+                    );
+                }
+            }
+            println!();
+        }
+    }
     if policy.has_keys() {
         dump::print_section_hdr("KEYS");
         for (i, key) in policy.get_keys().unwrap().iter().enumerate() {
@@ -304,47 +345,6 @@ pub fn dump_v2(fname: &str, encoded_buf: Bytes) {
                     }
                 }
             }
-        }
-    }
-    if policy.has_trusted_services() {
-        dump::print_section_hdr("TRUSTED SERVICES");
-        for (i, ts_rdr) in policy.get_trusted_services().unwrap().iter().enumerate() {
-            // Decode via the shared TryFrom so the display shares the VS's decode path.
-            match TrustedService::try_from(ts_rdr) {
-                Ok(ts) => {
-                    let expiration = if ts.expiration_seconds == 0 {
-                        "0 (runtime default)".to_string()
-                    } else {
-                        format!("{}s", ts.expiration_seconds)
-                    };
-                    println!(
-                        "{} {}  expiration: {}",
-                        format!("{:02}", i + 1).dimmed(),
-                        ts.service_id.yellow(),
-                        expiration.yellow()
-                    );
-                    for m in &ts.returns_attrs {
-                        println!(
-                            "         {} {} -> {}",
-                            format!("{}", "󰞘").dimmed(),
-                            m.service_attr_key.yellow(),
-                            m.zpr_attr_spec.green()
-                        );
-                    }
-                    if !ts.identity_attrs.is_empty() {
-                        println!("       identity: {}", ts.identity_attrs.join(", ").yellow());
-                    }
-                }
-                Err(e) => {
-                    println!(
-                        "{} {} {}",
-                        format!("{:02}", i + 1).dimmed(),
-                        "(invalid)".red(),
-                        format!("{}", e).red()
-                    );
-                }
-            }
-            println!();
         }
     }
 }
