@@ -671,10 +671,10 @@ impl ConfigApi {
 
     fn get_zpr_nodes(&self, key_path: Vec<&str>) -> Option<ConfigItem> {
         if key_path.len() == 1 {
-            // nodes -> list of node IDs
-            return Some(ConfigItem::KeySet(
-                self.config.nodes.keys().cloned().collect(),
-            ));
+            // nodes -> list of node IDs (sorted: config.nodes is a HashMap)
+            let mut ids: Vec<String> = self.config.nodes.keys().cloned().collect();
+            ids.sort();
+            return Some(ConfigItem::KeySet(ids));
         }
         let node_id = key_path[1];
         let node = self.config.nodes.get(node_id)?;
@@ -715,10 +715,10 @@ impl ConfigApi {
 
     fn get_zpr_links(&self, key_path: Vec<&str>) -> Option<ConfigItem> {
         if key_path.len() == 1 {
-            // links -> list of link IDs
-            return Some(ConfigItem::KeySet(
-                self.config.links.keys().cloned().collect(),
-            ));
+            // links -> list of link IDs (sorted: config.links is a HashMap)
+            let mut ids: Vec<String> = self.config.links.keys().cloned().collect();
+            ids.sort();
+            return Some(ConfigItem::KeySet(ids));
         }
         let link_id = key_path[1];
         let link = self.config.links.get(link_id)?;

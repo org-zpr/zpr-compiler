@@ -459,3 +459,236 @@ fn test_validation2_regression() {
     assert!(policy.has_com_policies());
     assert!(policy.get_com_policies().unwrap().len() > 0);
 }
+
+// ---- deterministic bin2 ordering ----
+
+/// One attribute expression as (key, op, values).
+type AttrTuple = (String, String, Vec<String>);
+
+/// Order-preserving structural snapshot of every policy collection that must be
+/// deterministically ordered. Bytes can't be compared instead: `created`, `version` and
+/// `metadata` are wall-clock derived.
+#[derive(Debug, PartialEq)]
+struct OrderSnapshot {
+    /// (service_id, zpl, client conds, service conds)
+    com_policies: Vec<(String, String, Vec<AttrTuple>, Vec<AttrTuple>)>,
+    /// (conditions, provided service ids)
+    join_policies: Vec<(Vec<AttrTuple>, Vec<String>)>,
+    keys: Vec<String>,
+    /// (link_id, attributes)
+    topology: Vec<(String, Vec<AttrTuple>)>,
+    trusted_services: Vec<String>,
+}
+
+fn attr_tuples(list: capnp::struct_list::Reader<policy_capnp::attr_expr::Owned>) -> Vec<AttrTuple> {
+    list.iter()
+        .map(|e| {
+            (
+                e.get_key().unwrap().to_str().unwrap().to_string(),
+                format!("{:?}", e.get_op().unwrap()),
+                e.get_value()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.unwrap().to_str().unwrap().to_string())
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+/// The same ordering key `JPKey` uses: op lowercased, values sorted, tuples key-sorted.
+fn jp_sort_key(conds: &[AttrTuple]) -> Vec<AttrTuple> {
+    let mut k: Vec<AttrTuple> = conds
+        .iter()
+        .map(|(key, op, vals)| {
+            let mut vals = vals.clone();
+            vals.sort();
+            (key.clone(), op.to_lowercase(), vals)
+        })
+        .collect();
+    k.sort();
+    k
+}
+
+fn snapshot(pbytes: &[u8]) -> OrderSnapshot {
+    let rdr = capnp::serialize::read_message(
+        &mut Cursor::new(pbytes),
+        capnp::message::ReaderOptions::new(),
+    )
+    .expect("decode policy");
+    let policy = rdr.get_root::<policy_capnp::policy::Reader>().unwrap();
+
+    let com_policies = policy
+        .get_com_policies()
+        .unwrap()
+        .iter()
+        .map(|cp| {
+            (
+                cp.get_service_id().unwrap().to_str().unwrap().to_string(),
+                cp.get_zpl().unwrap().to_str().unwrap().to_string(),
+                attr_tuples(cp.get_client_conds().unwrap()),
+                attr_tuples(cp.get_service_conds().unwrap()),
+            )
+        })
+        .collect();
+
+    let join_policies = policy
+        .get_join_policies()
+        .unwrap()
+        .iter()
+        .map(|jp| {
+            let provides = jp
+                .get_provides()
+                .map(|ps| {
+                    ps.iter()
+                        .map(|s| s.get_id().unwrap().to_str().unwrap().to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+            (attr_tuples(jp.get_match().unwrap()), provides)
+        })
+        .collect();
+
+    let keys = policy
+        .get_keys()
+        .unwrap()
+        .iter()
+        .map(|k| k.get_id().unwrap().to_str().unwrap().to_string())
+        .collect();
+
+    let topology = policy
+        .get_topology()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            (
+                p.get_link_id().unwrap().to_str().unwrap().to_string(),
+                attr_tuples(p.get_attrs().unwrap()),
+            )
+        })
+        .collect();
+
+    let trusted_services = policy
+        .get_trusted_services()
+        .unwrap()
+        .iter()
+        .map(|ts| ts.get_service_id().unwrap().to_str().unwrap().to_string())
+        .collect();
+
+    OrderSnapshot {
+        com_policies,
+        join_policies,
+        keys,
+        topology,
+        trusted_services,
+    }
+}
+
+fn assert_sorted<T: Ord + std::fmt::Debug + Clone>(what: &str, items: &[T]) {
+    let mut sorted = items.to_vec();
+    sorted.sort();
+    assert_eq!(sorted, items, "{what} must be sorted");
+}
+
+#[test]
+fn test_bin2_ordering_is_deterministic() {
+    // Distinct hints: TempDir paths are (hint, pid, seconds), so same-hint dirs alias.
+    let temp_a = TempDir::new("ordering-a");
+    let temp_b = TempDir::new("ordering-b");
+    let snap_a = snapshot(&compile_policy_bytes("test-ordering", &temp_a));
+    let snap_b = snapshot(&compile_policy_bytes("test-ordering", &temp_b));
+    assert_eq!(
+        snap_a, snap_b,
+        "recompiling the same input must not reorder"
+    );
+
+    let snap = snap_a;
+
+    // Com policies: grouped by service_id ascending, attribute lists key-sorted.
+    assert_sorted(
+        "com policy service ids",
+        &snap
+            .com_policies
+            .iter()
+            .map(|(id, ..)| id.clone())
+            .collect::<Vec<_>>(),
+    );
+    for (id, _zpl, cli, svc) in &snap.com_policies {
+        assert_sorted(
+            &format!("{id} client cond keys"),
+            &cli.iter().map(|(k, ..)| k.clone()).collect::<Vec<_>>(),
+        );
+        assert_sorted(
+            &format!("{id} service cond keys"),
+            &svc.iter().map(|(k, ..)| k.clone()).collect::<Vec<_>>(),
+        );
+    }
+
+    // Within a service, ZPL source order survives: `never` first, then the allows.
+    let db1: Vec<&str> = snap
+        .com_policies
+        .iter()
+        .filter(|(id, ..)| id == "database#1")
+        .map(|(_, zpl, ..)| zpl.as_str())
+        .collect();
+    assert_eq!(
+        db1,
+        vec![
+            "(line 9) never allow color:red employees to access classified databases",
+            "(line 10) allow lazy, color:green employees to access classified databases on tint:sales devices",
+            "(line 11) allow clearance:classified government users to access classified services",
+        ]
+    );
+
+    // Join policies: outer order follows the full structured condition key; inner lists
+    // key-sorted; provides sorted by service id.
+    assert_sorted(
+        "join policy condition keys",
+        &snap
+            .join_policies
+            .iter()
+            .map(|(conds, _)| jp_sort_key(conds))
+            .collect::<Vec<_>>(),
+    );
+    for (conds, provides) in &snap.join_policies {
+        assert_sorted(
+            "join condition keys",
+            &conds.iter().map(|(k, ..)| k.clone()).collect::<Vec<_>>(),
+        );
+        assert_sorted("join policy provides", provides);
+    }
+
+    // Keys, topology (including per-link attributes) and trusted services.
+    assert_sorted("bootstrap keys", &snap.keys);
+    assert_sorted(
+        "topology link ids",
+        &snap
+            .topology
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>(),
+    );
+    for (link_id, attrs) in &snap.topology {
+        assert_sorted(
+            &format!("{link_id} attribute keys"),
+            &attrs.iter().map(|(k, ..)| k.clone()).collect::<Vec<_>>(),
+        );
+    }
+    assert_sorted("trusted services", &snap.trusted_services);
+
+    // Sanity: the fixture actually exercises every collection.
+    assert!(
+        snap.keys.len() >= 2,
+        "fixture needs multiple bootstrap keys"
+    );
+    assert!(snap.topology.len() >= 2, "fixture needs multiple links");
+    assert!(
+        snap.trusted_services.len() >= 2,
+        "fixture needs multiple trusted services"
+    );
+    assert_eq!(
+        db1.len(),
+        3,
+        "fixture needs a suffixed service with 3 rules"
+    );
+}
