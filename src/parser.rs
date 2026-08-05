@@ -177,8 +177,13 @@ pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, 
         println!()
     }
 
-    // move all the classes in the policy
-    for (_, class) in classes.into_iter() {
+    // Move all the classes in the policy, in ZPL source order. `classes` is a HashMap, so
+    // draining it directly randomizes `defines`, which in turn randomizes the `#N` suffix
+    // assigned to same-config-id services downstream.
+    let mut ordered_classes: Vec<Class> = classes.into_values().collect();
+    ordered_classes
+        .sort_by(|a, b| (a.pos.line, a.pos.col, &a.name).cmp(&(b.pos.line, b.pos.col, &b.name)));
+    for class in ordered_classes.into_iter() {
         // Not sure i need the built in ones?
         if class.is_builtin() {
             continue;

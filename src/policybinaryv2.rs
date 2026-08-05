@@ -1,7 +1,5 @@
 //! The "bin2" policy format.
-use openssl::sha;
-use std::collections::HashMap;
-use std::hash::Hash;
+use std::collections::{BTreeMap, HashMap};
 use std::net::IpAddr;
 use zpr::policy::v1 as policy_capnp;
 use zpr::write_to::WriteTo;
@@ -95,16 +93,19 @@ fn new_scope_from_protocol(prot: &Protocol) -> Vec<Scope> {
 }
 
 /// Organize our JoinPolicies as they are added to the policy.
+/// A BTreeMap so `iter()` yields a deterministic, key-sorted order.
 #[derive(Default)]
 struct JPBuilder {
-    policies: HashMap<JPKey, JoinPolicy>,
+    policies: BTreeMap<JPKey, JoinPolicy>,
 }
 
 /// JoinPolicy key value. We construct these so that a given set of attributes
-/// maps to a unique key.
-#[derive(Debug, PartialEq, Eq, Hash)]
+/// maps to a unique key. The structured form is collision-free: attribute values
+/// may contain any punctuation, so a flattened string encoding would be ambiguous.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct JPKey {
-    hashval: String,
+    /// (zpl_key, op_code, sorted values), sorted by zpl_key.
+    conditions: Vec<(String, String, Vec<String>)>,
 }
 
 impl JPBuilder {
@@ -133,8 +134,10 @@ impl JPBuilder {
             }
         } else {
             // Not in our table yet.
+            let mut sorted_conditions = conditions.to_vec();
+            sorted_conditions.sort_by(|a, b| a.zpl_key().cmp(&b.zpl_key()));
             let mut jp = JoinPolicy {
-                conditions: conditions.to_vec(),
+                conditions: sorted_conditions,
                 flags: PFlags::default(),
                 provides: Some(vec![service]),
             };
@@ -150,37 +153,34 @@ impl JPKey {
     /// The JoinPolicy key is a unique identifier for a given set of attributes such that
     /// the same set of attributes always gets the same key.
     fn new(conditions: &[Attribute]) -> Self {
-        // To create the hash we use ordered list of keys, then canonical reps of the attributes.
-        let mut table = HashMap::new();
-        let mut sorted_keys = Vec::new();
+        let mut key_conditions: Vec<(String, String, Vec<String>)> = Vec::new();
         for attr in conditions {
             let k = attr.zpl_key();
 
-            let vals = attr.zpl_values();
+            let mut vals = attr.zpl_values();
             let op_code = if vals.is_empty() || vals[0].is_empty() || attr.is_multi_valued() {
                 "has"
             } else {
                 "eq"
             };
+            vals.sort();
 
-            let attr_str = format!("{op_code}: {}", &vals.join(","));
-
-            if let Some(_duplicate) = table.insert(k.clone(), attr_str) {
-                panic!("duplicate attribute found in join conditions: {k}",);
-            }
-            sorted_keys.push(k);
+            key_conditions.push((k, op_code.to_string(), vals));
         }
-        sorted_keys.sort();
-
-        let mut hasher = sha::Sha256::new();
-        for key in sorted_keys {
-            if let Some(val) = table.get(&key) {
-                hasher.update(key.as_bytes());
-                hasher.update(val.as_bytes());
+        // Sorting by key makes the key order-independent; adjacent equal keys are the
+        // duplicate attributes we refuse to accept.
+        key_conditions.sort();
+        for pair in key_conditions.windows(2) {
+            if pair[0].0 == pair[1].0 {
+                panic!(
+                    "duplicate attribute found in join conditions: {}",
+                    pair[0].0
+                );
             }
         }
-        let hashval = format!("{}", hex::encode(hasher.finish()));
-        JPKey { hashval }
+        JPKey {
+            conditions: key_conditions,
+        }
     }
 }
 
@@ -303,13 +303,17 @@ impl PolicyWriter for PolicyBinaryV2 {
         signal: Option<Signal>,
         pline: &str,
     ) {
+        let mut cli_conditions = cli_conditions.to_vec();
+        let mut svc_conditions = svc_conditions.to_vec();
+        cli_conditions.sort_by(|a, b| a.zpl_key().cmp(&b.zpl_key()));
+        svc_conditions.sort_by(|a, b| a.zpl_key().cmp(&b.zpl_key()));
         self.communication_policies.push(CommunicationPolicy {
             svc_id: svc_id.to_string(),
             policy_num,
             protocol: protocol.clone(),
             allow,
-            cli_conditions: cli_conditions.to_vec(),
-            svc_conditions: svc_conditions.to_vec(),
+            cli_conditions,
+            svc_conditions,
             pline: pline.to_string(),
             signal,
         });
@@ -342,6 +346,7 @@ impl PolicyWriter for PolicyBinaryV2 {
             };
             attrs.push(exp);
         }
+        attrs.sort_by(|a, b| a.key.cmp(&b.key));
 
         let peering = Peering {
             link_id: link_id.to_string(),
@@ -368,7 +373,20 @@ impl PolicyWriter for PolicyBinaryV2 {
 
     /// For Capn Proto the write_xxx functions just build up an internal copy of the data
     /// until we call this function which serializes everything at once.
-    fn finalize(self) -> Result<Vec<u8>, CompilationError> {
+    fn finalize(mut self) -> Result<Vec<u8>, CompilationError> {
+        // Deterministic output ordering. The com-policy sort must stay *stable*: within one
+        // service the ZPL source order matters (all `never` statements precede the `allow`
+        // statements), so we key only on svc_id and never use sort_unstable_by.
+        self.bootstrap_keys.sort_by(|a, b| a.cn.cmp(&b.cn));
+        self.communication_policies
+            .sort_by(|a, b| a.svc_id.cmp(&b.svc_id));
+        self.topology.sort_by(|a, b| a.link_id.cmp(&b.link_id));
+        for jp in self.join_policies.policies.values_mut() {
+            if let Some(provides) = jp.provides.as_mut() {
+                provides.sort_by(|a, b| a.id.cmp(&b.id));
+            }
+        }
+
         let mut policy_msg = ::capnp::message::Builder::new_default();
         let mut policy = policy_msg.init_root::<policy_capnp::policy::Builder>();
 
