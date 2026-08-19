@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::errors::CompilationError;
 use crate::ptypes::FPos;
@@ -63,11 +63,13 @@ mod test {
 
 /// Given a list of attributes that apply, return just the set of unique
 /// attributes and the ones with values should take precedence over ones without.
+/// Keys are unique per tag (`<domain>.zpr.tag.<name>`), so tags never collide
+/// with each other here; a BTreeMap keeps iteration deterministic.
 pub fn squash_attributes(
     attrs: &[Attribute],
     tok: &FPos,
-) -> Result<HashMap<String, Attribute>, CompilationError> {
-    let mut attr_map: HashMap<String, Attribute> = HashMap::new();
+) -> Result<BTreeMap<String, Attribute>, CompilationError> {
+    let mut attr_map: BTreeMap<String, Attribute> = BTreeMap::new();
     for a in attrs {
         if attr_map.contains_key(&a.zpl_key()) {
             // Map already has this attribute in it. If the map one has a value

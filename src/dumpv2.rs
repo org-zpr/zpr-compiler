@@ -406,9 +406,8 @@ fn attr_exp_v2_to_string(exp: &policy_capnp::attr_expr::Reader) -> String {
             s.push_str("]");
         } else if vals.len() == 1 {
             s.push_str(&vals.get(0).unwrap().to_str().unwrap());
-        } else {
-            s.push_str("\"\"");
         }
+        // len == 0? Don't say anything.
     } else {
         s.push_str("(no value)")
     }

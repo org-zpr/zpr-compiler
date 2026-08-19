@@ -276,23 +276,10 @@ allow marketing-emps to access role:marketing services.
                     assert_eq!(attr.is_tag(), false);
                     assert_eq!(attr.optional, false);
                 }
-                "user.zpr.tag" if attr.zpl_value() == "user.full-time" => {
+                "user.zpr.tag.full-time" | "user.zpr.tag.part-time" | "user.zpr.tag.intern" => {
                     assert_eq!(attr.is_multi_valued(), false);
                     assert_eq!(attr.is_tag(), true);
                     assert_eq!(attr.optional, true);
-                }
-                "user.zpr.tag" if attr.zpl_value() == "user.part-time" => {
-                    assert_eq!(attr.is_multi_valued(), false);
-                    assert_eq!(attr.is_tag(), true);
-                    assert_eq!(attr.optional, true);
-                }
-                "user.zpr.tag" if attr.zpl_value() == "user.intern" => {
-                    assert_eq!(attr.is_multi_valued(), false);
-                    assert_eq!(attr.is_tag(), true);
-                    assert_eq!(attr.optional, true);
-                }
-                "user.zpr.tag" => {
-                    panic!("unexpected tag: {}", attr.zpl_value());
                 }
                 _ => panic!("unexpected attribute name: {}", attr.zpl_key()),
             }

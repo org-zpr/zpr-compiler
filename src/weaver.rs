@@ -402,7 +402,7 @@ impl Weaver {
 
         if svc_type == ServiceType::Regular && resolved_attrs.is_empty() {
             return Err(CompilationError::ConfigError(format!(
-                "service with no attributes {}",
+                "service with no attributes: '{}'",
                 matched_service_name
             )));
         }
@@ -506,7 +506,7 @@ impl Weaver {
         let mut resolved_attrs = Vec::new();
         for zpl_attr in attrs {
             let attr_name = zpl_attr.zpl_key();
-            if zpl_attr.is_tag() && zpl_attr.zpl_value() == zpl::KATTR_CN {
+            if zpl_attr.is_tag() && zpl_attr.zplc_key() == format!("#{}", zpl::KATTR_CN) {
                 return Err(CompilationError::ConfigError(format!(
                     "{} attribute used as a tag, but is a tuple attribute",
                     zpl_attr.to_instance_string(),
@@ -520,7 +520,7 @@ impl Weaver {
                         .add_used_trusted_service(zpl::DEFAULT_TRUSTED_SERVICE_ID);
                 }
                 zpl::DEFAULT_ATTR => {
-                    resolved_attrs.push(zpl_attr.clone_with_new_name(zpl::KATTR_CN));
+                    resolved_attrs.push(zpl_attr.clone_with_new_name(zpl::KATTR_CN)?);
                     self.wctx
                         .add_used_trusted_service(zpl::DEFAULT_TRUSTED_SERVICE_ID);
                 }

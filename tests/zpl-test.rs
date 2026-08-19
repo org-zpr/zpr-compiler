@@ -692,3 +692,57 @@ fn test_bin2_ordering_is_deterministic() {
         "fixture needs a suffixed service with 3 rules"
     );
 }
+
+#[test]
+fn test_tag_conditions_one_key_per_tag() {
+    // Each tag compiles to its own `<domain>.zpr.tag.<name>` key with a valueless HAS
+    // (presence check). Multiple tags on one statement must not clobber each other.
+    //
+    // Previously we mapped tags to <domain>.zpr.tag so tags in the same domain
+    // clobbered each other.
+    let temp = TempDir::new("tag-encoding");
+    let pbytes = compile_policy_bytes("test-tag", &temp);
+    let rdr = capnp::serialize::read_message(
+        &mut Cursor::new(pbytes.as_slice()),
+        capnp::message::ReaderOptions::new(),
+    )
+    .unwrap();
+    let policy = rdr.get_root::<policy_capnp::policy::Reader>().unwrap();
+
+    let mut allow_keys: Option<Vec<String>> = None;
+    let mut deny_keys: Option<Vec<String>> = None;
+    for cp in policy.get_com_policies().unwrap().iter() {
+        if cp.get_service_id().unwrap().to_str().unwrap() != "database" {
+            continue;
+        }
+        let mut keys = Vec::new();
+        for cond in cp.get_client_conds().unwrap().iter() {
+            let key = cond.get_key().unwrap().to_str().unwrap().to_string();
+            assert!(
+                matches!(cond.get_op().unwrap(), policy_capnp::AttrOp::Has),
+                "tag condition {key} must be HAS"
+            );
+            assert_eq!(
+                cond.get_value().unwrap().len(),
+                0,
+                "tag condition {key} must be valueless (presence check)"
+            );
+            keys.push(key);
+        }
+        keys.sort();
+        if cp.get_allow() {
+            allow_keys = Some(keys);
+        } else {
+            deny_keys = Some(keys);
+        }
+    }
+
+    assert_eq!(
+        allow_keys.expect("allow policy for database not found"),
+        vec!["user.zpr.tag.nerd", "user.zpr.tag.redhead"]
+    );
+    assert_eq!(
+        deny_keys.expect("never policy for database not found"),
+        vec!["user.zpr.tag.baldy", "user.zpr.tag.stud"]
+    );
+}

@@ -1382,7 +1382,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1723,7 +1723,7 @@ checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
 name = "zplc"
-version = "0.14.1"
+version = "0.15.0"
 dependencies = [
  "base64",
  "bytes",
@@ -1744,8 +1744,8 @@ dependencies = [
 
 [[package]]
 name = "zpr"
-version = "0.21.0"
-source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.21.0#b212ca1a81464ee0534161fe6c6c8fd27f6a5b80"
+version = "0.23.0"
+source = "git+https://github.com/org-zpr/zpr-common.git?tag=v0.23.0#97dba33ec3492605aceb99889a9670ce1d274b82"
 dependencies = [
  "base64",
  "bytes",
