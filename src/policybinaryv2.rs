@@ -37,6 +37,7 @@ struct CommunicationPolicy {
     allow: bool,
     cli_conditions: Vec<Attribute>,
     svc_conditions: Vec<Attribute>,
+    link_conditions: Vec<Attribute>,
     pline: String,
     signal: Option<Signal>,
 }
@@ -300,13 +301,16 @@ impl PolicyWriter for PolicyBinaryV2 {
         allow: bool,
         cli_conditions: &[Attribute],
         svc_conditions: &[Attribute],
+        link_conditions: &[Attribute],
         signal: Option<Signal>,
         pline: &str,
     ) {
         let mut cli_conditions = cli_conditions.to_vec();
         let mut svc_conditions = svc_conditions.to_vec();
+        let mut link_conditions = link_conditions.to_vec();
         cli_conditions.sort_by(|a, b| a.zpl_key().cmp(&b.zpl_key()));
         svc_conditions.sort_by(|a, b| a.zpl_key().cmp(&b.zpl_key()));
+        link_conditions.sort_by(|a, b| a.zpl_key().cmp(&b.zpl_key()));
         self.communication_policies.push(CommunicationPolicy {
             svc_id: svc_id.to_string(),
             policy_num,
@@ -314,6 +318,7 @@ impl PolicyWriter for PolicyBinaryV2 {
             allow,
             cli_conditions,
             svc_conditions,
+            link_conditions,
             pline: pline.to_string(),
             signal,
         });
@@ -453,6 +458,10 @@ impl PolicyWriter for PolicyBinaryV2 {
                 .reborrow()
                 .init_service_conds(cp.svc_conditions.len() as u32);
             write_attributes(&cp.svc_conditions, &mut svcconds);
+            let mut linkconds = cpol
+                .reborrow()
+                .init_link_conds(cp.link_conditions.len() as u32);
+            write_attributes(&cp.link_conditions, &mut linkconds);
 
             if cp.signal.is_some() {
                 let mut sig_build = cpol.reborrow().init_signal();

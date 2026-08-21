@@ -122,6 +122,10 @@ pub struct ClientPolicy {
     /// List of attributes that must be met by a service for the policy to apply
     pub svc_condition: Vec<Attribute>,
 
+    /// List of attributes that must be met by every link on the communication
+    /// path for the policy to apply. Empty when the statement had no OVER clause.
+    pub link_condition: Vec<Attribute>,
+
     /// Signal containing message and destination
     pub signal: Option<Signal>,
 
@@ -447,6 +451,7 @@ impl Fabric {
         service_id: &str,
         cli_attrs: &[Attribute],
         svc_attrs: &[Attribute],
+        link_attrs: &[Attribute],
         access_only: bool,
         signal: Option<Signal>,
         pline: &PLine,
@@ -475,6 +480,7 @@ impl Fabric {
             never_allow: never_allow,
             cli_condition: cli_attrs.to_vec(),
             svc_condition: unique_svc_attrs.to_vec(),
+            link_condition: link_attrs.to_vec(),
             access_only,
             signal,
             zpl_line: pline.clone(),

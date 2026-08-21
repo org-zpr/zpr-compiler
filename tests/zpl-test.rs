@@ -746,3 +746,82 @@ fn test_tag_conditions_one_key_per_tag() {
         vec!["user.zpr.tag.baldy", "user.zpr.tag.stud"]
     );
 }
+
+#[test]
+fn test_link_conditions_end_to_end() {
+    // An "over <link-clause>" constrains the links of the communication path.
+    // The compiler records those constraints in `CPolicy.linkConds`; enforcement
+    // is the visa service's job and is deliberately out of scope here.
+    let temp = TempDir::new("link-over");
+    let pbytes = compile_policy_bytes("test-link-over", &temp);
+    let rdr = capnp::serialize::read_message(
+        &mut Cursor::new(pbytes.as_slice()),
+        capnp::message::ReaderOptions::new(),
+    )
+    .unwrap();
+    let policy = rdr.get_root::<policy_capnp::policy::Reader>().unwrap();
+
+    // Collect (client-condition keys, link-condition tuples) per database policy.
+    let mut allow_with_links: Option<Vec<(String, Vec<String>)>> = None;
+    let mut deny_with_links: Option<Vec<(String, Vec<String>)>> = None;
+    let mut saw_policy_without_links = false;
+
+    for cp in policy.get_com_policies().unwrap().iter() {
+        if cp.get_service_id().unwrap().to_str().unwrap() != "database" {
+            continue;
+        }
+        let mut link_conds = Vec::new();
+        for cond in cp.get_link_conds().unwrap().iter() {
+            let key = cond.get_key().unwrap().to_str().unwrap().to_string();
+            let vals: Vec<String> = cond
+                .get_value()
+                .unwrap()
+                .iter()
+                .map(|v| v.unwrap().to_str().unwrap().to_string())
+                .collect();
+            link_conds.push((key, vals));
+        }
+        link_conds.sort();
+
+        let cli_keys: Vec<String> = cp
+            .get_client_conds()
+            .unwrap()
+            .iter()
+            .map(|c| c.get_key().unwrap().to_str().unwrap().to_string())
+            .collect();
+
+        if link_conds.is_empty() {
+            // This is the "nerd" statement, which has no over clause.
+            assert!(
+                cli_keys.iter().any(|k| k.contains("nerd")),
+                "unexpected policy with no link conditions: {cli_keys:?}"
+            );
+            saw_policy_without_links = true;
+        } else if cp.get_allow() {
+            allow_with_links = Some(link_conds);
+        } else {
+            deny_with_links = Some(link_conds);
+        }
+    }
+
+    // "over secure, location:usa links" -> a valueless tag plus a key/value pair,
+    // both in the link domain.
+    assert_eq!(
+        allow_with_links.expect("allow policy with link conditions not found"),
+        vec![
+            ("link.location".to_string(), vec!["usa".to_string()]),
+            ("link.zpr.tag.secure".to_string(), vec![]),
+        ]
+    );
+
+    // "never allow ... over foreign links" must carry its link condition too.
+    assert_eq!(
+        deny_with_links.expect("never policy with link conditions not found"),
+        vec![("link.zpr.tag.foreign".to_string(), vec![])]
+    );
+
+    assert!(
+        saw_policy_without_links,
+        "expected a policy with no over clause to have empty linkConds"
+    );
+}

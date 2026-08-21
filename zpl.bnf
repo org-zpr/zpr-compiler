@@ -5,21 +5,18 @@
 // NOT YET IMPLEMENTED (documented in ZRFC 15 but absent from the compiler):
 //   - the predefined "servers" class (a subclass of devices with a set-valued
 //     "services" attribute)
-//   - the predefined "link"/"links" class
-//   - the "over ... links" clause on allow/never statements (link constraints),
-//     e.g. "... to access customer databases over secure links."
 //   - conditions / circumstances / limits (e.g. "before 18:00 GMT", "limited to 10Gb/day")
 //
 // KEYWORD STATE (from lex.rs):
 //   - Active keywords: never, allow, define, with, to, access, and, as, aka,
-//     tag, tags, on, optional, multiple, signal (plus "," as AND, "." followed
-//     by a newline to terminate a statement).
+//     tag, tags, on, optional, multiple, signal, over (plus "," as AND, "."
+//     followed by a newline to terminate a statement).
 //   - Keywords are case-insensitive ("ALLOW" == "allow"). Literals (class,
 //     attribute, and value names) are case-sensitive.
 //   - "a"/"an" are dropped as syntactic sugar wherever they appear (not just after "as").
-//   - "link", "links", "over" are NOT tokenized; if written they parse as ordinary
-//     literals. ZRFC 15 uses them for the link class and "over" clause (see above),
-//     so they are effectively spec keywords the compiler has not yet reserved.
+//   - "over" is a keyword and is therefore NOT one of the reserved prepositions.
+//     "link"/"links" are not keywords: they name the built-in link class and are
+//     tokenized as ordinary literals, exactly like "user"/"device"/"service".
 
 <zpl-policy> ::= <statement>*
 
@@ -48,13 +45,32 @@
 <define-statement> ::= "define" <name> <aka-clause>? "as" <class-name>
                        <with-attributes-clause>?
 
-<p-statement> ::= <subject-clause> "to" "access" <object-clause> <signal-clause>?
+<p-statement> ::= <subject-clause> "to" "access" <object-clause> <over-clause>? <signal-clause>?
 
 <subject-clause> ::= <user-spec> | <service-spec> | <device-spec> |
                      <user-spec> "on" <device-spec> |
                      <service-spec> "on" <device-spec>
 
 <object-clause> ::= <service-spec> | <service-spec> "on" <device-spec>
+
+// The "over" clause constrains the links of the communication path (ZRFC 15):
+// "Allow sales employees to access customer databases over secure links."
+// "Allow finance users to access payroll-services over location:usa links."
+// The statement applies only if a permitted path exists whose links all satisfy
+// the link description. The compiler records the constraints in the policy
+// (CPolicy.linkConds); it does NOT check that such a path exists — that is the
+// visa service's job. At most one over-clause per statement, and it must precede
+// the signal clause.
+<over-clause> ::= "over" <link-spec>
+
+// Only link-domain attributes are permitted here; an attribute explicitly
+// qualified with another domain (e.g. "user.foo") is an error, and unqualified
+// attributes default to the link domain.
+<link-spec> ::= (<attribute-expr> | <link-class-name>) (<and-token>? (<attribute-expr> | <link-class-name>))*
+
+// "link" is a built-in class and is NOT extensible: it may not be used as a
+// parent in a define statement, and there are no user-defined link subclasses.
+<link-class-name> ::= <built-in-link-class-name>
 
 // The "and"/"," before "signal" are optional delimiters (consumed but not required).
 // The message may be any <name> (quoting is conventional but not required).
@@ -152,7 +168,8 @@
 
 <built-in-class-name> ::= <built-in-device-class-name> |
                           <built-in-service-class-name> |
-                          <built-in-user-class-name>
+                          <built-in-user-class-name> |
+                          <built-in-link-class-name>
 
 // ZRFC 15 also defines a subclass "server"/"servers", not yet implemented.
 <built-in-device-class-name> ::= "device" | "devices"
@@ -162,6 +179,8 @@
 <built-in-service-class-name> ::= "service" | "services" | "VisaService" | "VisaServices"
 
 <built-in-user-class-name> ::= "user" | "users"
+
+<built-in-link-class-name> ::= "link" | "links"
 
 <value> ::= <unquoted-value> | <quoted-string> | <value-set>
 

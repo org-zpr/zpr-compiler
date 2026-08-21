@@ -185,6 +185,7 @@ impl Weaver {
             &fab_svc_id,
             &vs_access_attrs,
             &[],
+            &[], // no link constraints on the built-in visa service policy
             true,
             None,
             &pline,
@@ -254,6 +255,7 @@ impl Weaver {
                     &fab_admin_svc_id,
                     &resolved_attrs,
                     &[], // TODO: Should we consider RHS attributes?
+                    &[], // no link constraints on the admin API policy
                     false,
                     None,
                     &pline,
@@ -725,6 +727,7 @@ impl Weaver {
                 &vss_id,
                 &vs_provider_attrs,
                 &[],
+                &[], // no link constraints on the visa support service policy
                 false,
                 None,
                 &pline,
@@ -900,6 +903,29 @@ impl Weaver {
                 )?
             };
 
+            // And the link constraints from the OVER clause, if the statement had one.
+            // These are recorded in the policy for the visa service to enforce; the
+            // compiler does not itself check that a satisfying path exists.
+            //
+            // Note these are deliberately NOT passed through `resolve_attributes`:
+            // link attributes are not vouched for by a trusted service, they come
+            // from the topology in the configuration description (see `init_links`,
+            // which reads `zpr/links/<id>/attributes`). Resolving them would fail
+            // with "attribute not found in any trusted service".
+            let link_required_attrs = match &ac.link {
+                Some(link_clause) => {
+                    let link_attrs: Vec<Attribute> = link_clause
+                        .with
+                        .iter()
+                        .filter(|a| !a.optional)
+                        .cloned()
+                        .collect();
+                    let attr_map = squash_attributes(&link_attrs, &fp)?;
+                    attr_map.into_values().collect::<Vec<Attribute>>()
+                }
+                None => Vec::new(),
+            };
+
             // Now figure out what service we are talking about.
             // The service may be:
             // a) a service that is defined in configuration, eg "SomeDatabase"
@@ -931,6 +957,7 @@ impl Weaver {
                         &svc_id,
                         &required_attrs,
                         &svc_required_attrs,
+                        &link_required_attrs,
                         false, // guessing
                         ac.signal.clone(),
                         &pline,
@@ -944,6 +971,7 @@ impl Weaver {
                     &fab_svc_id,
                     &required_attrs,
                     &svc_required_attrs,
+                    &link_required_attrs,
                     false,
                     ac.signal.clone(),
                     &pline,
@@ -1178,6 +1206,7 @@ impl Weaver {
                 &ts_name,
                 &vs_access_attrs,
                 &[],
+                &[], // no link constraints on the trusted service policy
                 true,
                 None,
                 &pline,
@@ -1476,6 +1505,7 @@ mod test {
                 Clause::new(ClassFlavor::User, "user", Token::default()),
             ],
             server: vec![Clause::new(ClassFlavor::Service, "foo", Token::default())],
+            link: None,
             signal: None,
         };
         policy.allows.push(a_foo);

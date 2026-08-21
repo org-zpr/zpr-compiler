@@ -39,6 +39,7 @@ pub trait PolicyWriter {
         allow: bool,
         cli_conditions: &[Attribute],
         svc_conditions: &[Attribute],
+        link_conditions: &[Attribute],
         signal: Option<Signal>,
         pline: &str,
     );

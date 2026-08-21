@@ -1,0 +1,23 @@
+
+[nodes.n0]
+provider = [["device.zpr.adapter.cn", "node.zpr.org"]]
+zpr_address = "fd5a:5052:90de::1"
+
+[trusted_services.attrfile]
+api = "file"
+returns_attributes = [
+  "redhead -> #user.redhead",
+  "baldy -> #user.baldy",
+  "nerd -> #user.nerd"
+]
+expiration_seconds = 3600
+
+
+[protocols.http]
+l4protocol = "TCP"
+port = 80
+
+[services.database]
+protocol = "http"
+port = "80"
+provider = [["device.zpr.adapter.cn", "db.org"]]

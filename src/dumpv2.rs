@@ -212,6 +212,16 @@ pub fn dump_v2(fname: &str, encoded_buf: Bytes) {
                     );
                 }
             }
+            if cp.has_link_conds() {
+                for cond in cp.get_link_conds().unwrap() {
+                    println!("      cond {} :", "link".bold().italic());
+                    println!(
+                        "         {} {}",
+                        format!("{}", "󰞘").dimmed(),
+                        attr_exp_v2_to_string(&cond).yellow()
+                    );
+                }
+            }
             if cp.has_signal() {
                 let signal = cp.get_signal().unwrap();
                 println!(
