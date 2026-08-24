@@ -746,3 +746,193 @@ fn test_tag_conditions_one_key_per_tag() {
         vec!["user.zpr.tag.baldy", "user.zpr.tag.stud"]
     );
 }
+
+#[test]
+fn test_link_conditions_end_to_end() {
+    // An "over <link-clause>" constrains the links of the communication path.
+    // The compiler records those constraints in `CPolicy.linkConds`; enforcement
+    // is the visa service's job and is deliberately out of scope here.
+    let temp = TempDir::new("link-over");
+    let pbytes = compile_policy_bytes("test-link-over", &temp);
+    let rdr = capnp::serialize::read_message(
+        &mut Cursor::new(pbytes.as_slice()),
+        capnp::message::ReaderOptions::new(),
+    )
+    .unwrap();
+    let policy = rdr.get_root::<policy_capnp::policy::Reader>().unwrap();
+
+    // Collect (client-condition keys, link-condition tuples) per database policy.
+    let mut allow_with_links: Option<Vec<(String, Vec<String>)>> = None;
+    let mut deny_with_links: Option<Vec<(String, Vec<String>)>> = None;
+    let mut saw_policy_without_links = false;
+
+    for cp in policy.get_com_policies().unwrap().iter() {
+        if cp.get_service_id().unwrap().to_str().unwrap() != "database" {
+            continue;
+        }
+        let mut link_conds = Vec::new();
+        for cond in cp.get_link_conds().unwrap().iter() {
+            let key = cond.get_key().unwrap().to_str().unwrap().to_string();
+            let vals: Vec<String> = cond
+                .get_value()
+                .unwrap()
+                .iter()
+                .map(|v| v.unwrap().to_str().unwrap().to_string())
+                .collect();
+            link_conds.push((key, vals));
+        }
+        link_conds.sort();
+
+        let cli_keys: Vec<String> = cp
+            .get_client_conds()
+            .unwrap()
+            .iter()
+            .map(|c| c.get_key().unwrap().to_str().unwrap().to_string())
+            .collect();
+
+        if link_conds.is_empty() {
+            // This is the "nerd" statement, which has no over clause.
+            assert!(
+                cli_keys.iter().any(|k| k.contains("nerd")),
+                "unexpected policy with no link conditions: {cli_keys:?}"
+            );
+            saw_policy_without_links = true;
+        } else if cp.get_allow() {
+            allow_with_links = Some(link_conds);
+        } else {
+            deny_with_links = Some(link_conds);
+        }
+    }
+
+    // "over secure, location:usa links" -> a valueless tag plus a key/value pair,
+    // both in the link domain.
+    let allow_conds = allow_with_links.expect("allow policy with link conditions not found");
+    assert_eq!(
+        allow_conds,
+        vec![
+            ("link.location".to_string(), vec!["usa".to_string()]),
+            ("link.zpr.tag.secure".to_string(), vec![]),
+        ]
+    );
+
+    // "never allow ... over foreign links" must carry its link condition too.
+    let deny_conds = deny_with_links.expect("never policy with link conditions not found");
+    assert_eq!(
+        deny_conds,
+        vec![("link.zpr.tag.foreign".to_string(), vec![])]
+    );
+
+    assert!(
+        saw_policy_without_links,
+        "expected a policy with no over clause to have empty linkConds"
+    );
+
+    // Every emitted link condition must actually be satisfiable by a link in the
+    // compiled topology. This is the property that matters: the ZPL side and the
+    // ZPLC side have to agree on the attribute encoding, otherwise a `never allow`
+    // with an over clause would fail open once the visa service enforces link rules.
+    let mut topo_keys: Vec<String> = Vec::new();
+    for peering in policy.get_topology().unwrap().iter() {
+        for attr in peering.get_attrs().unwrap().iter() {
+            topo_keys.push(attr.get_key().unwrap().to_str().unwrap().to_string());
+        }
+    }
+    topo_keys.sort();
+    topo_keys.dedup();
+
+    // The tag on the link (`["#secure", ""]` in the zplc) must encode identically to
+    // the tag written in ZPL (`over secure links`).
+    assert!(
+        topo_keys.contains(&"link.zpr.tag.secure".to_string()),
+        "configured link tag not encoded as link.zpr.tag.secure: {topo_keys:?}"
+    );
+    assert!(
+        topo_keys.contains(&"link.zpr.tag.foreign".to_string()),
+        "configured link tag not encoded as link.zpr.tag.foreign: {topo_keys:?}"
+    );
+    assert!(
+        topo_keys.contains(&"link.location".to_string()),
+        "configured link key/value attribute missing: {topo_keys:?}"
+    );
+
+    for (key, _) in allow_conds.iter().chain(deny_conds.iter()) {
+        assert!(
+            topo_keys.contains(key),
+            "link condition {key} is satisfied by no configured link (topology keys: {topo_keys:?})"
+        );
+    }
+
+    // The VisaService admin policy is built on a separate path in the weaver
+    // (visa_services_to_services). Its over clause must be preserved too:
+    // "allow redhead users to access VisaService over secure links" must not
+    // grant admin access over arbitrary links.
+    let mut admin_link_conds: Option<Vec<(String, Vec<String>)>> = None;
+    for cp in policy.get_com_policies().unwrap().iter() {
+        if cp.get_service_id().unwrap().to_str().unwrap() != "/zpr/visaservice/admin" {
+            continue;
+        }
+        let mut link_conds = Vec::new();
+        for cond in cp.get_link_conds().unwrap().iter() {
+            let key = cond.get_key().unwrap().to_str().unwrap().to_string();
+            let vals: Vec<String> = cond
+                .get_value()
+                .unwrap()
+                .iter()
+                .map(|v| v.unwrap().to_str().unwrap().to_string())
+                .collect();
+            link_conds.push((key, vals));
+        }
+        link_conds.sort();
+        admin_link_conds = Some(link_conds);
+    }
+    assert_eq!(
+        admin_link_conds.expect("VisaService admin policy not found"),
+        vec![("link.zpr.tag.secure".to_string(), vec![])],
+        "over clause dropped from the VisaService admin policy"
+    );
+}
+
+#[test]
+fn test_over_clause_with_unconfigured_attribute_fails_to_compile() {
+    // ZPL and ZPLC are always compiled together, so a link attribute that appears on no
+    // configured link means the author wrote a statement that can never match. Fail loudly.
+    // Named "bad-" rather than "test-" so the bulk must-compile sweeps skip it.
+    let temp = TempDir::new("link-over-bad");
+    let path = get_zpl_dir().join("bad-link-over-unsatisfiable.zpl");
+    let cb = CompilationBuilder::new(path)
+        .output_format(OutputFormat::V2)
+        .output_directory(&temp.path);
+    let mut comp = cb.build();
+    let err = comp
+        .compile()
+        .expect_err("over clause naming an unconfigured link attribute must not compile");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("not present on any configured link"),
+        "unexpected error: {msg}"
+    );
+    assert!(
+        msg.contains("nosuchtag"),
+        "error should name the offending attribute: {msg}"
+    );
+}
+
+#[test]
+fn test_over_clause_with_unconfigured_value_warns_but_compiles() {
+    // Distinct from the case above: the link attribute `location` IS configured, but no
+    // link carries the value `use` (the configured values are `usa` and `eu`). That is a
+    // likely typo, so it is reported -- but link values are topology data a later config
+    // edit may legitimately introduce, so it must not fail the compile.
+    let temp = TempDir::new("link-over-unknown-value");
+    let path = get_zpl_dir().join("test-link-over-unknown-value.zpl");
+    let cb = CompilationBuilder::new(path)
+        .output_format(OutputFormat::V2)
+        .output_directory(&temp.path);
+    let mut comp = cb.build();
+    comp.compile()
+        .expect("an over clause with an unknown value must warn, not fail");
+
+    // The warning text itself is asserted in weaver::test::test_link_condition_unknown_value_warns;
+    // `compile()` returns unit on success, so it cannot be inspected from here, and --werror
+    // would trip on the unrelated "no policy granting admin access to VisaService" warning first.
+}

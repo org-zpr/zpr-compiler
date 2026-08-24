@@ -208,6 +208,7 @@ impl<T: PolicyWriter> PolicyBuilder<T> {
                     !policy.never_allow,
                     &policy.cli_condition,
                     &policy.svc_condition,
+                    &policy.link_condition,
                     policy.signal.clone(),
                     &policy.zpl_line.to_string(),
                 );

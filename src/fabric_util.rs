@@ -4,6 +4,10 @@ use crate::errors::CompilationError;
 use crate::ptypes::FPos;
 use zpr::policy_types::{AttrDomain, Attribute};
 
+/// Prefix that marks an attribute key in the configuration description as a tag rather
+/// than a key/value tuple. Matches the spelling used by `returns_attributes`.
+pub const TAG_PREFIX: &str = "#";
+
 /// Convert the list of (key, value) pairs into a list of attributes.
 ///
 /// Note this only supports KEY:VALUE attributes, not TAG attributes.
@@ -26,20 +30,38 @@ pub fn vec_to_attributes(v: &[(String, String)]) -> Result<Vec<Attribute>, Compi
     Ok(attrs)
 }
 
-/// Just like [vec_to_attributes] but also adds a domain hint to the attributes.
+/// Just like [vec_to_attributes] but also adds a domain hint to the attributes, and
+/// understands the tag encoding used by the configuration description.
+///
+/// A key carrying the `#` prefix denotes a **tag** rather than a key/value tuple, the
+/// same spelling `returns_attributes` uses for trusted services (`"role -> #user.admin"`).
+/// A tag has no value, so `("#secure", "")` becomes the tag attribute `link.zpr.tag.secure`
+/// while `("location", "usa")` becomes the tuple attribute `link.location` with value `usa`.
+///
+/// This matters because ZPL writes tags and key/value pairs with the same syntax
+/// (`over secure, location:usa links`): without a tag-capable encoding on the
+/// configuration side a ZPL tag condition could never be satisfied by a configured link.
 pub fn vec_to_attributes_in_domain(
     v: &[(String, String)],
     domain: AttrDomain,
 ) -> Result<Vec<Attribute>, CompilationError> {
     let mut attrs = Vec::new();
     for (k, v) in v {
-        attrs.push(
+        let attr = if let Some(tag_name) = k.strip_prefix(TAG_PREFIX) {
+            if !v.is_empty() {
+                return Err(CompilationError::ConfigError(format!(
+                    "tag attribute '{k}' must not have a value (got '{v}')",
+                )));
+            }
+            Attribute::tag(tag_name).domain_hint(domain).build()?
+        } else {
             Attribute::tuple(k)
                 .domain_hint(domain)
                 .single()
                 .value(v)
-                .build()?,
-        );
+                .build()?
+        };
+        attrs.push(attr);
     }
     Ok(attrs)
 }
@@ -58,6 +80,45 @@ mod test {
 
         // Other zpr.* keys still fail the domain check (no spoofing internal attrs).
         assert!(vec_to_attributes(&[("zpr.role".to_string(), "node".to_string())]).is_err());
+    }
+
+    #[test]
+    fn test_config_tag_encoding_matches_zpl_tag_encoding() {
+        // A "#name" key in the config is a tag and must encode to the same key ZPL
+        // produces for `over name links`, otherwise no configured link could ever
+        // satisfy a ZPL tag condition.
+        let attrs = vec_to_attributes_in_domain(
+            &[
+                ("#secure".to_string(), "".to_string()),
+                ("location".to_string(), "usa".to_string()),
+            ],
+            AttrDomain::Link,
+        )
+        .expect("link attributes should encode");
+
+        assert_eq!(attrs.len(), 2);
+        assert!(attrs[0].is_tag());
+        assert_eq!(attrs[0].zpl_key(), "link.zpr.tag.secure");
+        assert!(attrs[0].zpl_values().is_empty());
+
+        assert!(!attrs[1].is_tag());
+        assert_eq!(attrs[1].zpl_key(), "link.location");
+        assert_eq!(attrs[1].zpl_value(), "usa");
+    }
+
+    #[test]
+    fn test_config_tag_with_value_is_rejected() {
+        // A tag is valueless by definition; silently dropping the value would hide a
+        // config mistake.
+        let err = vec_to_attributes_in_domain(
+            &[("#secure".to_string(), "yes".to_string())],
+            AttrDomain::Link,
+        )
+        .expect_err("tag carrying a value must be rejected");
+        assert!(
+            err.to_string().contains("must not have a value"),
+            "unexpected error: {err}"
+        );
     }
 }
 

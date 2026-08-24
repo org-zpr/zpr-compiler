@@ -28,6 +28,7 @@ pub enum TokenType {
     Period,
     Eos, // means "end of statement" but is never actually created
     Signal,
+    Over, // introduces the link constraint clause of an allow statement
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -80,7 +81,6 @@ const RESERVED_PREPOSITIONS: &[&str] = &[
     "onto",
     "out",
     "outside",
-    "over",
     "past",
     "per",
     "regarding",
@@ -131,6 +131,7 @@ impl Token {
             "multiple" => TokenType::Multiple,
             "." => TokenType::Period,
             "signal" => TokenType::Signal,
+            "over" => TokenType::Over,
             _ if RESERVED_PREPOSITIONS.contains(&ls.as_str()) => {
                 return Err(CompilationError::ReservedPreposition(ls, line, col));
             }
@@ -909,6 +910,7 @@ mod test {
             ("tags", super::TokenType::Tags),
             ("optional", super::TokenType::Optional),
             ("multiple", super::TokenType::Multiple),
+            ("over", super::TokenType::Over),
         ];
         for (word, expected) in cases {
             let tz = super::tokenize_str(word, &CompilationCtx::default()).unwrap();
@@ -923,6 +925,39 @@ mod test {
         let tz = super::tokenize_str(",", &CompilationCtx::default()).unwrap();
         assert_eq!(tz.tokens.len(), 1);
         assert_eq!(tz.tokens[0].tt, super::TokenType::Comma);
+    }
+
+    #[test]
+    fn test_keyword_over_all_legal_casings() {
+        // "over" is a keyword (RFC 15 link constraint clause) and, like every
+        // other keyword, is accepted lowercase, capitalized or all caps.
+        for word in ["over", "Over", "OVER"] {
+            let tz = super::tokenize_str(word, &CompilationCtx::default())
+                .unwrap_or_else(|e| panic!("'{word}' should tokenize, got {e:?}"));
+            assert_eq!(tz.tokens.len(), 1, "expected 1 token for '{word}'");
+            assert_eq!(tz.tokens[0].tt, super::TokenType::Over);
+        }
+    }
+
+    #[test]
+    fn test_over_clause_tokenizes_in_statement() {
+        // The RFC 15 example must tokenize, with "over" as a keyword and
+        // "links" left as an ordinary literal (it is a class name, not a keyword).
+        let zpl = "allow sales employees to access customer databases over secure links.";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let over_idx = tz
+            .tokens
+            .iter()
+            .position(|t| t.tt == super::TokenType::Over)
+            .expect("expected an Over token");
+        assert_eq!(
+            tz.tokens[over_idx + 1].tt,
+            super::TokenType::Literal("secure".to_string())
+        );
+        assert_eq!(
+            tz.tokens[over_idx + 2].tt,
+            super::TokenType::Literal("links".to_string())
+        );
     }
 
     // --- Case insensitivity ---
@@ -1312,7 +1347,9 @@ mod test {
 
     #[test]
     fn test_reserved_prepositions() {
-        for word in ["from", "WITHOUT", "Over"] {
+        // Note "over" is deliberately absent: it became a keyword when the link
+        // constraint clause was added (RFC 15), so it is no longer reserved.
+        for word in ["from", "WITHOUT", "Through"] {
             match super::tokenize_str(word, &CompilationCtx::default()) {
                 Err(CompilationError::ReservedPreposition(w, _, _)) => {
                     assert_eq!(w, word.to_lowercase());

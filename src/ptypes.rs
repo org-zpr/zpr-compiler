@@ -78,6 +78,9 @@ pub struct AllowClause {
     pub span: (FPos, FPos),
     pub client: Vec<Clause>,
     pub server: Vec<Clause>,
+    /// Constraints on the links of the communication path, from the `over` clause.
+    /// `None` when the statement has no `over` clause.
+    pub link: Option<Clause>,
     pub signal: Option<Signal>,
 }
 
@@ -94,6 +97,9 @@ impl fmt::Display for AllowClause {
         write!(f, "    TO ACCESS\n")?;
         for c in &self.server {
             write!(f, "     {:?}\n", c)?;
+        }
+        if let Some(lc) = &self.link {
+            write!(f, "    OVER\n      {:?}\n", lc)?;
         }
         if let Some(sig) = &self.signal {
             write!(f, "    AND SIGNAL\n      {:?}\n", sig)?;
@@ -114,6 +120,9 @@ impl AllowClause {
         write!(f, "    TO ACCESS\n").unwrap();
         for c in &self.server {
             write!(f, "     {:?}\n", c).unwrap();
+        }
+        if let Some(lc) = &self.link {
+            write!(f, "    OVER\n      {:?}\n", lc).unwrap();
         }
         if let Some(sig) = &self.signal {
             write!(f, "    AND SIGNAL\n      {:?}\n", sig).unwrap();
@@ -220,6 +229,7 @@ pub enum ClassFlavor {
     Device,
     User,
     Service,
+    Link,
 }
 
 impl Display for ClassFlavor {
@@ -228,6 +238,7 @@ impl Display for ClassFlavor {
             ClassFlavor::Device => write!(f, "device"),
             ClassFlavor::User => write!(f, "user"),
             ClassFlavor::Service => write!(f, "service"),
+            ClassFlavor::Link => write!(f, "link"),
             ClassFlavor::Undefined => write!(f, "undefined"),
         }
     }
@@ -239,6 +250,7 @@ impl Into<AttrDomain> for ClassFlavor {
             ClassFlavor::Device => AttrDomain::Device,
             ClassFlavor::User => AttrDomain::User,
             ClassFlavor::Service => AttrDomain::Service,
+            ClassFlavor::Link => AttrDomain::Link,
             ClassFlavor::Undefined => AttrDomain::Unspecified,
         }
     }
@@ -268,6 +280,7 @@ impl Class {
             Class::default_service(),
             Class::default_device(),
             Class::default_visa_service(),
+            Class::default_link(),
         ]
     }
     pub fn default_user() -> Class {
@@ -322,11 +335,29 @@ impl Class {
             class_id: usize::MAX - 4,
         }
     }
+    /// The predefined "link" class (RFC 15). Links are described in the
+    /// configuration description, not in ZPL, so the class is not extensible:
+    /// `define X as link` is rejected. Only the built-in class may appear, and
+    /// only in the `over` clause of an allow/never statement.
+    pub fn default_link() -> Class {
+        Class {
+            flavor: ClassFlavor::Link,
+            parent: zpl::DEF_CLASS_LINK_NAME.to_string(),
+            name: zpl::DEF_CLASS_LINK_NAME.to_string(),
+            aka: None,
+            plural: zpl::DEF_CLASS_LINK_PLURAL.to_string(),
+            pos: FPos { line: 0, col: 0 },
+            with_attrs: vec![],
+            extensible: false,
+            class_id: usize::MAX - 5,
+        }
+    }
     pub fn is_builtin(&self) -> bool {
         self.name == zpl::DEF_CLASS_USER_NAME
             || self.name == zpl::DEF_CLASS_SERVICE_NAME
             || self.name == zpl::DEF_CLASS_DEVICE_NAME
             || self.name == zpl::DEF_CLASS_VISA_SERVICE_NAME
+            || self.name == zpl::DEF_CLASS_LINK_NAME
     }
 
     pub fn iterate_all_names(&self) -> impl Iterator<Item = &String> {

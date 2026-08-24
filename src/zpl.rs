@@ -10,6 +10,12 @@ pub const DEF_CLASS_USER_PLURAL: &str = "users";
 pub const DEF_CLASS_DEVICE_NAME: &str = "device";
 pub const DEF_CLASS_DEVICE_PLURAL: &str = "devices";
 
+/// Predefined "link" class (RFC 15). A link is a connection between two nodes
+/// in the ZPRnet; its attributes are constrained by the "over" clause of an
+/// allow/never statement.
+pub const DEF_CLASS_LINK_NAME: &str = "link";
+pub const DEF_CLASS_LINK_PLURAL: &str = "links";
+
 pub const DEFAULT_TRUSTED_SERVICE_ID: &str = "default";
 pub const DEFAULT_TRUSTED_SERVICE_API: &str = TS_API_V1;
 
@@ -36,7 +42,6 @@ pub const KATTR_ROLE: &str = "zpr.role";
 pub const KATTR_CN: &str = "device.zpr.adapter.cn";
 pub const KATTR_ADDR: &str = "zpr.addr";
 
-/// TODO: Add a "link" default class?
 pub const KATTR_LINK_COST: &str = "zpr.cost";
 
 /// Multi-valued "services" attribute.

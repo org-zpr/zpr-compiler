@@ -66,6 +66,37 @@ peers = [ { node = "<NODEID>" },
           { node = "<NODEID>", interface = "i3" } ]
 ```
 
+### Link attributes
+
+Link attributes are what a ZPL `over` clause matches against, eg
+`allow red users to access database over secure, location:usa links.`
+
+An entry is either a key/value pair or a **tag**. A tag is written with a `#`
+prefix and an empty value, the same spelling used by `returns_attributes`:
+
+```toml
+[links.<LINKID>]
+attributes = [["zpr.cost", "1"],      # key/value
+              ["location", "usa"],    # key/value
+              ["#secure", ""]]        # tag
+```
+
+Giving a `#`-prefixed key a non-empty value is an error.
+
+Because ZPL and ZPLC are always compiled together, the compiler can check an `over`
+clause against the topology. Attribute names and values are treated differently:
+
+- An `over` clause naming a link attribute that **no configured link carries** is an
+  **error**. Such a statement could never match anything.
+- An `over` clause naming a **value** that no configured link carries — while the
+  attribute itself does exist — is a **warning** (`location:use` where the configured
+  values are `usa` and `eu`). This catches typos without failing the build, since link
+  values are topology data a later configuration edit may legitimately introduce, and
+  value matching is ultimately the visa service's job at enforcement time. Compile with
+  `--werror` to make it fatal.
+
+Tags carry no value, so only the attribute check applies to them.
+
 
 ## Trusted Services
 

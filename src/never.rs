@@ -103,6 +103,27 @@ mod test {
         assert!(!clause.server.is_empty());
     }
 
+    // A "never allow ... over <link-clause>" statement must parse and carry the
+    // link constraints, exactly as the allow form does (RFC 15).
+    #[test]
+    fn test_never_with_over_clause_parses() {
+        use crate::ptypes::ClassFlavor;
+
+        let ctx = CompilationCtx::default();
+        let tz = tokenize_str(
+            "never allow regulated services to access backup services over foreign links",
+            &ctx,
+        )
+        .unwrap();
+        let (class_index, classes) = make_classes();
+        let clause = parse_never(&tz.tokens, 1, &class_index, &classes)
+            .expect("never statement with an over clause should parse");
+
+        let link = clause.link.expect("expected the link clause to be set");
+        assert_eq!(link.flavor, ClassFlavor::Link);
+        assert_eq!(link.with.len(), 1, "expected the 'foreign' link attribute");
+    }
+
     // parse_never must overwrite span.0 with the "never" token's position so
     // that source locations in error messages point at "never", not "allow".
     #[test]

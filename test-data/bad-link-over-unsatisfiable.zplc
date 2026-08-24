@@ -1,0 +1,50 @@
+
+[nodes.n0]
+provider = [["device.zpr.adapter.cn", "node.zpr.org"]]
+zpr_address = "fd5a:5052:90de::1"
+
+[nodes.n0.substrate_addrs]
+i0 = "10.0.0.1:5000"
+
+[nodes.n1]
+provider = [["device.zpr.adapter.cn", "node1.zpr.org"]]
+zpr_address = "fd5a:5052:90de::2"
+
+[nodes.n1.substrate_addrs]
+i0 = "10.0.0.2:5000"
+
+[nodes.n2]
+provider = [["device.zpr.adapter.cn", "node2.zpr.org"]]
+zpr_address = "fd5a:5052:90de::3"
+
+[nodes.n2.substrate_addrs]
+i0 = "10.0.0.3:5000"
+
+# Link attributes exercise both encodings: "#name" is a tag (no value), a plain
+# key is a key/value tuple. The ZPL statements below constrain links using both.
+[links.n0n1]
+attributes = [["zpr.cost", "10"], ["#secure", ""], ["location", "usa"]]
+peers = [{node="n0"}, {node="n1"}]
+
+[links.n1n2]
+attributes = [["zpr.cost", "20"], ["#foreign", ""], ["location", "eu"]]
+peers = [{node="n1"}, {node="n2"}]
+
+[trusted_services.attrfile]
+api = "file"
+returns_attributes = [
+  "redhead -> #user.redhead",
+  "baldy -> #user.baldy",
+  "nerd -> #user.nerd"
+]
+expiration_seconds = 3600
+
+
+[protocols.http]
+l4protocol = "TCP"
+port = 80
+
+[services.database]
+protocol = "http"
+port = "80"
+provider = [["device.zpr.adapter.cn", "db.org"]]

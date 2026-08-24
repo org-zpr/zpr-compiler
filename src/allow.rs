@@ -17,6 +17,7 @@ struct ParseAllowState {
     client_user_clause: Option<Clause>,
     client_service_clause: Option<Clause>,
     service_clause: Option<Clause>,
+    link_clause: Option<Clause>,
     signal_clause: Option<Signal>,
 }
 
@@ -121,6 +122,7 @@ impl ParseAllowState {
             // client class into the client class of the attribute domain. We do not to that (yet?)
             // for the service clause.
             server: vec![self.service_clause.take().expect("service clause not set")],
+            link: self.link_clause.take(),
             signal: self.signal_clause.take(),
         }
     }
@@ -138,6 +140,12 @@ impl ParseAllowState {
 /// allow <user-clause> to access <service-clause>
 /// allow <service-clause> to access <service-clause>
 /// allow <device-clause> to access <service-clause>
+///
+/// The service clause may be followed by an OVER clause that constrains the links
+/// of the communication path (RFC 15), and finally by a SIGNAL clause:
+///
+/// allow <user-clause> to access <service-clause> over <link-clause>
+/// allow <user-clause> to access <service-clause> over <link-clause> and signal ...
 ///
 /// `classes_idx` maps class names and AKA names to their canonical names (eg, "services" -> "service").
 /// `classs_map` maps class canonical name to [Class] struct.
@@ -292,12 +300,21 @@ pub fn parse_allow(
         panic!("assertion fails - no client clauses");
     }
 
-    // The remaining tokens should start with "access ..." or "signal ..." which we pass to the service class parser.
-    // If there is a signal token at the end, only that token will remain after this function.
+    // The remaining tokens should start with "access ..." which we pass to the service class
+    // parser. It stops at an OVER or a SIGNAL, leaving those clauses in the queue for us.
     let mut last_tok =
         parse_allow_service_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
 
-    if let Some(_tok) = tokens.peek() {
+    // An optional OVER clause constrains the links of the communication path.
+    if let Some(tok) = tokens.peek() {
+        if tok.tt == TokenType::Over {
+            last_tok =
+                parse_allow_over_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
+        }
+    }
+
+    // An optional SIGNAL clause, which must come last.
+    if tokens.peek().is_some() {
         last_tok =
             parse_allow_signal_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
     }
@@ -319,6 +336,14 @@ pub fn parse_allow(
             if attr.is_unspecified_domain() {
                 let flavor = classes_map.get(&server_clause.class).unwrap().flavor;
                 attr.set_domain(flavor.into());
+            }
+        }
+    }
+    // Attributes in the OVER clause always live in the link domain.
+    if let Some(link_clause) = &mut ac.link {
+        for attr in &mut link_clause.with {
+            if attr.is_unspecified_domain() {
+                attr.set_domain(AttrDomain::Link);
             }
         }
     }
@@ -440,7 +465,12 @@ where
     // Need a service clause now -- parse to end of statement.
     let mut ps = PState::new(&pa_state.root_tok);
     // Signal clause will always
-    let popts = ParseOpts::stop_at_any(&[TokenType::On, TokenType::Eos, TokenType::Signal]);
+    let popts = ParseOpts::stop_at_any(&[
+        TokenType::On,
+        TokenType::Eos,
+        TokenType::Signal,
+        TokenType::Over,
+    ]);
     let mut last_token =
         ps.parse_tags_attrs_and_classname(tokens, classes_idx, &popts, "service clause")?;
 
@@ -454,10 +484,10 @@ where
     }
     let mut service_clause = ps.to_clause(ClassFlavor::Service)?;
 
-    // If there are tokens remaining, there are three valid possibilities: we have
-    // an ON token, we have a SIGNAL clause, or we have an ON followed by a SIGNAL.
-    // If we have an ON followed by a SIGNAL, the queue will match the first branch
-    // of the match, then exit the function with the signal still in the queue.
+    // If there are tokens remaining, the valid possibilities are: an ON clause, an
+    // OVER clause, a SIGNAL clause, or an ON followed by an OVER and/or a SIGNAL.
+    // In the ON case the queue will match the first branch of the match, then exit
+    // the function with the OVER/SIGNAL still in the queue for the caller.
     if let Some(tok) = tokens.peek() {
         match tok.tt {
             TokenType::On => {
@@ -470,7 +500,7 @@ where
                 last_token = nested_ps.parse_tags_attrs_and_classname(
                     tokens,
                     classes_idx,
-                    &ParseOpts::stop_at_any(&[TokenType::Eos, TokenType::Signal]),
+                    &ParseOpts::stop_at_any(&[TokenType::Eos, TokenType::Signal, TokenType::Over]),
                     "service device clause",
                 )?;
 
@@ -515,9 +545,11 @@ where
             }
             TokenType::Signal => { // Want to fall through
             }
+            TokenType::Over => { // Want to fall through
+            }
             _ => {
                 return Err(CompilationError::AllowStmtParseError(
-                    format!("Expected 'on' or 'signal' not {:?}", tok.tt),
+                    format!("Expected 'on', 'over' or 'signal' not {:?}", tok.tt),
                     pa_state.root_tok.line,
                     pa_state.root_tok.col,
                 ));
@@ -526,6 +558,89 @@ where
     }
 
     pa_state.service_clause = Some(service_clause);
+    Ok(last_token)
+}
+
+/// Parse the OVER clause of an allow statement, which constrains the links of the
+/// communication path. The passed tokens MUST start with "OVER".
+///
+/// Grammar: `over <link-clause>`, where the link clause names the built-in `link`
+/// (or `links`) class along with zero or more attribute expressions, exactly like
+/// the other clause specs. Per RFC 15:
+///
+/// ```text
+/// Allow sales employees to access customer databases over secure links.
+/// Allow finance users to access payroll-services over location:usa links.
+/// ```
+///
+/// A SIGNAL clause may follow, so parsing stops at (without consuming) a SIGNAL.
+///
+/// On a successful parse this returns the last token parsed and sets the link
+/// clause in the [ParseAllowState].
+fn parse_allow_over_clause<'a, I>(
+    pa_state: &mut ParseAllowState,
+    tokens: &mut Peekable<I>,
+    classes_idx: &HashMap<String, String>,
+    classes_map: &HashMap<String, Class>,
+) -> Result<Token, CompilationError>
+where
+    I: Iterator<Item = &'a Token>,
+{
+    // Pop off the "OVER" token...
+    let over_tok = putil::require_tt(
+        &pa_state.root_tok,
+        tokens.next(),
+        "OVER",
+        "allow",
+        TokenType::Over,
+    )?;
+
+    // Only one OVER clause is permitted per statement.
+    if pa_state.link_clause.is_some() {
+        return Err(CompilationError::AllowStmtParseError(
+            "only one OVER clause is permitted per statement".to_string(),
+            over_tok.line,
+            over_tok.col,
+        ));
+    }
+
+    let mut ps = PState::new(&pa_state.root_tok);
+    let last_token = ps.parse_tags_attrs_and_classname(
+        tokens,
+        classes_idx,
+        &ParseOpts::stop_at_any(&[TokenType::Eos, TokenType::Signal]),
+        "link (OVER) clause",
+    )?;
+
+    // The class named in an OVER clause must be the link class.
+    let cn = ps.class_name.as_ref().unwrap();
+    if classes_map.get(cn).unwrap().flavor != ClassFlavor::Link {
+        return Err(CompilationError::AllowStmtParseError(
+            format!("expected a link class in OVER clause, got: '{}'", cn),
+            over_tok.line,
+            over_tok.col,
+        ));
+    }
+
+    let link_clause = ps.to_clause(ClassFlavor::Link)?;
+
+    // Only link attributes may be constrained by an OVER clause. An attribute that
+    // was explicitly qualified with another domain (eg "user.foo") is an error;
+    // unqualified ones are defaulted to the link domain by the caller.
+    for attr in &link_clause.with {
+        if !attr.is_unspecified_domain() && !attr.is_domain(AttrDomain::Link) {
+            return Err(CompilationError::AllowStmtParseError(
+                format!(
+                    "illegal non-link attribute in OVER clause: '{}'",
+                    attr.to_instance_string()
+                ),
+                over_tok.line,
+                over_tok.col,
+            ));
+        }
+    }
+
+    pa_state.link_clause = Some(link_clause);
     Ok(last_token)
 }
 
@@ -901,6 +1016,123 @@ mod test {
                     );
                 }
             }
+        }
+    }
+
+    // --- OVER clause (link constraints, RFC 15) ---
+
+    #[test]
+    fn test_parses_valid_over_clause() {
+        // The first two are the literal examples from RFC 15; the rest cover the
+        // interaction with the other optional clauses.
+        let valids = vec![
+            "allow sales users to access customer services over secure links",
+            "allow finance users to access payroll services over location:usa links",
+            "allow blue users on green devices to access services over secure links",
+            "allow blue users to access services on level:seven devices over secure links",
+            "allow blue users to access services over secure links and signal \"blue\" to service",
+            "allow blue users to access services over link",
+            "allow blue users to access services over secure, location:usa links",
+        ];
+
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+
+        for statement in &valids {
+            let tz = tokenize_str(statement, &cctx).unwrap();
+            let clause = parse_allow(&tz.tokens, 1, &class_index, &classes).unwrap_or_else(|e| {
+                panic!("valid statement failed to parse: '{statement}': {e:?}")
+            });
+            let link = clause
+                .link
+                .unwrap_or_else(|| panic!("no link clause captured for: '{statement}'"));
+            assert_eq!(link.flavor, ClassFlavor::Link);
+            assert_eq!(link.class, "link");
+        }
+    }
+
+    #[test]
+    fn test_over_clause_attributes_land_in_link_domain() {
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(
+            "allow finance users to access payroll services over secure, location:usa links",
+            &cctx,
+        )
+        .unwrap();
+        let clause = parse_allow(&tz.tokens, 1, &class_index, &classes).unwrap();
+
+        let link = clause.link.expect("expected a link clause");
+        assert_eq!(link.with.len(), 2, "expected both link attributes");
+        for attr in &link.with {
+            assert!(
+                attr.is_domain(AttrDomain::Link),
+                "attribute '{}' should be in the link domain",
+                attr.to_instance_string()
+            );
+        }
+    }
+
+    #[test]
+    fn test_no_over_clause_leaves_link_none() {
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str("allow blue users to access services", &cctx).unwrap();
+        let clause = parse_allow(&tz.tokens, 1, &class_index, &classes).unwrap();
+        assert!(clause.link.is_none());
+    }
+
+    #[test]
+    fn test_fails_on_invalid_over_clause() {
+        let invalids = vec![
+            // OVER must name the link class, not some other flavor.
+            "allow blue users to access services over green devices",
+            "allow blue users to access services over other services",
+            // No class named at all.
+            "allow blue users to access services over secure",
+            // Empty over clause.
+            "allow blue users to access services over",
+            // Only one over clause per statement.
+            "allow blue users to access services over secure links over fast links",
+            // The signal clause must be last.
+            "allow blue users to access services and signal \"blue\" to service over secure links",
+            // Attributes explicitly in another domain are not link constraints.
+            "allow blue users to access services over user.secure links",
+        ];
+
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+
+        for statement in &invalids {
+            // Some of these fail at tokenization, the rest at parse time; either
+            // is acceptable, what matters is that none of them is accepted.
+            let Ok(tz) = tokenize_str(statement, &cctx) else {
+                continue;
+            };
+            assert!(
+                parse_allow(&tz.tokens, 1, &class_index, &classes).is_err(),
+                "invalid statement unexpectedly parsed: '{statement}'"
+            );
+        }
+    }
+
+    #[test]
+    fn test_over_clause_accepts_singular_and_plural_and_casing() {
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+        for statement in [
+            "allow blue users to access services over secure link",
+            "allow blue users to access services over secure links",
+            "allow blue users to access services OVER secure links",
+            "allow blue users to access services Over secure links",
+        ] {
+            let tz = tokenize_str(statement, &cctx).unwrap();
+            let clause = parse_allow(&tz.tokens, 1, &class_index, &classes)
+                .unwrap_or_else(|e| panic!("'{statement}' should parse: {e:?}"));
+            assert!(
+                clause.link.is_some(),
+                "'{statement}' should set link clause"
+            );
         }
     }
 
