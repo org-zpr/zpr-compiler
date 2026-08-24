@@ -83,9 +83,19 @@ attributes = [["zpr.cost", "1"],      # key/value
 
 Giving a `#`-prefixed key a non-empty value is an error.
 
-Because ZPL and ZPLC are always compiled together, the compiler rejects an `over`
-clause naming a link attribute that no configured link carries — such a statement
-could never match anything.
+Because ZPL and ZPLC are always compiled together, the compiler can check an `over`
+clause against the topology. Attribute names and values are treated differently:
+
+- An `over` clause naming a link attribute that **no configured link carries** is an
+  **error**. Such a statement could never match anything.
+- An `over` clause naming a **value** that no configured link carries — while the
+  attribute itself does exist — is a **warning** (`location:use` where the configured
+  values are `usa` and `eu`). This catches typos without failing the build, since link
+  values are topology data a later configuration edit may legitimately introduce, and
+  value matching is ultimately the visa service's job at enforcement time. Compile with
+  `--werror` to make it fatal.
+
+Tags carry no value, so only the attribute check applies to them.
 
 
 ## Trusted Services

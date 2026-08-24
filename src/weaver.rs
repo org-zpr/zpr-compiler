@@ -81,8 +81,8 @@ pub fn weave(
     weaver.init_services(comp, &class_idx, policy, config, ctx)?;
     weaver.init_nodes(config, ctx)?;
     weaver.add_topology(config, ctx)?;
-    weaver.add_client_deny_policies(comp, &class_idx, policy, config)?;
-    weaver.add_client_allow_policies(comp, &class_idx, policy, config)?;
+    weaver.add_client_deny_policies(comp, &class_idx, policy, config, ctx)?;
+    weaver.add_client_allow_policies(comp, &class_idx, policy, config, ctx)?;
     // By the time we get here, we have resolved all attributes and so know which trusted
     // services are in play.
     weaver.add_trusted_services(config, ctx)?;
@@ -810,31 +810,41 @@ impl Weaver {
         Ok(())
     }
 
-    /// Reject an `over` clause whose attributes no configured link can ever satisfy.
+    /// Check an `over` clause against the configured topology.
     ///
     /// ZPLC (the topology) and ZPL are always compiled together, so at this point we know
-    /// every link in the fabric and the attributes it carries. A link condition that
-    /// matches no configured link makes the whole statement dead — it can never grant (or,
-    /// worse for a `never allow`, ever deny) anything. That is a policy authoring mistake,
-    /// so we fail the compile rather than silently emitting an unsatisfiable rule.
+    /// every link in the fabric and the attributes it carries. Two distinct mistakes are
+    /// possible, and they are treated differently:
     ///
-    /// A condition is considered satisfiable if at least one link carries an attribute with
-    /// the same `zpl_key()`. Only the key is compared, not the value: values on a link are
-    /// topology data that a later edit may legitimately change, and RFC 15 leaves value
-    /// matching to the visa service at enforcement time.
+    /// - **Unknown attribute (error).** No configured link carries an attribute with this
+    ///   `zpl_key()`. The statement is dead — it can never grant, and for a `never allow`
+    ///   can never deny, anything. That is a policy authoring mistake, so the compile fails
+    ///   rather than silently emitting an unsatisfiable rule.
+    /// - **Unknown value (warning).** The attribute exists on some link, but no link
+    ///   currently carries the value the clause names. This is usually a typo
+    ///   (`location:use` for `location:usa`), which is why it is reported, but it is not
+    ///   fatal: link values are topology data that a later configuration edit may
+    ///   legitimately introduce, and RFC 15 leaves value matching to the visa service at
+    ///   enforcement time. `--werror` promotes it to an error for callers who want that.
+    ///
+    /// Tags have no values, so only the key check applies to them.
     fn check_link_conditions_satisfiable(
         &self,
         conds: &[Attribute],
         pos: &FPos,
+        ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         for cond in conds {
             let key = cond.zpl_key();
-            let satisfiable = self
+            let matching_attrs = self
                 .fabric
                 .links
                 .iter()
-                .any(|link| link.link_attrs.iter().any(|la| la.zpl_key() == key));
-            if !satisfiable {
+                .flat_map(|link| link.link_attrs.iter())
+                .filter(|la| la.zpl_key() == key)
+                .collect::<Vec<&Attribute>>();
+
+            if matching_attrs.is_empty() {
                 return Err(CompilationError::ZPLError(
                     format!(
                         "link attribute '{}' in OVER clause is not present on any configured link, \
@@ -844,6 +854,37 @@ impl Weaver {
                     pos.line,
                     pos.col,
                 ));
+            }
+
+            // The key exists; check the values the clause asks for. A value no link
+            // carries today is a likely typo but not fatal -- warn only.
+            for value in cond.zpl_values() {
+                let value_present = matching_attrs
+                    .iter()
+                    .any(|la| la.zpl_values().iter().any(|v| *v == value));
+                if !value_present {
+                    let configured = {
+                        let mut vals = matching_attrs
+                            .iter()
+                            .flat_map(|la| la.zpl_values())
+                            .collect::<Vec<String>>();
+                        vals.sort();
+                        vals.dedup();
+                        vals
+                    };
+                    ctx.warn(&format!(
+                        "line {}: link attribute '{}' in OVER clause has value '{}', \
+                         which is not present on any configured link (configured values: {})",
+                        pos.line,
+                        key,
+                        value,
+                        if configured.is_empty() {
+                            "none".to_string()
+                        } else {
+                            configured.join(", ")
+                        },
+                    ))?;
+                }
             }
         }
         Ok(())
@@ -857,10 +898,11 @@ impl Weaver {
         class_idx: &HashMap<String, &Class>,
         policy: &Policy,
         config: &ConfigApi,
+        ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         // Every allow is an access condition (aka rule, aka policy).
         // We need the attributes from the user and device clauses.
-        self.add_client_policies_allow_or_deny(comp, &policy.allows, false, class_idx, config)
+        self.add_client_policies_allow_or_deny(comp, &policy.allows, false, class_idx, config, ctx)
     }
 
     fn add_client_deny_policies(
@@ -869,10 +911,11 @@ impl Weaver {
         class_idx: &HashMap<String, &Class>,
         policy: &Policy,
         config: &ConfigApi,
+        ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         // Every allow is an access condition (aka rule, aka policy).
         // We need the attributes from the user and device clauses.
-        self.add_client_policies_allow_or_deny(comp, &policy.nevers, true, class_idx, config)
+        self.add_client_policies_allow_or_deny(comp, &policy.nevers, true, class_idx, config, ctx)
     }
 
     fn add_client_policies_allow_or_deny(
@@ -882,6 +925,7 @@ impl Weaver {
         never_allow: bool,
         class_idx: &HashMap<String, &Class>,
         config: &ConfigApi,
+        ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         for (i, ac) in allow_clause.iter().enumerate() {
             let server_service = ac.get_server_service_clause().unwrap();
@@ -961,7 +1005,7 @@ impl Weaver {
                         .collect();
                     let attr_map = squash_attributes(&link_attrs, &fp)?;
                     let conds = attr_map.into_values().collect::<Vec<Attribute>>();
-                    self.check_link_conditions_satisfiable(&conds, &ac.span.0)?;
+                    self.check_link_conditions_satisfiable(&conds, &ac.span.0, ctx)?;
                     conds
                 }
                 None => Vec::new(),
@@ -1429,6 +1473,118 @@ mod test {
     use crate::ptypes::{AllowClause, ClassFlavor, Clause, FPos};
     use std::env;
     use std::path::PathBuf;
+
+    /// A weaver with a single configured link carrying the given attributes, for
+    /// exercising `check_link_conditions_satisfiable` directly.
+    fn weaver_with_link_attrs(attrs: Vec<Attribute>) -> Weaver {
+        let mut w = Weaver::new(WeavingContext::default());
+        let addr = |last: u16| NodeLinkAddr {
+            zpr_addr: format!("fd5a:5052:90de::{last}").parse().unwrap(),
+            substrate: SubstrateAddr {
+                host: "127.0.0.1".to_string(),
+                port: 5000 + last,
+            },
+        };
+        w.fabric.push_link(FabricLink {
+            link_id: "n0n1".to_string(),
+            node_a: addr(1),
+            node_b: addr(2),
+            link_attrs: attrs,
+        });
+        w
+    }
+
+    fn link_tuple(name: &str, value: &str) -> Attribute {
+        Attribute::tuple(name)
+            .single()
+            .value(value)
+            .domain_hint(AttrDomain::Link)
+            .build()
+            .expect("failed to build link tuple attribute")
+    }
+
+    #[test]
+    fn test_link_condition_unknown_attribute_is_an_error() {
+        // No configured link carries `link.medium` at all -- the statement is dead code.
+        let w = weaver_with_link_attrs(vec![link_tuple("location", "usa")]);
+        let err = w
+            .check_link_conditions_satisfiable(
+                &[link_tuple("medium", "fibre")],
+                &FPos::default(),
+                &CompilationCtx::default(),
+            )
+            .expect_err("unknown link attribute must fail the compile");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not present on any configured link"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_link_condition_unknown_value_warns() {
+        // `link.location` exists, but no link carries the value `use` -- warn, do not fail.
+        let w = weaver_with_link_attrs(vec![link_tuple("location", "usa")]);
+        w.check_link_conditions_satisfiable(
+            &[link_tuple("location", "use")],
+            &FPos::default(),
+            &CompilationCtx::default(),
+        )
+        .expect("an unknown link attribute value must warn, not fail");
+
+        // With werror the same warning becomes an error, which lets us assert its text.
+        let err = w
+            .check_link_conditions_satisfiable(
+                &[link_tuple("location", "use")],
+                &FPos::default(),
+                &CompilationCtx::new(false, true),
+            )
+            .expect_err("werror must promote the unknown-value warning to an error");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("link.location"),
+            "warning should name the attribute: {msg}"
+        );
+        assert!(
+            msg.contains("'use'"),
+            "warning should name the offending value: {msg}"
+        );
+        assert!(
+            msg.contains("usa"),
+            "warning should list the configured values: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_link_condition_known_value_is_silent() {
+        // Exact match on both key and value: no error, and werror proves no warning fired.
+        let w = weaver_with_link_attrs(vec![link_tuple("location", "usa")]);
+        w.check_link_conditions_satisfiable(
+            &[link_tuple("location", "usa")],
+            &FPos::default(),
+            &CompilationCtx::new(false, true),
+        )
+        .expect("a link condition matching a configured value must not warn");
+    }
+
+    #[test]
+    fn test_link_condition_tag_has_no_value_check() {
+        // Tags carry no value, so only the key check applies. werror would surface any
+        // spurious value warning as an error.
+        let tag = |name: &str| {
+            Attribute::tag(name)
+                .domain_hint(AttrDomain::Link)
+                .build()
+                .expect("failed to build link tag attribute")
+        };
+        let w = weaver_with_link_attrs(vec![tag("secure")]);
+        w.check_link_conditions_satisfiable(
+            &[tag("secure")],
+            &FPos::default(),
+            &CompilationCtx::new(false, true),
+        )
+        .expect("a configured link tag must satisfy the same tag in an over clause");
+    }
 
     #[test]
     fn test_init_services_minimal() {

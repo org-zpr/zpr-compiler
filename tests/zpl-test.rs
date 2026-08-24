@@ -887,3 +887,23 @@ fn test_over_clause_with_unconfigured_attribute_fails_to_compile() {
         "error should name the offending attribute: {msg}"
     );
 }
+
+#[test]
+fn test_over_clause_with_unconfigured_value_warns_but_compiles() {
+    // Distinct from the case above: the link attribute `location` IS configured, but no
+    // link carries the value `use` (the configured values are `usa` and `eu`). That is a
+    // likely typo, so it is reported -- but link values are topology data a later config
+    // edit may legitimately introduce, so it must not fail the compile.
+    let temp = TempDir::new("link-over-unknown-value");
+    let path = get_zpl_dir().join("test-link-over-unknown-value.zpl");
+    let cb = CompilationBuilder::new(path)
+        .output_format(OutputFormat::V2)
+        .output_directory(&temp.path);
+    let mut comp = cb.build();
+    comp.compile()
+        .expect("an over clause with an unknown value must warn, not fail");
+
+    // The warning text itself is asserted in weaver::test::test_link_condition_unknown_value_warns;
+    // `compile()` returns unit on success, so it cannot be inspected from here, and --werror
+    // would trip on the unrelated "no policy granting admin access to VisaService" warning first.
+}
