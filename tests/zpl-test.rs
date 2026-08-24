@@ -861,6 +861,35 @@ fn test_link_conditions_end_to_end() {
             "link condition {key} is satisfied by no configured link (topology keys: {topo_keys:?})"
         );
     }
+
+    // The VisaService admin policy is built on a separate path in the weaver
+    // (visa_services_to_services). Its over clause must be preserved too:
+    // "allow redhead users to access VisaService over secure links" must not
+    // grant admin access over arbitrary links.
+    let mut admin_link_conds: Option<Vec<(String, Vec<String>)>> = None;
+    for cp in policy.get_com_policies().unwrap().iter() {
+        if cp.get_service_id().unwrap().to_str().unwrap() != "/zpr/visaservice/admin" {
+            continue;
+        }
+        let mut link_conds = Vec::new();
+        for cond in cp.get_link_conds().unwrap().iter() {
+            let key = cond.get_key().unwrap().to_str().unwrap().to_string();
+            let vals: Vec<String> = cond
+                .get_value()
+                .unwrap()
+                .iter()
+                .map(|v| v.unwrap().to_str().unwrap().to_string())
+                .collect();
+            link_conds.push((key, vals));
+        }
+        link_conds.sort();
+        admin_link_conds = Some(link_conds);
+    }
+    assert_eq!(
+        admin_link_conds.expect("VisaService admin policy not found"),
+        vec![("link.zpr.tag.secure".to_string(), vec![])],
+        "over clause dropped from the VisaService admin policy"
+    );
 }
 
 #[test]

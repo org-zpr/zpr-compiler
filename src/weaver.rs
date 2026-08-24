@@ -78,9 +78,12 @@ pub fn weave(
         class_idx.insert(cl.name.clone(), cl);
     }
 
-    weaver.init_services(comp, &class_idx, policy, config, ctx)?;
+    weaver.init_services(&class_idx, policy, config)?;
     weaver.init_nodes(config, ctx)?;
     weaver.add_topology(config, ctx)?;
+    // Admin policies can carry OVER clauses, whose satisfiability check needs the
+    // links added by add_topology -- hence this runs here, not in init_services.
+    weaver.add_visa_admin_policies(comp, &class_idx, policy, config, ctx)?;
     weaver.add_client_deny_policies(comp, &class_idx, policy, config, ctx)?;
     weaver.add_client_allow_policies(comp, &class_idx, policy, config, ctx)?;
     // By the time we get here, we have resolved all attributes and so know which trusted
@@ -134,15 +137,13 @@ impl Weaver {
     /// the configuration but we only want the ones that are refefenced in the ZPL.
     fn init_services(
         &mut self,
-        comp: &Compilation,
         class_idx: &HashMap<String, &Class>,
         policy: &Policy,
         config: &ConfigApi,
-        ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         self.defines_to_services(class_idx, policy, config)?;
         self.allow_clauses_to_services(class_idx, policy, config)?;
-        self.visa_services_to_services(comp, class_idx, policy, config, ctx)?;
+        self.visa_services_to_services()?;
 
         Ok(())
     }
@@ -151,14 +152,7 @@ impl Weaver {
     /// Most visa service related functionality is built in. However user can set
     /// the attributes of the administrator who is able to access the visa service
     /// admin HTTPS API.
-    fn visa_services_to_services(
-        &mut self,
-        comp: &Compilation,
-        class_idx: &HashMap<String, &Class>,
-        policy: &Policy,
-        config: &ConfigApi,
-        ctx: &CompilationCtx,
-    ) -> Result<(), CompilationError> {
+    fn visa_services_to_services(&mut self) -> Result<(), CompilationError> {
         let vs_protocol = Protocol::tcp("zpr-vs")
             .add_port(PortSpec::Single(zpl::VISA_SERVICE_PORT))
             .build()?;
@@ -198,11 +192,36 @@ impl Weaver {
             .unwrap();
 
         // This AMIN service is provided by the visa service too.
-        let fab_admin_svc_id = self.fabric.add_builtin_service(
+        self.fabric.add_builtin_service(
             &format!("{}/admin", zpl::VS_SERVICE_NAME),
             &admin_api_protocol,
             &vs_attrs,
         )?;
+
+        // The admin access conditions themselves come from ZPL allow statements
+        // and are added later, by `add_visa_admin_policies`: they may carry OVER
+        // clauses, which cannot be checked against the topology until
+        // `add_topology` has populated the fabric links.
+
+        // TODO: When we get around to trusted services, we need to add builtin rules
+        //       that grant VS access to the trusted services.
+        //       And adapters also have rules (to access the OAuth endpoints).
+        Ok(())
+    }
+
+    /// Add the admin API access conditions from ZPL allow statements that target
+    /// the visa service. Must run after `add_topology`: an OVER clause on such a
+    /// statement is checked for satisfiability against the configured links,
+    /// exactly like on a regular service policy.
+    fn add_visa_admin_policies(
+        &mut self,
+        comp: &Compilation,
+        class_idx: &HashMap<String, &Class>,
+        policy: &Policy,
+        config: &ConfigApi,
+        ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
+        let fab_admin_svc_id = format!("{}/admin", zpl::VS_SERVICE_NAME);
 
         // The admin permissions come from ZPL allow statements, not from configuration.
         let mut condition_count = 0;
@@ -248,6 +267,14 @@ impl Weaver {
                     .as_slice(),
                 config,
             )?;
+
+            // Link constraints from the statement's OVER clause. Without this, a
+            // policy like "allow admins to access VisaService over secure links"
+            // would grant admin access over ANY link -- the constraint must flow
+            // through the same squashing and satisfiability flow as for regular
+            // services.
+            let link_required_attrs = self.link_conditions_for_clause(ac, &fp, ctx)?;
+
             let pline = PLine::new(ac.span.0.line, &comp.zpl_for_allow_statement(plcy_idx));
             if !resolved_attrs.is_empty() {
                 self.fabric.add_condition_to_service(
@@ -255,7 +282,7 @@ impl Weaver {
                     &fab_admin_svc_id,
                     &resolved_attrs,
                     &[], // TODO: Should we consider RHS attributes?
-                    &[], // no link constraints on the admin API policy
+                    &link_required_attrs,
                     false,
                     None,
                     &pline,
@@ -267,10 +294,6 @@ impl Weaver {
             // TODO: is this an error?
             ctx.warn("no policy granting admin access to VisaService")?;
         }
-
-        // TODO: When we get around to trusted services, we need to add builtin rules
-        //       that grant VS access to the trusted services.
-        //       And adapters also have rules (to access the OAuth endpoints).
         Ok(())
     }
 
@@ -810,6 +833,39 @@ impl Weaver {
         Ok(())
     }
 
+    /// Extract, squash and satisfiability-check the link conditions from a
+    /// statement's OVER clause. Returns an empty vec when the statement has no
+    /// OVER clause. Used by both the regular service policy path and the
+    /// VisaService admin policy path so the two cannot diverge.
+    ///
+    /// Note the conditions are deliberately NOT passed through
+    /// `resolve_attributes`: link attributes are not vouched for by a trusted
+    /// service, they come from the topology in the configuration description
+    /// (see `init_links`, which reads `zpr/links/<id>/attributes`). Resolving
+    /// them would fail with "attribute not found in any trusted service".
+    fn link_conditions_for_clause(
+        &self,
+        ac: &AllowClause,
+        fp: &FPos,
+        ctx: &CompilationCtx,
+    ) -> Result<Vec<Attribute>, CompilationError> {
+        match &ac.link {
+            Some(link_clause) => {
+                let link_attrs: Vec<Attribute> = link_clause
+                    .with
+                    .iter()
+                    .filter(|a| !a.optional)
+                    .cloned()
+                    .collect();
+                let attr_map = squash_attributes(&link_attrs, fp)?;
+                let conds = attr_map.into_values().collect::<Vec<Attribute>>();
+                self.check_link_conditions_satisfiable(&conds, &ac.span.0, ctx)?;
+                Ok(conds)
+            }
+            None => Ok(Vec::new()),
+        }
+    }
+
     /// Check an `over` clause against the configured topology.
     ///
     /// ZPLC (the topology) and ZPL are always compiled together, so at this point we know
@@ -989,27 +1045,7 @@ impl Weaver {
             // And the link constraints from the OVER clause, if the statement had one.
             // These are recorded in the policy for the visa service to enforce; the
             // compiler does not itself check that a satisfying path exists.
-            //
-            // Note these are deliberately NOT passed through `resolve_attributes`:
-            // link attributes are not vouched for by a trusted service, they come
-            // from the topology in the configuration description (see `init_links`,
-            // which reads `zpr/links/<id>/attributes`). Resolving them would fail
-            // with "attribute not found in any trusted service".
-            let link_required_attrs = match &ac.link {
-                Some(link_clause) => {
-                    let link_attrs: Vec<Attribute> = link_clause
-                        .with
-                        .iter()
-                        .filter(|a| !a.optional)
-                        .cloned()
-                        .collect();
-                    let attr_map = squash_attributes(&link_attrs, &fp)?;
-                    let conds = attr_map.into_values().collect::<Vec<Attribute>>();
-                    self.check_link_conditions_satisfiable(&conds, &ac.span.0, ctx)?;
-                    conds
-                }
-                None => Vec::new(),
-            };
+            let link_required_attrs = self.link_conditions_for_clause(ac, &fp, ctx)?;
 
             // Now figure out what service we are talking about.
             // The service may be:
@@ -1472,7 +1508,6 @@ mod test {
     use crate::lex::Token;
     use crate::ptypes::{AllowClause, ClassFlavor, Clause, FPos};
     use std::env;
-    use std::path::PathBuf;
 
     /// A weaver with a single configured link carrying the given attributes, for
     /// exercising `check_link_conditions_satisfiable` directly.
@@ -1606,15 +1641,8 @@ mod test {
         let config =
             ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), &CompilationCtx::default())
                 .expect("failed to parse config");
-        let comp = Compilation::builder(PathBuf::default()).build();
 
-        let res = w.init_services(
-            &comp,
-            &class_idx,
-            &policy,
-            &config,
-            &CompilationCtx::default(),
-        );
+        let res = w.init_services(&class_idx, &policy, &config);
         assert!(res.is_ok());
 
         // Should create two services: visa-service and visa-service-admin
@@ -1665,12 +1693,11 @@ mod test {
         let ctx = CompilationCtx::default();
         let config = ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), &ctx)
             .expect("failed to parse config");
-        let comp = Compilation::builder(PathBuf::default()).build();
 
         {
             let mut w = Weaver::new(WeavingContext::default());
 
-            let res = w.init_services(&comp, &class_idx, &policy, &config, &ctx);
+            let res = w.init_services(&class_idx, &policy, &config);
             assert!(res.is_ok(), "init_services failed: {}", res.unwrap_err());
 
             // Should create two services: visa-service and visa-service-admin.
@@ -1727,7 +1754,7 @@ mod test {
 
         {
             let mut w = Weaver::new(WeavingContext::default());
-            let res = w.init_services(&comp, &class_idx, &policy, &config, &ctx);
+            let res = w.init_services(&class_idx, &policy, &config);
             println!("{:?}", res);
             assert!(res.is_ok(), "init_services failed: {}", res.unwrap_err());
             assert_eq!(w.fabric.services.len(), 3);
