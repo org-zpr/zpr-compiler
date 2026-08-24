@@ -810,6 +810,45 @@ impl Weaver {
         Ok(())
     }
 
+    /// Reject an `over` clause whose attributes no configured link can ever satisfy.
+    ///
+    /// ZPLC (the topology) and ZPL are always compiled together, so at this point we know
+    /// every link in the fabric and the attributes it carries. A link condition that
+    /// matches no configured link makes the whole statement dead — it can never grant (or,
+    /// worse for a `never allow`, ever deny) anything. That is a policy authoring mistake,
+    /// so we fail the compile rather than silently emitting an unsatisfiable rule.
+    ///
+    /// A condition is considered satisfiable if at least one link carries an attribute with
+    /// the same `zpl_key()`. Only the key is compared, not the value: values on a link are
+    /// topology data that a later edit may legitimately change, and RFC 15 leaves value
+    /// matching to the visa service at enforcement time.
+    fn check_link_conditions_satisfiable(
+        &self,
+        conds: &[Attribute],
+        pos: &FPos,
+    ) -> Result<(), CompilationError> {
+        for cond in conds {
+            let key = cond.zpl_key();
+            let satisfiable = self
+                .fabric
+                .links
+                .iter()
+                .any(|link| link.link_attrs.iter().any(|la| la.zpl_key() == key));
+            if !satisfiable {
+                return Err(CompilationError::ZPLError(
+                    format!(
+                        "link attribute '{}' in OVER clause is not present on any configured link, \
+                         so this statement can never match",
+                        cond.to_instance_string(),
+                    ),
+                    pos.line,
+                    pos.col,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Process the ZPL policy into conditions for accessing fabric services.
     /// Must be done after initializing the services.
     fn add_client_allow_policies(
@@ -921,7 +960,9 @@ impl Weaver {
                         .cloned()
                         .collect();
                     let attr_map = squash_attributes(&link_attrs, &fp)?;
-                    attr_map.into_values().collect::<Vec<Attribute>>()
+                    let conds = attr_map.into_values().collect::<Vec<Attribute>>();
+                    self.check_link_conditions_satisfiable(&conds, &ac.span.0)?;
+                    conds
                 }
                 None => Vec::new(),
             };

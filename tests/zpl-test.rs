@@ -806,8 +806,9 @@ fn test_link_conditions_end_to_end() {
 
     // "over secure, location:usa links" -> a valueless tag plus a key/value pair,
     // both in the link domain.
+    let allow_conds = allow_with_links.expect("allow policy with link conditions not found");
     assert_eq!(
-        allow_with_links.expect("allow policy with link conditions not found"),
+        allow_conds,
         vec![
             ("link.location".to_string(), vec!["usa".to_string()]),
             ("link.zpr.tag.secure".to_string(), vec![]),
@@ -815,13 +816,74 @@ fn test_link_conditions_end_to_end() {
     );
 
     // "never allow ... over foreign links" must carry its link condition too.
+    let deny_conds = deny_with_links.expect("never policy with link conditions not found");
     assert_eq!(
-        deny_with_links.expect("never policy with link conditions not found"),
+        deny_conds,
         vec![("link.zpr.tag.foreign".to_string(), vec![])]
     );
 
     assert!(
         saw_policy_without_links,
         "expected a policy with no over clause to have empty linkConds"
+    );
+
+    // Every emitted link condition must actually be satisfiable by a link in the
+    // compiled topology. This is the property that matters: the ZPL side and the
+    // ZPLC side have to agree on the attribute encoding, otherwise a `never allow`
+    // with an over clause would fail open once the visa service enforces link rules.
+    let mut topo_keys: Vec<String> = Vec::new();
+    for peering in policy.get_topology().unwrap().iter() {
+        for attr in peering.get_attrs().unwrap().iter() {
+            topo_keys.push(attr.get_key().unwrap().to_str().unwrap().to_string());
+        }
+    }
+    topo_keys.sort();
+    topo_keys.dedup();
+
+    // The tag on the link (`["#secure", ""]` in the zplc) must encode identically to
+    // the tag written in ZPL (`over secure links`).
+    assert!(
+        topo_keys.contains(&"link.zpr.tag.secure".to_string()),
+        "configured link tag not encoded as link.zpr.tag.secure: {topo_keys:?}"
+    );
+    assert!(
+        topo_keys.contains(&"link.zpr.tag.foreign".to_string()),
+        "configured link tag not encoded as link.zpr.tag.foreign: {topo_keys:?}"
+    );
+    assert!(
+        topo_keys.contains(&"link.location".to_string()),
+        "configured link key/value attribute missing: {topo_keys:?}"
+    );
+
+    for (key, _) in allow_conds.iter().chain(deny_conds.iter()) {
+        assert!(
+            topo_keys.contains(key),
+            "link condition {key} is satisfied by no configured link (topology keys: {topo_keys:?})"
+        );
+    }
+}
+
+#[test]
+fn test_over_clause_with_unconfigured_attribute_fails_to_compile() {
+    // ZPL and ZPLC are always compiled together, so a link attribute that appears on no
+    // configured link means the author wrote a statement that can never match. Fail loudly.
+    // Named "bad-" rather than "test-" so the bulk must-compile sweeps skip it.
+    let temp = TempDir::new("link-over-bad");
+    let path = get_zpl_dir().join("bad-link-over-unsatisfiable.zpl");
+    let cb = CompilationBuilder::new(path)
+        .output_format(OutputFormat::V2)
+        .output_directory(&temp.path);
+    let mut comp = cb.build();
+    let err = comp
+        .compile()
+        .expect_err("over clause naming an unconfigured link attribute must not compile");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("not present on any configured link"),
+        "unexpected error: {msg}"
+    );
+    assert!(
+        msg.contains("nosuchtag"),
+        "error should name the offending attribute: {msg}"
     );
 }

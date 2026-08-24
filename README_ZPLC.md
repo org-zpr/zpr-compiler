@@ -66,6 +66,27 @@ peers = [ { node = "<NODEID>" },
           { node = "<NODEID>", interface = "i3" } ]
 ```
 
+### Link attributes
+
+Link attributes are what a ZPL `over` clause matches against, eg
+`allow red users to access database over secure, location:usa links.`
+
+An entry is either a key/value pair or a **tag**. A tag is written with a `#`
+prefix and an empty value, the same spelling used by `returns_attributes`:
+
+```toml
+[links.<LINKID>]
+attributes = [["zpr.cost", "1"],      # key/value
+              ["location", "usa"],    # key/value
+              ["#secure", ""]]        # tag
+```
+
+Giving a `#`-prefixed key a non-empty value is an error.
+
+Because ZPL and ZPLC are always compiled together, the compiler rejects an `over`
+clause naming a link attribute that no configured link carries — such a statement
+could never match anything.
+
 
 ## Trusted Services
 
