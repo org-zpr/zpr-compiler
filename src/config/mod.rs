@@ -155,6 +155,24 @@ pub struct TrustedService {
     pub returns_attrs: Vec<AttrMapping>, // ordered service-key -> attribute mappings
     pub identity_attrs: Vec<String>,
     pub provider: Option<Vec<(String, String)>>, // required for non-default
+    /// Set when `api = "oidc"`. Read by the weaver in OIDC-B2; until then only
+    /// tests consume it, so it is exempted from dead-code analysis.
+    #[allow(dead_code)]
+    pub oidc: Option<OidcTsConfig>,
+}
+
+/// The `api = "oidc"` properties of a trusted service (see spec-OIDC.md "ZPLC configuration").
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OidcTsConfig {
+    pub issuer: String,
+    pub jwks_uri: String,
+    pub client_id: String,
+    pub client_secret: Option<String>,
+    pub scopes: Vec<String>,
+    pub allowed_domains: Vec<String>,
+    pub seed_jwks_path: Option<PathBuf>, // resolved relative to the .zplc; contents embedded in B2
+    pub max_auth_age_seconds: u32,
+    pub allow_offline_access: bool,
 }
 
 impl Config {
@@ -520,6 +538,7 @@ impl ConfigParse {
                 provider: None,
                 client: None,
                 service: None,
+                oidc: None,
             };
             trusted_services.push(ts);
         }
