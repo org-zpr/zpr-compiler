@@ -804,7 +804,7 @@ mod test {
 
                     if !has_service_conds {
                         // Then there should be a cli condition on color:red,
-                        // plus the injected `has user.authority` marker (#144).
+                        // plus the injected `has user.zpr.authority` marker (#144).
                         if !plcy.has_client_conds() {
                             assert!(false, "expected cli condition for color:red, got none");
                         }
@@ -828,7 +828,7 @@ mod test {
                             conds
                         );
                         assert!(
-                            conds.contains(&"user.authority HAS \"\"".to_string()),
+                            conds.contains(&"user.zpr.authority HAS \"\"".to_string()),
                             "missing authority marker in {:?}",
                             conds
                         );
@@ -863,7 +863,7 @@ mod test {
                             let mut marker_count = 0;
                             for cond in plcy.get_client_conds().unwrap() {
                                 let s = attr_exp_v2_to_string(&cond);
-                                if s == "user.authority HAS \"\"" {
+                                if s == "user.zpr.authority HAS \"\"" {
                                     // The injected authority marker (#144).
                                     marker_count += 1;
                                     continue;
@@ -996,7 +996,7 @@ mod test {
     }
 
     // A bare `allow users ...` must no longer compile to an empty client
-    // condition: it carries `has user.authority` (issue #144).
+    // condition: it carries `has user.zpr.authority` (issue #144).
     #[test]
     fn test_authority_marker_end_to_end_bare_users() {
         let policies = compile_to_com_policies(
@@ -1005,7 +1005,7 @@ mod test {
         );
         let webby: Vec<_> = policies.iter().filter(|p| p.0 == "Webby").collect();
         assert_eq!(webby.len(), 1, "expected one Webby policy: {policies:?}");
-        assert_eq!(webby[0].2, vec!["user.authority HAS \"\""]);
+        assert_eq!(webby[0].2, vec!["user.zpr.authority HAS \"\""]);
     }
 
     // An authored value on the marker key squashes with the injected valueless
@@ -1014,11 +1014,11 @@ mod test {
     fn test_authority_marker_authored_value_squashes_to_eq() {
         let policies = compile_to_com_policies(
             "auth-marker-valued",
-            "define Webby as service with device.zpr.adapter.cn.\nallow user.authority:google users to access Webby.\n",
+            "define Webby as service with device.zpr.adapter.cn.\nallow user.zpr.authority:google users to access Webby.\n",
         );
         let webby: Vec<_> = policies.iter().filter(|p| p.0 == "Webby").collect();
         assert_eq!(webby.len(), 1, "expected one Webby policy: {policies:?}");
-        assert_eq!(webby[0].2, vec!["user.authority EQ google"]);
+        assert_eq!(webby[0].2, vec!["user.zpr.authority EQ google"]);
     }
 
     // `never allow users ...` is untouched: the deny still compiles to an
@@ -1057,11 +1057,11 @@ mod test {
             1,
             "expected one VisaService admin policy: {policies:?}"
         );
-        assert_eq!(admin[0].2, vec!["user.authority HAS \"\""]);
+        assert_eq!(admin[0].2, vec!["user.zpr.authority HAS \"\""]);
     }
 
     // A written RHS device spec (`... to access Webby on devices`) must emit
-    // `has device.authority` into the SERVICE conditions: services without a
+    // `has device.zpr.authority` into the SERVICE conditions: services without a
     // live device authentication must not satisfy a statement that explicitly
     // names devices (issue #144, Codex review on PR #145).
     #[test]
@@ -1072,7 +1072,7 @@ mod test {
         );
         let webby: Vec<_> = policies.iter().filter(|p| p.0 == "Webby").collect();
         assert_eq!(webby.len(), 1, "expected one Webby policy: {policies:?}");
-        assert_eq!(webby[0].2, vec!["user.authority HAS \"\""]);
-        assert_eq!(webby[0].3, vec!["device.authority HAS \"\""]);
+        assert_eq!(webby[0].2, vec!["user.zpr.authority HAS \"\""]);
+        assert_eq!(webby[0].3, vec!["device.zpr.authority HAS \"\""]);
     }
 }

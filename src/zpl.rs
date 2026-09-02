@@ -43,15 +43,19 @@ pub const KATTR_CN: &str = "device.zpr.adapter.cn";
 pub const KATTR_ADDR: &str = "zpr.addr";
 
 // Authority presence markers (issue #144). The visa service installs
-// `<ns>.authority` exactly when a non-expired authentication exists for that
-// namespace, so `has user.authority` reads as "a live user authentication is
-// present". The attribute's value names the authentication method (for
-// example `user.authority:google`), letting policy distinguish methods
-// without a second marker.
-pub const KATTR_USER_AUTHORITY: &str = "user.authority";
-pub const KATTR_DEVICE_AUTHORITY: &str = "device.authority";
+// `<ns>.zpr.authority` exactly when a non-expired authentication exists for
+// that namespace, so `has user.zpr.authority` reads as "a live user
+// authentication is present". The attribute's value names the authentication
+// method (for example `user.zpr.authority:google`), letting policy distinguish
+// methods without a second marker. The `zpr.` infix keeps the marker inside
+// the ZPR-owned sub-namespace of the class domain (like `device.zpr.adapter.cn`
+// and `<class>.zpr.tag.<name>`), so a deployment's trusted service cannot
+// declare it and forge the marker -- see the reserved-namespace check in
+// `config::trusted_service::parse_return_mappings`.
+pub const KATTR_USER_AUTHORITY: &str = "user.zpr.authority";
+pub const KATTR_DEVICE_AUTHORITY: &str = "device.zpr.authority";
 
-/// True when `key` (a zpl key, e.g. `device.authority`) is one of the
+/// True when `key` (a zpl key, e.g. `device.zpr.authority`) is one of the
 /// authority presence marker attributes (issue #144).
 pub fn is_authority_marker_key(key: &str) -> bool {
     key == KATTR_USER_AUTHORITY || key == KATTR_DEVICE_AUTHORITY

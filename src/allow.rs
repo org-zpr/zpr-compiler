@@ -56,7 +56,7 @@ impl ParseAllowState {
     ) -> AllowClause {
         // A written actor class spec asserts a live authentication for its
         // namespace (issue #144): `allow users ...` must compile to at least
-        // `has user.authority`, not to an empty client condition. Inject the
+        // `has user.zpr.authority`, not to an empty client condition. Inject the
         // marker here, BEFORE the defaults are substituted below, because the
         // `Option` is the only record of whether the author actually wrote
         // the clause -- the default clauses substituted below assert nothing.
@@ -1694,20 +1694,20 @@ mod test {
         out
     }
 
-    // A bare written `users` spec must emit `has user.authority` and nothing
+    // A bare written `users` spec must emit `has user.zpr.authority` and nothing
     // else; the synthesized device clause must stay empty.
     #[test]
     fn test_authority_marker_bare_users() {
         let keys = client_keys_by_flavor("allow users to access services");
-        assert_eq!(keys[&ClassFlavor::User], vec!["user.authority"]);
+        assert_eq!(keys[&ClassFlavor::User], vec!["user.zpr.authority"]);
         assert!(keys[&ClassFlavor::Device].is_empty());
     }
 
-    // A bare written `devices` spec: `has device.authority` only, user clause empty.
+    // A bare written `devices` spec: `has device.zpr.authority` only, user clause empty.
     #[test]
     fn test_authority_marker_bare_devices() {
         let keys = client_keys_by_flavor("allow devices to access services");
-        assert_eq!(keys[&ClassFlavor::Device], vec!["device.authority"]);
+        assert_eq!(keys[&ClassFlavor::Device], vec!["device.zpr.authority"]);
         assert!(keys[&ClassFlavor::User].is_empty());
     }
 
@@ -1732,8 +1732,8 @@ mod test {
     #[test]
     fn test_authority_marker_users_on_devices() {
         let keys = client_keys_by_flavor("allow users on devices to access services");
-        assert_eq!(keys[&ClassFlavor::User], vec!["user.authority"]);
-        assert_eq!(keys[&ClassFlavor::Device], vec!["device.authority"]);
+        assert_eq!(keys[&ClassFlavor::User], vec!["user.zpr.authority"]);
+        assert_eq!(keys[&ClassFlavor::Device], vec!["device.zpr.authority"]);
     }
 
     // A constrained user spec keeps its written attribute AND gains the marker.
@@ -1742,7 +1742,7 @@ mod test {
         let keys = client_keys_by_flavor("allow domain:example users to access services");
         assert_eq!(
             keys[&ClassFlavor::User],
-            vec!["user.authority", "user.domain"]
+            vec!["user.domain", "user.zpr.authority"]
         );
     }
 
@@ -1751,10 +1751,11 @@ mod test {
     // valued one (asserted end-to-end in the compilation tests).
     #[test]
     fn test_authority_marker_authored_value_coexists_at_parse() {
-        let keys = client_keys_by_flavor("allow user.authority:google users to access services");
+        let keys =
+            client_keys_by_flavor("allow user.zpr.authority:google users to access services");
         assert_eq!(
             keys[&ClassFlavor::User],
-            vec!["user.authority", "user.authority"]
+            vec!["user.zpr.authority", "user.zpr.authority"]
         );
     }
 
@@ -1778,7 +1779,7 @@ mod test {
     fn test_authority_marker_rhs_devices() {
         assert_eq!(
             server_keys("allow users to access services on devices"),
-            vec!["device.authority"]
+            vec!["device.zpr.authority"]
         );
     }
 
@@ -1794,7 +1795,7 @@ mod test {
     fn test_authority_marker_rhs_devices_with_attribute() {
         assert_eq!(
             server_keys("allow users to access services on color:blue devices"),
-            vec!["device.authority", "device.color"]
+            vec!["device.color", "device.zpr.authority"]
         );
     }
 }

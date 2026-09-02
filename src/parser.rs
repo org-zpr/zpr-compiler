@@ -651,7 +651,7 @@ allow marketing-emps to access role:marketing services.
             .expect("user clause missing from LHS");
         assert_eq!(user_clause.class, "employee");
         // Since #144 a written user spec carries the injected `has
-        // user.authority` marker, so `with` is no longer empty -- assert
+        // user.zpr.authority` marker, so `with` is no longer empty -- assert
         // instead that no TAG was created from the miscased class name.
         assert!(
             !user_clause.with.iter().any(|a| a.is_tag()),
