@@ -105,15 +105,30 @@ fn parse_expiration_seconds(
 
 /// Parse each `"<service-key> -> <attr-spec>"` string into an ordered `Vec<AttrMapping>`,
 /// rejecting duplicate service keys via a temporary set (no parallel map retained).
+///
+/// ZPR owns the `zpr.` sub-namespace inside every class domain
+/// (`device.zpr.adapter.cn`, `user.zpr.tag.red`, `user.zpr.authority`). Only the
+/// default trusted service vouches for those keys; a declared service claiming
+/// one could forge an identity key or, since #144, an authentication marker.
+/// `is_default` exempts the builtin default service's own mappings.
 fn parse_return_mappings(
     ts_id: &str,
     raw: &[String],
+    is_default: bool,
 ) -> Result<Vec<AttrMapping>, CompilationError> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut out = Vec::new();
     for ra in raw {
         let m = parse_attribute_mapping(ra)
             .map_err(|e| err_config!("trusted_service {}: {}", ts_id, e))?;
+        let name = m.attr.get_name();
+        if !is_default && (name == "zpr" || name.starts_with("zpr.")) {
+            return Err(err_config!(
+                "trusted_service {}: attribute '{}' is reserved for ZPR",
+                ts_id,
+                m.zpr_attr_spec
+            ));
+        }
         if !seen.insert(m.service_attr_key.clone()) {
             return Err(err_config!(
                 "trusted_service {} contains duplicate service attribute name '{}'",
@@ -156,7 +171,9 @@ fn parse_file_trusted_service(
         ));
     }
     let raw = parse_string_array(ts, "returns_attributes", "trusted_service")?;
-    let returns_attrs = parse_return_mappings(ts_id, &raw)?;
+    // A `file` service is never the builtin default (`api = "file"` on the
+    // default id is rejected upstream), so reserved-namespace checks apply.
+    let returns_attrs = parse_return_mappings(ts_id, &raw, false)?;
     if returns_attrs.is_empty() {
         return Err(err_config!(
             "trusted_service {} with api \"file\" requires at least one returns_attributes mapping",
@@ -261,7 +278,7 @@ pub(super) fn parse_trusted_service(
         service_svc = None;
     }
 
-    let returns_attrs = parse_return_mappings(ts_id, &returns_raw)?;
+    let returns_attrs = parse_return_mappings(ts_id, &returns_raw, is_default)?;
 
     let mut identity_attrs = Vec::new();
     for ra in &identity_raw {
@@ -436,6 +453,64 @@ mod test {
         );
         let err = parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap_err();
         assert!(err.to_string().contains("duplicate"), "{err}");
+    }
+
+    // A declared (non-default) trusted service must not claim any attribute in
+    // the ZPR-owned `zpr.` sub-namespace of a class domain: doing so could
+    // forge an identity key (`device.zpr.adapter.cn`) or an authority marker
+    // (`user.zpr.authority`, issue #144 / PR #145 review).
+    #[test]
+    fn test_reserved_zpr_namespace_rejected_for_declared_service() {
+        for spec in [
+            "user.zpr.authority",
+            "device.zpr.authority",
+            "device.zpr.adapter.cn",
+            "user.zpr.authority{}",
+            "user.zpr",
+        ] {
+            let t = body(&format!(
+                "api = \"file\"\nreturns_attributes = [\"foo -> {spec}\"]\n"
+            ));
+            let err =
+                parse_trusted_service("attrfile", &t, &CompilationCtx::default()).unwrap_err();
+            assert!(
+                err.to_string().contains("reserved for ZPR"),
+                "spec {spec} gave: {err}"
+            );
+        }
+    }
+
+    // The tag form `#user.zprish` is the normal tag mechanism: it encodes to
+    // `user.zpr.tag.zprish`, which never collides with a reserved tuple key,
+    // so tags with ordinary names stay accepted -- as do non-`zpr.` tuple
+    // names and names merely containing "zpr".
+    #[test]
+    fn test_reserved_zpr_namespace_scope() {
+        for spec in [
+            "user.zprish",
+            "user.authority",
+            "device.myzpr.x",
+            "#user.zprish",
+        ] {
+            let t = body(&format!(
+                "api = \"file\"\nreturns_attributes = [\"foo -> {spec}\"]\n"
+            ));
+            assert!(
+                parse_trusted_service("attrfile", &t, &CompilationCtx::default()).is_ok(),
+                "spec {spec} should be accepted"
+            );
+        }
+    }
+
+    // The builtin default trusted service's own `device.zpr.adapter.cn`
+    // mapping must still parse: the reservation applies to declared services
+    // only.
+    #[test]
+    fn test_default_service_keeps_reserved_cn_mapping() {
+        let t = body("cert_path = \"foo.pem\"\n");
+        let ts = parse_trusted_service("default", &t, &CompilationCtx::default()).unwrap();
+        assert_eq!(ts.returns_attrs.len(), 1);
+        assert_eq!(ts.returns_attrs[0].service_attr_key, zpl::KATTR_CN);
     }
 
     #[test]
