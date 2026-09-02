@@ -1,4 +1,4 @@
-use crate::allow::parse_allow;
+use crate::allow::parse_allow_impl;
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
 use crate::ptypes::{AllowClause, Class};
@@ -32,11 +32,17 @@ pub fn parse_never(
             never_statement[1].col,
         ));
     }
-    let mut allow_clause = parse_allow(
+    // Deny semantics: do NOT inject the authority presence markers here
+    // (issue #144). A marker would narrow the deny, so a bare
+    // `never allow users ...` would stop denying unauthenticated actors.
+    // An unconstrained class spec in a never statement therefore still
+    // compiles to an empty (match-everything) condition, which is fail-closed.
+    let mut allow_clause = parse_allow_impl(
         &never_statement[1..],
         statement_id,
         classes_idx,
         classes_map,
+        false,
     )?;
     // Since we started with never, we update the span.
     allow_clause.span.0 = never_statement[0].clone().into();

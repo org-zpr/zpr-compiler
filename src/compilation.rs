@@ -803,30 +803,39 @@ mod test {
                     let has_service_conds = plcy.get_service_conds().unwrap().len() > 0;
 
                     if !has_service_conds {
-                        // Then there should be a cli condition on color:red
+                        // Then there should be a cli condition on color:red,
+                        // plus the injected `has user.zpr.authority` marker (#144).
                         if !plcy.has_client_conds() {
                             assert!(false, "expected cli condition for color:red, got none");
                         }
 
-                        let mut cond_count = 0;
+                        let conds: Vec<String> = plcy
+                            .get_client_conds()
+                            .unwrap()
+                            .iter()
+                            .map(|c| attr_exp_v2_to_string(&c))
+                            .collect();
 
-                        for cond in plcy.get_client_conds().unwrap() {
-                            cond_count += 1;
-
-                            let attr_str = attr_exp_v2_to_string(&cond);
-
-                            assert_eq!(attr_str, "user.color EQ red");
-                            matched |= 0b00000001;
-                        }
-                        if cond_count != 1 {
-                            assert!(
-                                false,
-                                "expected 1 cli condition for color:red, got {}",
-                                cond_count
-                            );
-                        }
+                        assert_eq!(
+                            conds.len(),
+                            2,
+                            "expected 2 cli conditions for color:red, got {:?}",
+                            conds
+                        );
+                        assert!(
+                            conds.contains(&"user.color EQ red".to_string()),
+                            "missing color condition in {:?}",
+                            conds
+                        );
+                        assert!(
+                            conds.contains(&"user.zpr.authority HAS \"\"".to_string()),
+                            "missing authority marker in {:?}",
+                            conds
+                        );
+                        matched |= 0b00000001;
                     } else {
-                        // The other two policies should each have one cli_conditiona and one svc_condition.
+                        // The other two policies should each have one svc_condition and
+                        // two cli_conditions (the color plus the authority marker).
                         // The expected values are:
                         //    - user.color EQ green WITH service.content EQ green
                         //    - user.color EQ brown WITH service.content EQ brown
@@ -851,14 +860,25 @@ mod test {
                         let cli_attr_str = {
                             let mut attr_str = String::new();
                             let mut ccount = 0;
+                            let mut marker_count = 0;
                             for cond in plcy.get_client_conds().unwrap() {
+                                let s = attr_exp_v2_to_string(&cond);
+                                if s == "user.zpr.authority HAS \"\"" {
+                                    // The injected authority marker (#144).
+                                    marker_count += 1;
+                                    continue;
+                                }
                                 ccount += 1;
-                                attr_str = attr_exp_v2_to_string(&cond);
+                                attr_str = s;
                             }
+                            assert_eq!(
+                                marker_count, 1,
+                                "expected the authority marker for color:brown/green"
+                            );
                             if ccount != 1 {
                                 assert!(
                                     false,
-                                    "expected 1 cli condition for color:brown/green, got {}",
+                                    "expected 1 color cli condition for color:brown/green, got {}",
                                     ccount
                                 );
                             }
@@ -919,5 +939,140 @@ mod test {
             s.push_str("(no value)")
         }
         s
+    }
+
+    // ---- Authority presence markers, end to end (issue #144) ----
+
+    /// Compile the given ZPL against BASIC_CONFIG and return, per com-policy,
+    /// (service_id, allow, sorted client condition strings, sorted service
+    /// condition strings).
+    fn compile_to_com_policies(
+        name_hint: &str,
+        zpl: &str,
+    ) -> Vec<(String, bool, Vec<String>, Vec<String>)> {
+        let tempdir = TempDir::new(name_hint);
+        let zpl_file = tempdir.path.join("test.zpl");
+        std::fs::write(&zpl_file, zpl).expect("failed to write zpl file");
+        let cfg_file = tempdir.path.join("test.zplc");
+        std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
+
+        let mut compilation = Compilation::builder(zpl_file).config(&cfg_file).build();
+        let ctx = CompilationCtx::default();
+        let pol_bin = compilation
+            .compile_to_policy(&ctx)
+            .expect("compilation failed")
+            .unwrap();
+
+        let policy_bytes = Bytes::from(pol_bin);
+        let policy_rdr = capnp::serialize::read_message(
+            policy_bytes.reader(),
+            capnp::message::ReaderOptions::new(),
+        )
+        .unwrap();
+        let pol = policy_rdr
+            .get_root::<policy_capnp::policy::Reader>()
+            .unwrap();
+
+        let mut out = Vec::new();
+        for plcy in pol.get_com_policies().unwrap().iter() {
+            let svc_id = plcy.get_service_id().unwrap().to_string().unwrap();
+            let mut conds: Vec<String> = plcy
+                .get_client_conds()
+                .unwrap()
+                .iter()
+                .map(|c| attr_exp_v2_to_string(&c))
+                .collect();
+            conds.sort();
+            let mut svc_conds: Vec<String> = plcy
+                .get_service_conds()
+                .unwrap()
+                .iter()
+                .map(|c| attr_exp_v2_to_string(&c))
+                .collect();
+            svc_conds.sort();
+            out.push((svc_id, plcy.get_allow(), conds, svc_conds));
+        }
+        out
+    }
+
+    // A bare `allow users ...` must no longer compile to an empty client
+    // condition: it carries `has user.zpr.authority` (issue #144).
+    #[test]
+    fn test_authority_marker_end_to_end_bare_users() {
+        let policies = compile_to_com_policies(
+            "auth-marker-users",
+            "define Webby as service with device.zpr.adapter.cn.\nallow users to access Webby.\n",
+        );
+        let webby: Vec<_> = policies.iter().filter(|p| p.0 == "Webby").collect();
+        assert_eq!(webby.len(), 1, "expected one Webby policy: {policies:?}");
+        assert_eq!(webby[0].2, vec!["user.zpr.authority HAS \"\""]);
+    }
+
+    // An authored value on the marker key squashes with the injected valueless
+    // marker into a single Eq condition -- no duplicate Has.
+    #[test]
+    fn test_authority_marker_authored_value_squashes_to_eq() {
+        let policies = compile_to_com_policies(
+            "auth-marker-valued",
+            "define Webby as service with device.zpr.adapter.cn.\nallow user.zpr.authority:google users to access Webby.\n",
+        );
+        let webby: Vec<_> = policies.iter().filter(|p| p.0 == "Webby").collect();
+        assert_eq!(webby.len(), 1, "expected one Webby policy: {policies:?}");
+        assert_eq!(webby[0].2, vec!["user.zpr.authority EQ google"]);
+    }
+
+    // `never allow users ...` is untouched: the deny still compiles to an
+    // empty client condition (denies every actor, fail-closed).
+    #[test]
+    fn test_authority_marker_not_injected_in_never() {
+        let policies = compile_to_com_policies(
+            "auth-marker-never",
+            "define Webby as service with device.zpr.adapter.cn.\nallow devices to access Webby.\nnever allow users to access Webby.\n",
+        );
+        let deny: Vec<_> = policies.iter().filter(|p| p.0 == "Webby" && !p.1).collect();
+        assert_eq!(deny.len(), 1, "expected one deny policy: {policies:?}");
+        assert!(
+            deny[0].2.is_empty(),
+            "never-allow client condition must stay empty: {:?}",
+            deny[0].2
+        );
+    }
+
+    // The VisaService admin path picks up the markers from the same clause
+    // data as the regular path, and a bare `allow users to access VisaService.`
+    // now emits a real admin condition (previously it emitted nothing and the
+    // compiler warned "no policy granting admin access to VisaService").
+    #[test]
+    fn test_authority_marker_on_visa_admin_path() {
+        let policies = compile_to_com_policies(
+            "auth-marker-admin",
+            "define Webby as service with device.zpr.adapter.cn.\nallow users to access VisaService.\nallow devices to access Webby.\n",
+        );
+        let admin: Vec<_> = policies
+            .iter()
+            .filter(|p| p.0 == "/zpr/visaservice/admin")
+            .collect();
+        assert_eq!(
+            admin.len(),
+            1,
+            "expected one VisaService admin policy: {policies:?}"
+        );
+        assert_eq!(admin[0].2, vec!["user.zpr.authority HAS \"\""]);
+    }
+
+    // A written RHS device spec (`... to access Webby on devices`) must emit
+    // `has device.zpr.authority` into the SERVICE conditions: services without a
+    // live device authentication must not satisfy a statement that explicitly
+    // names devices (issue #144, Codex review on PR #145).
+    #[test]
+    fn test_authority_marker_end_to_end_rhs_devices() {
+        let policies = compile_to_com_policies(
+            "auth-marker-rhs-devices",
+            "define Webby as service with device.zpr.adapter.cn.\nallow users to access Webby on devices.\n",
+        );
+        let webby: Vec<_> = policies.iter().filter(|p| p.0 == "Webby").collect();
+        assert_eq!(webby.len(), 1, "expected one Webby policy: {policies:?}");
+        assert_eq!(webby[0].2, vec!["user.zpr.authority HAS \"\""]);
+        assert_eq!(webby[0].3, vec!["device.zpr.authority HAS \"\""]);
     }
 }

@@ -206,6 +206,7 @@ mod test {
     use super::*;
     use crate::lex::{Tokenization, tokenize_str};
     use crate::ptypes::ClassFlavor;
+    use crate::zpl;
 
     #[test]
     fn test_parse_define() {
@@ -649,7 +650,20 @@ allow marketing-emps to access role:marketing services.
             .find(|c| c.flavor == ClassFlavor::User)
             .expect("user clause missing from LHS");
         assert_eq!(user_clause.class, "employee");
-        assert!(user_clause.with.is_empty(), "'EMPLOYEES' must not be a tag");
+        // Since #144 a written user spec carries the injected `has
+        // user.zpr.authority` marker, so `with` is no longer empty -- assert
+        // instead that no TAG was created from the miscased class name.
+        assert!(
+            !user_clause.with.iter().any(|a| a.is_tag()),
+            "'EMPLOYEES' must not be a tag"
+        );
+        assert!(
+            user_clause
+                .with
+                .iter()
+                .any(|a| a.zpl_key() == zpl::KATTR_USER_AUTHORITY),
+            "subclass spec must carry the user authority marker"
+        );
 
         let input = "define employee as a user with id.\ndefine Employee as a user with id.";
         let tz = tokenize_str(input, &ctx).unwrap();
@@ -660,6 +674,40 @@ allow marketing-emps to access role:marketing services.
                 "unexpected error: {e:?}"
             ),
         }
+    }
+
+    // A device subclass written on the LHS gets the device authority marker,
+    // same as the builtin `devices` class (issue #144).
+    #[test]
+    fn test_device_subclass_gets_authority_marker() {
+        let ctx = CompilationCtx::default();
+        let input = "define laptop as a device with id.\nallow laptops to access services.";
+        let tz = tokenize_str(input, &ctx).unwrap();
+        let pr = parse(tz.tokens, &ctx).expect("should parse");
+        let device_clause = pr.policy.allows[0]
+            .client
+            .iter()
+            .find(|c| c.flavor == ClassFlavor::Device)
+            .expect("device clause missing from LHS");
+        assert_eq!(device_clause.class, "laptop");
+        assert!(
+            device_clause
+                .with
+                .iter()
+                .any(|a| a.zpl_key() == zpl::KATTR_DEVICE_AUTHORITY),
+            "device subclass spec must carry the device authority marker"
+        );
+        // The synthesized user clause must NOT get a marker.
+        let user_clause = pr.policy.allows[0]
+            .client
+            .iter()
+            .find(|c| c.flavor == ClassFlavor::User)
+            .expect("user clause missing from LHS");
+        assert!(
+            user_clause.with.is_empty(),
+            "synthesized user clause must stay empty: {:?}",
+            user_clause.with
+        );
     }
 
     // An AKA colliding with an existing name/AKA must be a Redefinition error,

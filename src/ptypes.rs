@@ -222,7 +222,7 @@ impl fmt::Display for Signal {
 }
 
 /// A defined class in ZPL has a type which we call "flavor".
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Copy, Default)]
 pub enum ClassFlavor {
     #[default]
     Undefined, // they all start here
