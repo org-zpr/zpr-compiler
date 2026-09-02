@@ -19,6 +19,11 @@ struct ParseAllowState {
     service_clause: Option<Clause>,
     link_clause: Option<Clause>,
     signal_clause: Option<Signal>,
+    /// True when the author wrote a trailing `ON <device-clause>` after the
+    /// service clause. Its attributes are folded into `service_clause.with`
+    /// during parsing, so this flag is the only record that a server-side
+    /// device spec was written (issue #144).
+    service_on_device_clause_written: bool,
 }
 
 impl ParseAllowState {
@@ -63,6 +68,16 @@ impl ParseAllowState {
             }
             if let Some(c) = self.client_device_clause.as_mut() {
                 c.with.push(authority_marker(zpl::KATTR_DEVICE_AUTHORITY));
+            }
+            // A written RHS device spec (`... to access <service> ON <device>`)
+            // asserts a live device authentication on the SERVER side. Its
+            // attributes were folded into the service clause by
+            // parse_allow_service_clause, so the marker goes there too; the
+            // key's `device.` prefix keeps it in the device domain.
+            if self.service_on_device_clause_written {
+                if let Some(c) = self.service_clause.as_mut() {
+                    c.with.push(authority_marker(zpl::KATTR_DEVICE_AUTHORITY));
+                }
             }
         }
 
@@ -561,6 +576,11 @@ where
                 // This is a good parse if we actually got a device or signal flavor class.
                 let cn = nested_ps.class_name.as_ref().unwrap();
                 if classes_map.get(cn).unwrap().flavor == ClassFlavor::Device {
+                    // Record that the author wrote a server-side device spec so
+                    // to_allow_clause can inject the device authority marker
+                    // (issue #144) -- the clause itself is folded into
+                    // service_clause.with below and loses its identity.
+                    pa_state.service_on_device_clause_written = true;
                     let service_ec = nested_ps.to_clause(ClassFlavor::Device)?;
 
                     // Since ZPL could use a defined class in the on clause we need to walk the tree and
@@ -1735,6 +1755,46 @@ mod test {
         assert_eq!(
             keys[&ClassFlavor::User],
             vec!["user.authority", "user.authority"]
+        );
+    }
+
+    /// Parse a statement and return the sorted zplc keys of the server-side
+    /// service clause's attributes.
+    fn server_keys(statement: &str) -> Vec<String> {
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        let clause = parse_allow(&tz.tokens, 1, &class_index, &classes)
+            .unwrap_or_else(|e| panic!("'{statement}' should parse: {e:?}"));
+        let sc = clause.get_server_service_clause().expect("server clause");
+        let mut keys: Vec<String> = sc.with.iter().map(|a| a.zplc_key()).collect();
+        keys.sort();
+        keys
+    }
+
+    // A written RHS device spec (`... on devices`) must emit the device
+    // authority marker into the server-side service clause (issue #144).
+    #[test]
+    fn test_authority_marker_rhs_devices() {
+        assert_eq!(
+            server_keys("allow users to access services on devices"),
+            vec!["device.authority"]
+        );
+    }
+
+    // No RHS device spec written -> no marker in the service clause.
+    #[test]
+    fn test_authority_marker_no_rhs_devices() {
+        assert!(server_keys("allow users to access services").is_empty());
+    }
+
+    // A constrained RHS device spec keeps its written attribute AND gains
+    // the marker.
+    #[test]
+    fn test_authority_marker_rhs_devices_with_attribute() {
+        assert_eq!(
+            server_keys("allow users to access services on color:blue devices"),
+            vec!["device.authority", "device.color"]
         );
     }
 }

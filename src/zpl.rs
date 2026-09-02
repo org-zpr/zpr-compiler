@@ -51,6 +51,12 @@ pub const KATTR_ADDR: &str = "zpr.addr";
 pub const KATTR_USER_AUTHORITY: &str = "user.authority";
 pub const KATTR_DEVICE_AUTHORITY: &str = "device.authority";
 
+/// True when `key` (a zpl key, e.g. `device.authority`) is one of the
+/// authority presence marker attributes (issue #144).
+pub fn is_authority_marker_key(key: &str) -> bool {
+    key == KATTR_USER_AUTHORITY || key == KATTR_DEVICE_AUTHORITY
+}
+
 pub const KATTR_LINK_COST: &str = "zpr.cost";
 
 /// Multi-valued "services" attribute.

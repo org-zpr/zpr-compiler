@@ -501,9 +501,22 @@ impl Weaver {
             // start with parent class attributes
             let mut attrs = attrs_for_class(class_idx, &server_service.class)?;
 
-            // And include any additionaal server side attributes from the RHS clause.
+            // And include any additional server side attributes from the RHS clause.
+            // The authority presence markers are excluded: they assert a live
+            // runtime authentication checked per-connection (svc_condition),
+            // not a configured provider attribute -- folding one in here would
+            // fork a service variant whose provider set can never match a
+            // configured provider, and add_condition_to_service would then
+            // drop the marker from the service conditions as "already a
+            // provider attribute" (issue #144).
             for rhs_clause in &ac.server {
-                attrs.extend_from_slice(&rhs_clause.with);
+                attrs.extend(
+                    rhs_clause
+                        .with
+                        .iter()
+                        .filter(|a| !zpl::is_authority_marker_key(&a.zpl_key()))
+                        .cloned(),
+                );
             }
             let svc_class =
                 class_idx

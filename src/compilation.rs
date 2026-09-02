@@ -944,8 +944,12 @@ mod test {
     // ---- Authority presence markers, end to end (issue #144) ----
 
     /// Compile the given ZPL against BASIC_CONFIG and return, per com-policy,
-    /// (service_id, allow, sorted client condition strings).
-    fn compile_to_com_policies(name_hint: &str, zpl: &str) -> Vec<(String, bool, Vec<String>)> {
+    /// (service_id, allow, sorted client condition strings, sorted service
+    /// condition strings).
+    fn compile_to_com_policies(
+        name_hint: &str,
+        zpl: &str,
+    ) -> Vec<(String, bool, Vec<String>, Vec<String>)> {
         let tempdir = TempDir::new(name_hint);
         let zpl_file = tempdir.path.join("test.zpl");
         std::fs::write(&zpl_file, zpl).expect("failed to write zpl file");
@@ -979,7 +983,14 @@ mod test {
                 .map(|c| attr_exp_v2_to_string(&c))
                 .collect();
             conds.sort();
-            out.push((svc_id, plcy.get_allow(), conds));
+            let mut svc_conds: Vec<String> = plcy
+                .get_service_conds()
+                .unwrap()
+                .iter()
+                .map(|c| attr_exp_v2_to_string(&c))
+                .collect();
+            svc_conds.sort();
+            out.push((svc_id, plcy.get_allow(), conds, svc_conds));
         }
         out
     }
@@ -1047,5 +1058,21 @@ mod test {
             "expected one VisaService admin policy: {policies:?}"
         );
         assert_eq!(admin[0].2, vec!["user.authority HAS \"\""]);
+    }
+
+    // A written RHS device spec (`... to access Webby on devices`) must emit
+    // `has device.authority` into the SERVICE conditions: services without a
+    // live device authentication must not satisfy a statement that explicitly
+    // names devices (issue #144, Codex review on PR #145).
+    #[test]
+    fn test_authority_marker_end_to_end_rhs_devices() {
+        let policies = compile_to_com_policies(
+            "auth-marker-rhs-devices",
+            "define Webby as service with device.zpr.adapter.cn.\nallow users to access Webby on devices.\n",
+        );
+        let webby: Vec<_> = policies.iter().filter(|p| p.0 == "Webby").collect();
+        assert_eq!(webby.len(), 1, "expected one Webby policy: {policies:?}");
+        assert_eq!(webby[0].2, vec!["user.authority HAS \"\""]);
+        assert_eq!(webby[0].3, vec!["device.authority HAS \"\""]);
     }
 }
