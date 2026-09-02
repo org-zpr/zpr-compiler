@@ -737,9 +737,16 @@ fn test_tag_conditions_one_key_per_tag() {
         }
     }
 
+    // The allow statement carries the injected `has user.authority` presence
+    // marker (#144); the never statement must NOT (a marker would narrow the
+    // deny).
     assert_eq!(
         allow_keys.expect("allow policy for database not found"),
-        vec!["user.zpr.tag.nerd", "user.zpr.tag.redhead"]
+        vec![
+            "user.authority",
+            "user.zpr.tag.nerd",
+            "user.zpr.tag.redhead"
+        ]
     );
     assert_eq!(
         deny_keys.expect("never policy for database not found"),

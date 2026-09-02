@@ -42,6 +42,15 @@ pub const KATTR_ROLE: &str = "zpr.role";
 pub const KATTR_CN: &str = "device.zpr.adapter.cn";
 pub const KATTR_ADDR: &str = "zpr.addr";
 
+// Authority presence markers (issue #144). The visa service installs
+// `<ns>.authority` exactly when a non-expired authentication exists for that
+// namespace, so `has user.authority` reads as "a live user authentication is
+// present". The attribute's value names the authentication method (for
+// example `user.authority:google`), letting policy distinguish methods
+// without a second marker.
+pub const KATTR_USER_AUTHORITY: &str = "user.authority";
+pub const KATTR_DEVICE_AUTHORITY: &str = "device.authority";
+
 pub const KATTR_LINK_COST: &str = "zpr.cost";
 
 /// Multi-valued "services" attribute.

@@ -562,6 +562,18 @@ impl Weaver {
                     self.wctx
                         .add_used_trusted_service(zpl::DEFAULT_TRUSTED_SERVICE_ID);
                 }
+                // The authority presence markers are installed by the visa
+                // service when a live authentication exists for that namespace
+                // (issue #144) -- they are not attributes an external trusted
+                // service reports, so they are exempt from the trusted-service
+                // audit below. The match is on the key, so an authored
+                // constraint such as `user.authority:google` resolves through
+                // this same arm.
+                zpl::KATTR_USER_AUTHORITY | zpl::KATTR_DEVICE_AUTHORITY => {
+                    resolved_attrs.push(zpl_attr.clone());
+                    self.wctx
+                        .add_used_trusted_service(zpl::DEFAULT_TRUSTED_SERVICE_ID);
+                }
                 _ => {
                     // TODO: This should be cached
                     // TODO: Not sure we are handling the case where ZPL is using prefixes correctly here.

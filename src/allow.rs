@@ -43,7 +43,29 @@ impl ParseAllowState {
     ///
     /// The `server` vector in the [AllowClause] will just have one element -- a service clause
     /// that may have attributes from other domains (eg, device or user attributes).
-    fn to_allow_clause(&mut self, clause_id: usize, last_tok: Token) -> AllowClause {
+    fn to_allow_clause(
+        &mut self,
+        clause_id: usize,
+        last_tok: Token,
+        inject_authority_markers: bool,
+    ) -> AllowClause {
+        // A written actor class spec asserts a live authentication for its
+        // namespace (issue #144): `allow users ...` must compile to at least
+        // `has user.authority`, not to an empty client condition. Inject the
+        // marker here, BEFORE the defaults are substituted below, because the
+        // `Option` is the only record of whether the author actually wrote
+        // the clause -- the default clauses substituted below assert nothing.
+        // `never allow` statements skip this: injecting there would narrow a
+        // deny, so it would stop denying unauthenticated actors.
+        if inject_authority_markers {
+            if let Some(c) = self.client_user_clause.as_mut() {
+                c.with.push(authority_marker(zpl::KATTR_USER_AUTHORITY));
+            }
+            if let Some(c) = self.client_device_clause.as_mut() {
+                c.with.push(authority_marker(zpl::KATTR_DEVICE_AUTHORITY));
+            }
+        }
+
         let mut client_user_clause = self.client_user_clause.take().unwrap_or(Clause::new(
             ClassFlavor::User,
             zpl::DEF_CLASS_USER_NAME,
@@ -128,6 +150,18 @@ impl ParseAllowState {
     }
 }
 
+/// Build a `has <key>.authority` presence marker (issue #144).
+///
+/// A single-valued attribute with no value writes as `AttrOp::Has`, and the
+/// `user.` / `device.` key prefix resolves the domain, so no schema change is
+/// involved. The key constants are well-formed, so construction cannot fail.
+fn authority_marker(key: &str) -> Attribute {
+    Attribute::tuple(key)
+        .single()
+        .build()
+        .expect("authority marker key must carry a valid domain prefix")
+}
+
 /// First token is an ALLOW which is checked by caller.
 ///
 /// Format of the allow statement is:
@@ -154,6 +188,26 @@ pub fn parse_allow(
     statement_id: usize,
     classes_idx: &HashMap<String, String>,
     classes_map: &HashMap<String, Class>,
+) -> Result<AllowClause, CompilationError> {
+    parse_allow_impl(
+        allow_statement,
+        statement_id,
+        classes_idx,
+        classes_map,
+        true,
+    )
+}
+
+/// Like [parse_allow], but lets the caller suppress the authority presence
+/// markers. `never allow` statements (see [crate::never::parse_never]) must
+/// not carry them: a marker would NARROW the deny, so a bare
+/// `never allow users ...` would stop denying unauthenticated actors.
+pub fn parse_allow_impl(
+    allow_statement: &[Token],
+    statement_id: usize,
+    classes_idx: &HashMap<String, String>,
+    classes_map: &HashMap<String, Class>,
+    inject_authority_markers: bool,
 ) -> Result<AllowClause, CompilationError> {
     if allow_statement.is_empty() {
         panic!("parse_allow called with empty statement");
@@ -319,7 +373,7 @@ pub fn parse_allow(
             parse_allow_signal_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
     }
 
-    let mut ac = parse_state.to_allow_clause(statement_id, last_tok);
+    let mut ac = parse_state.to_allow_clause(statement_id, last_tok, inject_authority_markers);
 
     // Set any UNSPECIFIED (lacking domain) attributes to the domain of the clause they are in.
 
@@ -1599,5 +1653,88 @@ mod test {
             Ok(c) => panic!("should have failed: ON clause class is not an device: {c:?}"),
             Err(e) => assert!(e.to_string().contains("device"), "unexpected error: {e}"),
         }
+    }
+
+    // ---- Authority presence markers (issue #144) ----
+
+    /// Parse a statement and return, per flavor, the list of zplc keys in the
+    /// matching client clause (empty list when the clause has no attributes).
+    fn client_keys_by_flavor(statement: &str) -> HashMap<ClassFlavor, Vec<String>> {
+        let (class_index, classes) = default_classes();
+        let cctx = CompilationCtx::default();
+        let tz = tokenize_str(statement, &cctx).unwrap();
+        let clause = parse_allow(&tz.tokens, 1, &class_index, &classes)
+            .unwrap_or_else(|e| panic!("'{statement}' should parse: {e:?}"));
+        let mut out = HashMap::new();
+        for c in &clause.client {
+            let mut keys: Vec<String> = c.with.iter().map(|a| a.zplc_key()).collect();
+            keys.sort();
+            out.insert(c.flavor, keys);
+        }
+        out
+    }
+
+    // A bare written `users` spec must emit `has user.authority` and nothing
+    // else; the synthesized device clause must stay empty.
+    #[test]
+    fn test_authority_marker_bare_users() {
+        let keys = client_keys_by_flavor("allow users to access services");
+        assert_eq!(keys[&ClassFlavor::User], vec!["user.authority"]);
+        assert!(keys[&ClassFlavor::Device].is_empty());
+    }
+
+    // A bare written `devices` spec: `has device.authority` only, user clause empty.
+    #[test]
+    fn test_authority_marker_bare_devices() {
+        let keys = client_keys_by_flavor("allow devices to access services");
+        assert_eq!(keys[&ClassFlavor::Device], vec!["device.authority"]);
+        assert!(keys[&ClassFlavor::User].is_empty());
+    }
+
+    // An LHS service spec gets neither marker: libeval matching is already
+    // service-centric, and no user/device clause was written.
+    #[test]
+    fn test_authority_marker_bare_services_lhs() {
+        let keys = client_keys_by_flavor("allow services to access services");
+        assert!(keys[&ClassFlavor::User].is_empty());
+        assert!(keys[&ClassFlavor::Device].is_empty());
+        // The written service clause gets no authority marker either.
+        assert!(
+            !keys[&ClassFlavor::Service]
+                .iter()
+                .any(|k| k.contains("authority")),
+            "service clause must not carry an authority marker: {:?}",
+            keys[&ClassFlavor::Service]
+        );
+    }
+
+    // `users on devices`: both actor clauses were written, so both markers.
+    #[test]
+    fn test_authority_marker_users_on_devices() {
+        let keys = client_keys_by_flavor("allow users on devices to access services");
+        assert_eq!(keys[&ClassFlavor::User], vec!["user.authority"]);
+        assert_eq!(keys[&ClassFlavor::Device], vec!["device.authority"]);
+    }
+
+    // A constrained user spec keeps its written attribute AND gains the marker.
+    #[test]
+    fn test_authority_marker_with_written_attribute() {
+        let keys = client_keys_by_flavor("allow domain:example users to access services");
+        assert_eq!(
+            keys[&ClassFlavor::User],
+            vec!["user.authority", "user.domain"]
+        );
+    }
+
+    // An authored valued form of the marker key parses alongside the injected
+    // valueless marker; squash_attributes later collapses the pair to the
+    // valued one (asserted end-to-end in the compilation tests).
+    #[test]
+    fn test_authority_marker_authored_value_coexists_at_parse() {
+        let keys = client_keys_by_flavor("allow user.authority:google users to access services");
+        assert_eq!(
+            keys[&ClassFlavor::User],
+            vec!["user.authority", "user.authority"]
+        );
     }
 }
