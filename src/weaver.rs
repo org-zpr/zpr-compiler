@@ -579,11 +579,10 @@ impl Weaver {
                 // service when a live authentication exists for that namespace
                 // (issue #144) -- they are not attributes an external trusted
                 // service reports. They live in the ZPR-owned `zpr.` sub-
-                // namespace, which declared trusted services must not claim
-                // (issue #146 adds the declaration-side rejection in
-                // config::trusted_service::parse_return_mappings), so resolving
-                // them to the default trusted service here is sound. The match
-                // is on the key, so an authored constraint
+                // namespace, which declared trusted services cannot claim
+                // (rejected in config::trusted_service::parse_return_mappings),
+                // so resolving them to the default trusted service here is
+                // sound. The match is on the key, so an authored constraint
                 // such as `user.zpr.authority:google` resolves through this
                 // same arm.
                 zpl::KATTR_USER_AUTHORITY | zpl::KATTR_DEVICE_AUTHORITY => {
